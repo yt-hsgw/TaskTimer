@@ -1,0 +1,21 @@
+[package]
+name = "tasktimer"
+version = "0.1.0"
+description = "オフライン対応TODO・タイマー管理デスクトップアプリ"
+authors = ["TaskTimer Contributors"]
+edition = "2021"
+
+[lib]
+name = "tasktimer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+time = { version = "0.3", features = ["formatting", "macros", "serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
