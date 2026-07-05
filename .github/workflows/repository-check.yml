@@ -1,0 +1,37 @@
+name: リポジトリチェック
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  design-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+
+      - name: 必須設計ファイルを確認
+        run: |
+          test -f README.md
+          test -f AGENTS.md
+          test -f SECURITY.md
+          test -f docs/mvp-spec.md
+          test -f docs/architecture.md
+          test -f docs/domain-model.md
+          test -f docs/database-schema.sql
+          test -f docs/security.md
+          test -f docs/testing.md
+          test -f docs/review/checklist.md
+
+      - name: SQLiteスキーマを検証
+        run: sqlite3 :memory: ".read docs/database-schema.sql"
+
+      - name: 秘密情報ファイルの誤コミットを確認
+        run: |
+          if find . -path ./.git -prune -o -name ".env" -print -quit | grep -q .; then
+            echo ".env をコミットしてはいけません"
+            exit 1
+          fi
