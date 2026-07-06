@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   CreateSubtaskDraft,
+  NotificationDispatchSummary,
   TaskTimerGateway,
   TaskWithSubtasks,
   WeekCalendarItem,
@@ -35,4 +36,10 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<void>("delete_task", { request: { taskId } }),
   deleteSubtask: (subtaskId: string) =>
     invoke<void>("delete_subtask", { request: { subtaskId } }),
+  updateNotificationDisplayMode: (displayMode: NotificationDisplayMode) =>
+    invoke<NotificationDisplayMode>("update_notification_display_mode", {
+      request: { displayMode },
+    }),
+  dispatchDueNotifications: () =>
+    invoke<NotificationDispatchSummary>("dispatch_due_notifications"),
 };

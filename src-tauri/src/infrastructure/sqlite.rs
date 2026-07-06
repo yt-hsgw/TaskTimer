@@ -18,13 +18,13 @@ use uuid::Uuid;
 
 use crate::{
     application::repositories::{
-        target_ref, ActiveTimer, CalendarMarker, CalendarRepository,
-        NotificationPreferenceRepository, RepositoryResult, SubtaskRecord, TaskReadRepository,
-        TaskRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
-        WeekCalendarItem, WorkItemCreate,
+        target_ref, ActiveTimer, CalendarMarker, CalendarRepository, NotificationCommandRepository,
+        NotificationJob, NotificationPreferenceRepository, RepositoryResult, SubtaskRecord,
+        TaskReadRepository, TaskRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord,
+        TimerRepository, WeekCalendarItem, WorkItemCreate,
     },
     domain::{
-        notification::NotificationDisplayMode,
+        notification::{NotificationDisplayMode, NotificationKind, NotificationRegistrationStatus},
         task::{assert_completable, assert_timer_startable, WorkStatus},
         timer::{WorkTargetRef, WorkTargetType},
     },
@@ -316,12 +316,97 @@ impl NotificationPreferenceRepository for SqliteDatabase {
     }
 }
 
+impl NotificationCommandRepository for SqliteDatabase {
+    fn update_notification_display_mode(
+        &self,
+        display_mode: NotificationDisplayMode,
+        now: String,
+    ) -> RepositoryResult<NotificationDisplayMode> {
+        self.with_transaction(|transaction| {
+            transaction
+                .execute(
+                    "
+                    UPDATE notification_preferences
+                    SET display_mode = ?1,
+                        updated_at = ?2
+                    WHERE id = 'default'
+                    ",
+                    params![display_mode.as_str(), now],
+                )
+                .map_err(|error| format!("通知表示設定を保存できません: {error}"))?;
+
+            let display_mode: String = transaction
+                .query_row(
+                    "
+                    SELECT display_mode
+                    FROM notification_preferences
+                    WHERE id = 'default'
+                    ",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("通知表示設定を取得できません: {error}"))?;
+            NotificationDisplayMode::from_db(&display_mode)
+        })
+    }
+
+    fn list_due_notification_jobs(
+        &self,
+        now: &str,
+        limit: i64,
+    ) -> RepositoryResult<Vec<NotificationJob>> {
+        let limit = limit.clamp(1, 100);
+        self.with_connection(|connection| select_due_notification_jobs(connection, now, limit))
+    }
+
+    fn mark_notification_registered(&self, id: &str, now: &str) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| {
+            transaction
+                .execute(
+                    "
+                    UPDATE notification_rules
+                    SET registration_status = 'registered',
+                        last_error = NULL,
+                        updated_at = ?1
+                    WHERE id = ?2
+                      AND deleted_at IS NULL
+                    ",
+                    params![now, id],
+                )
+                .map(|_| ())
+                .map_err(|error| format!("通知登録成功状態を保存できません: {error}"))
+        })
+    }
+
+    fn mark_notification_failed(&self, id: &str, error: &str, now: &str) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| {
+            transaction
+                .execute(
+                    "
+                    UPDATE notification_rules
+                    SET registration_status = 'failed',
+                        last_error = ?1,
+                        updated_at = ?2
+                    WHERE id = ?3
+                      AND deleted_at IS NULL
+                    ",
+                    params![truncate_error(error), now, id],
+                )
+                .map(|_| ())
+                .map_err(|error| format!("通知登録失敗状態を保存できません: {error}"))
+        })
+    }
+}
+
 fn insert_task(
     transaction: &Transaction<'_>,
     input: WorkItemCreate,
 ) -> RepositoryResult<TaskRecord> {
     let id = Uuid::new_v4().to_string();
     let sort_order = next_task_sort_order(transaction)?;
+    let planned_start_date = input.planned_start_date.clone();
+    let due_date = input.due_date.clone();
+    let now = input.now.clone();
     transaction
         .execute(
             "
@@ -342,6 +427,16 @@ fn insert_task(
             ],
         )
         .map_err(|error| format!("タスクを作成できません: {error}"))?;
+    insert_notification_rules_for_target(
+        transaction,
+        &WorkTargetRef {
+            target_type: WorkTargetType::Task,
+            id: id.clone(),
+        },
+        planned_start_date.as_deref(),
+        due_date.as_deref(),
+        &now,
+    )?;
 
     select_task_by_id(transaction, &id)
 }
@@ -353,6 +448,9 @@ fn insert_subtask(
 ) -> RepositoryResult<SubtaskRecord> {
     let id = Uuid::new_v4().to_string();
     let sort_order = next_subtask_sort_order(transaction, task_id)?;
+    let planned_start_date = input.planned_start_date.clone();
+    let due_date = input.due_date.clone();
+    let now = input.now.clone();
     transaction
         .execute(
             "
@@ -374,8 +472,145 @@ fn insert_subtask(
             ],
         )
         .map_err(|error| format!("サブタスクを作成できません: {error}"))?;
+    insert_notification_rules_for_target(
+        transaction,
+        &WorkTargetRef {
+            target_type: WorkTargetType::Subtask,
+            id: id.clone(),
+        },
+        planned_start_date.as_deref(),
+        due_date.as_deref(),
+        &now,
+    )?;
 
     select_subtask_by_id(transaction, &id)
+}
+
+fn insert_notification_rules_for_target(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    planned_start_date: Option<&str>,
+    due_date: Option<&str>,
+    now: &str,
+) -> RepositoryResult<()> {
+    if let Some(date) = planned_start_date {
+        insert_notification_rule(
+            transaction,
+            target,
+            NotificationKind::PlannedStart,
+            &notification_time_for_date(date),
+            now,
+        )?;
+    }
+
+    if let Some(date) = due_date {
+        insert_notification_rule(
+            transaction,
+            target,
+            NotificationKind::Due,
+            &notification_time_for_date(date),
+            now,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn insert_notification_rule(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    kind: NotificationKind,
+    notify_at: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            INSERT INTO notification_rules (
+              id, target_type, target_id, kind, notify_at, enabled,
+              registration_status, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, 1, 'pending', ?6, ?6)
+            ",
+            params![
+                Uuid::new_v4().to_string(),
+                target.target_type.as_str(),
+                target.id.as_str(),
+                kind.as_str(),
+                notify_at,
+                now
+            ],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("通知ルールを作成できません: {error}"))
+}
+
+fn notification_time_for_date(date: &str) -> String {
+    format!("{date}T00:00:00Z")
+}
+
+fn select_due_notification_jobs(
+    connection: &Connection,
+    now: &str,
+    limit: i64,
+) -> RepositoryResult<Vec<NotificationJob>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT notification_rules.id,
+                   notification_rules.target_type,
+                   notification_rules.target_id,
+                   notification_rules.kind,
+                   notification_rules.notify_at,
+                   notification_rules.registration_status,
+                   COALESCE(tasks.title, subtasks.title) AS target_title
+            FROM notification_rules
+            LEFT JOIN tasks
+              ON notification_rules.target_type = 'task'
+             AND notification_rules.target_id = tasks.id
+             AND tasks.deleted_at IS NULL
+            LEFT JOIN subtasks
+              ON notification_rules.target_type = 'subtask'
+             AND notification_rules.target_id = subtasks.id
+             AND subtasks.deleted_at IS NULL
+            WHERE notification_rules.enabled = 1
+              AND notification_rules.deleted_at IS NULL
+              AND notification_rules.notify_at <= ?1
+              AND notification_rules.registration_status IN ('pending', 'failed')
+              AND COALESCE(tasks.id, subtasks.id) IS NOT NULL
+            ORDER BY notification_rules.notify_at ASC,
+                     notification_rules.created_at ASC
+            LIMIT ?2
+            ",
+        )
+        .map_err(|error| format!("通知ジョブクエリを準備できません: {error}"))?;
+
+    let rows = statement
+        .query_map(params![now, limit], |row| {
+            let target_type_text: String = row.get(1)?;
+            let target_type = WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?;
+            let kind_text: String = row.get(3)?;
+            let registration_status_text: String = row.get(5)?;
+            Ok(NotificationJob {
+                id: row.get(0)?,
+                target: target_ref(target_type, row.get(2)?),
+                kind: NotificationKind::from_db(&kind_text).map_err(db_value_error)?,
+                notify_at: row.get(4)?,
+                registration_status: NotificationRegistrationStatus::from_db(
+                    &registration_status_text,
+                )
+                .map_err(db_value_error)?,
+                target_title: row.get(6)?,
+            })
+        })
+        .map_err(|error| format!("通知ジョブを取得できません: {error}"))?;
+
+    rows.map(|row| row.map_err(|error| format!("通知ジョブ行を読めません: {error}")))
+        .collect()
+}
+
+fn truncate_error(error: &str) -> String {
+    error.chars().take(500).collect()
 }
 
 fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec<TaskRecord>> {
@@ -1210,8 +1445,13 @@ fn db_value_error(error: String) -> rusqlite::Error {
 mod tests {
     use super::*;
     use crate::{
-        application::{clock::Clock, repositories::TaskReadRepository, usecases},
-        domain::{task::WorkStatus, timer::WorkTargetType},
+        application::{
+            clock::Clock,
+            notification::{LocalNotificationGateway, LocalNotificationMessage},
+            repositories::TaskReadRepository,
+            usecases,
+        },
+        domain::{notification::NotificationDisplayMode, task::WorkStatus, timer::WorkTargetType},
     };
 
     struct FixedClock {
@@ -1221,6 +1461,45 @@ mod tests {
     impl Clock for FixedClock {
         fn now_utc_iso8601(&self) -> String {
             self.now.to_string()
+        }
+    }
+
+    struct RecordingNotificationGateway {
+        messages: Mutex<Vec<LocalNotificationMessage>>,
+        error: Option<&'static str>,
+    }
+
+    impl RecordingNotificationGateway {
+        fn ok() -> Self {
+            Self {
+                messages: Mutex::new(Vec::new()),
+                error: None,
+            }
+        }
+
+        fn failing(error: &'static str) -> Self {
+            Self {
+                messages: Mutex::new(Vec::new()),
+                error: Some(error),
+            }
+        }
+
+        fn messages(&self) -> Vec<LocalNotificationMessage> {
+            self.messages.lock().expect("messages").clone()
+        }
+    }
+
+    impl LocalNotificationGateway for RecordingNotificationGateway {
+        fn send(&self, message: &LocalNotificationMessage) -> Result<(), String> {
+            self.messages
+                .lock()
+                .expect("messages")
+                .push(message.clone());
+            if let Some(error) = self.error {
+                Err(error.to_string())
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -1629,5 +1908,127 @@ mod tests {
         assert_eq!(deleted_subtasks, 1);
         assert_eq!(deleted_timers, 1);
         assert_eq!(disabled_notifications, 1);
+    }
+
+    #[test]
+    fn dispatch_due_notifications_hides_title_in_generic_mode() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let dispatch_clock = FixedClock {
+            now: "2026-07-07T00:00:00Z",
+        };
+        let notification_gateway = RecordingNotificationGateway::ok();
+
+        usecases::create_task(
+            &database,
+            &create_clock,
+            usecases::WorkItemDraft {
+                title: "秘密の顧客タスク".to_string(),
+                planned_start_date: Some("2026-07-06".to_string()),
+                due_date: Some("2026-07-07".to_string()),
+                memo: Some("通知に出してはいけないメモ".to_string()),
+            },
+        )
+        .expect("create task");
+        usecases::update_notification_display_mode(
+            &database,
+            &create_clock,
+            NotificationDisplayMode::Generic,
+        )
+        .expect("update preference");
+
+        let summary =
+            usecases::dispatch_due_notifications(&database, &notification_gateway, &dispatch_clock)
+                .expect("dispatch notifications");
+        let messages = notification_gateway.messages();
+        let registered_count: i64 = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "
+                        SELECT COUNT(*)
+                        FROM notification_rules
+                        WHERE registration_status = 'registered'
+                        ",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("registered count: {error}"))
+            })
+            .expect("registered count");
+
+        assert_eq!(summary.attempted, 2);
+        assert_eq!(summary.succeeded, 2);
+        assert_eq!(summary.failed, 0);
+        assert_eq!(messages.len(), 2);
+        assert!(messages.iter().all(|message| message.title == "TaskTimer"));
+        assert!(messages
+            .iter()
+            .all(|message| !message.title.contains("秘密")
+                && !message.body.contains("秘密")
+                && !message.body.contains("メモ")));
+        assert_eq!(registered_count, 2);
+    }
+
+    #[test]
+    fn dispatch_due_notifications_records_failures_for_retry() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let notification_gateway = RecordingNotificationGateway::failing("permission denied");
+
+        usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                title: "通知失敗確認".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-06".to_string()),
+                memo: None,
+            },
+        )
+        .expect("create task");
+
+        let summary =
+            usecases::dispatch_due_notifications(&database, &notification_gateway, &clock)
+                .expect("dispatch notifications");
+        let (failed_count, last_error): (i64, String) = database
+            .with_connection(|connection| {
+                let failed_count = connection
+                    .query_row(
+                        "
+                        SELECT COUNT(*)
+                        FROM notification_rules
+                        WHERE registration_status = 'failed'
+                        ",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("failed count");
+                let last_error = connection
+                    .query_row(
+                        "
+                        SELECT last_error
+                        FROM notification_rules
+                        WHERE registration_status = 'failed'
+                        LIMIT 1
+                        ",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("last error");
+                Ok((failed_count, last_error))
+            })
+            .expect("failed state");
+
+        assert_eq!(summary.attempted, 1);
+        assert_eq!(summary.succeeded, 0);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.last_error.as_deref(), Some("permission denied"));
+        assert_eq!(failed_count, 1);
+        assert_eq!(last_error, "permission denied");
     }
 }

@@ -2,6 +2,8 @@ use tauri::State;
 
 type DatabaseState<'a> = State<'a, crate::infrastructure::sqlite::SqliteDatabase>;
 type ClockState<'a> = State<'a, crate::infrastructure::clock::SystemClock>;
+type NotificationGatewayState<'a> =
+    State<'a, crate::infrastructure::notification::TauriLocalNotificationGateway>;
 const TASK_LIST_LIMIT: i64 = 200;
 
 #[tauri::command]
@@ -132,4 +134,29 @@ pub fn delete_subtask(
     request: super::dto::DeleteSubtaskRequestDto,
 ) -> Result<(), String> {
     super::usecases::delete_subtask(database.inner(), clock.inner(), request.subtask_id)
+}
+
+#[tauri::command]
+pub fn update_notification_display_mode(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::UpdateNotificationDisplayModeRequestDto,
+) -> Result<String, String> {
+    let display_mode = request.try_into()?;
+    super::usecases::update_notification_display_mode(database.inner(), clock.inner(), display_mode)
+        .map(|display_mode| display_mode.as_str().to_string())
+}
+
+#[tauri::command]
+pub fn dispatch_due_notifications(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    notification_gateway: NotificationGatewayState<'_>,
+) -> Result<super::dto::NotificationDispatchSummaryDto, String> {
+    super::usecases::dispatch_due_notifications(
+        database.inner(),
+        notification_gateway.inner(),
+        clock.inner(),
+    )
+    .map(Into::into)
 }

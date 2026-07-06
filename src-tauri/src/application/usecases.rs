@@ -1,15 +1,20 @@
 use crate::domain::{
+    notification::{build_notification_content, NotificationDisplayMode},
     task::{validate_date_range, validate_memo, validate_optional_date, validate_title},
     timer::WorkTargetRef,
 };
 
 use super::{
     clock::Clock,
+    notification::{LocalNotificationGateway, LocalNotificationMessage},
     repositories::{
-        ActiveTimer, RepositoryResult, SubtaskRecord, TaskRecord, TaskTimerCommandRepository,
-        WorkItemCreate,
+        ActiveTimer, NotificationCommandRepository, NotificationDispatchSummary,
+        NotificationPreferenceRepository, RepositoryResult, SubtaskRecord, TaskRecord,
+        TaskTimerCommandRepository, WorkItemCreate,
     },
 };
+
+const NOTIFICATION_DISPATCH_LIMIT: i64 = 20;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItemDraft {
@@ -94,6 +99,53 @@ pub fn delete_subtask(
 ) -> RepositoryResult<()> {
     let subtask_id = validate_identifier(&subtask_id, "サブタスクID")?;
     repository.delete_subtask(subtask_id, clock.now_utc_iso8601())
+}
+
+pub fn update_notification_display_mode(
+    repository: &impl NotificationCommandRepository,
+    clock: &impl Clock,
+    display_mode: NotificationDisplayMode,
+) -> RepositoryResult<NotificationDisplayMode> {
+    repository.update_notification_display_mode(display_mode, clock.now_utc_iso8601())
+}
+
+pub fn dispatch_due_notifications(
+    repository: &(impl NotificationCommandRepository + NotificationPreferenceRepository),
+    notification_gateway: &impl LocalNotificationGateway,
+    clock: &impl Clock,
+) -> RepositoryResult<NotificationDispatchSummary> {
+    let now = clock.now_utc_iso8601();
+    let display_mode = repository.get_notification_display_mode()?;
+    let jobs = repository.list_due_notification_jobs(&now, NOTIFICATION_DISPATCH_LIMIT)?;
+
+    let mut summary = NotificationDispatchSummary {
+        attempted: jobs.len(),
+        succeeded: 0,
+        failed: 0,
+        last_error: None,
+    };
+
+    for job in jobs {
+        let content = build_notification_content(&display_mode, &job.target_title);
+        let result = notification_gateway.send(&LocalNotificationMessage {
+            title: content.title,
+            body: content.body,
+        });
+
+        match result {
+            Ok(()) => {
+                repository.mark_notification_registered(&job.id, &now)?;
+                summary.succeeded += 1;
+            }
+            Err(error) => {
+                repository.mark_notification_failed(&job.id, &error, &now)?;
+                summary.failed += 1;
+                summary.last_error = Some(error);
+            }
+        }
+    }
+
+    Ok(summary)
 }
 
 fn validate_work_item_draft(draft: WorkItemDraft, now: String) -> RepositoryResult<WorkItemCreate> {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
+  NotificationDispatchSummary,
   TaskWithSubtasks,
   WeekCalendarItem,
   WorkItemDraft,
@@ -20,6 +21,8 @@ export function App() {
   const [activeTimer, setActiveTimer] = useState<ActiveTimer | null>(null);
   const [displayMode, setDisplayMode] =
     useState<NotificationDisplayMode>("title_only");
+  const [notificationSummary, setNotificationSummary] =
+    useState<NotificationDispatchSummary | null>(null);
   const [weekStartDate, setWeekStartDate] = useState(getCurrentWeekStartDate);
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
@@ -57,6 +60,9 @@ export function App() {
       setItems(nextItems);
       setActiveTimer(nextActiveTimer);
       setDisplayMode(nextDisplayMode);
+      setNotificationSummary(
+        await tauriTaskTimerGateway.dispatchDueNotifications(),
+      );
       setSelectedTaskId((currentTaskId) => {
         if (nextTasks.some((task) => task.id === currentTaskId)) {
           return currentTaskId;
@@ -202,6 +208,24 @@ export function App() {
     [runMutation],
   );
 
+  const handleUpdateNotificationDisplayMode = useCallback(
+    (nextDisplayMode: NotificationDisplayMode) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.updateNotificationDisplayMode(nextDisplayMode);
+      }),
+    [runMutation],
+  );
+
+  const handleRetryNotifications = useCallback(
+    () =>
+      runMutation(async () => {
+        setNotificationSummary(
+          await tauriTaskTimerGateway.dispatchDueNotifications(),
+        );
+      }),
+    [runMutation],
+  );
+
   return (
     <main className="app-shell">
       <header className="top-bar">
@@ -251,7 +275,13 @@ export function App() {
           }
           onNextWeek={() => setWeekStartDate((current) => shiftDate(current, 7))}
         />
-        <SettingsPanel displayMode={displayMode} />
+        <SettingsPanel
+          displayMode={displayMode}
+          isMutating={isMutating}
+          notificationSummary={notificationSummary}
+          onUpdateDisplayMode={handleUpdateNotificationDisplayMode}
+          onRetryNotifications={handleRetryNotifications}
+        />
       </section>
     </main>
   );
