@@ -25,7 +25,7 @@ use crate::{
     },
     domain::{
         notification::NotificationDisplayMode,
-        task::{assert_timer_startable, WorkStatus},
+        task::{assert_completable, assert_timer_startable, WorkStatus},
         timer::{WorkTargetRef, WorkTargetType},
     },
 };
@@ -124,36 +124,7 @@ impl CalendarRepository for SqliteDatabase {
 
 impl TimerRepository for SqliteDatabase {
     fn get_active_timer(&self) -> RepositoryResult<Option<ActiveTimer>> {
-        self.with_connection(|connection| {
-            connection
-                .query_row(
-                    "
-                    SELECT id, target_type, target_id, started_at, stopped_at,
-                           elapsed_seconds, deleted_at, created_at
-                    FROM timer_sessions
-                    WHERE stopped_at IS NULL
-                      AND deleted_at IS NULL
-                    LIMIT 1
-                    ",
-                    [],
-                    |row| {
-                        let target_type_text: String = row.get(1)?;
-                        let target_type =
-                            WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?;
-                        Ok(ActiveTimer {
-                            id: row.get(0)?,
-                            target: target_ref(target_type, row.get(2)?),
-                            started_at: row.get(3)?,
-                            stopped_at: row.get(4)?,
-                            elapsed_seconds: row.get(5)?,
-                            deleted_at: row.get(6)?,
-                            created_at: row.get(7)?,
-                        })
-                    },
-                )
-                .optional()
-                .map_err(|error| format!("アクティブタイマーを取得できません: {error}"))
-        })
+        self.with_connection(select_active_timer)
     }
 }
 
@@ -243,6 +214,84 @@ impl TaskTimerCommandRepository for SqliteDatabase {
             }
 
             select_timer_by_id(transaction, &active_timer.id)
+        })
+    }
+
+    fn complete_task(
+        &self,
+        task_id: String,
+        allow_incomplete_subtasks: bool,
+        now: String,
+    ) -> RepositoryResult<TaskRecord> {
+        self.with_transaction(|transaction| {
+            let task = select_existing_task_by_id(transaction, &task_id)?;
+            assert_completable(&task.status)?;
+            if task.status == WorkStatus::Done {
+                return Ok(task);
+            }
+
+            let incomplete_subtasks = count_incomplete_subtasks(transaction, &task_id)?;
+            if incomplete_subtasks > 0 && !allow_incomplete_subtasks {
+                return Err(format!(
+                    "未完了のサブタスクが{incomplete_subtasks}件あります。確認後に完了してください"
+                ));
+            }
+
+            transaction
+                .execute(
+                    "
+                    UPDATE tasks
+                    SET status = 'done',
+                        completed_at = COALESCE(completed_at, ?1),
+                        updated_at = ?1
+                    WHERE id = ?2
+                      AND deleted_at IS NULL
+                    ",
+                    params![now, task_id],
+                )
+                .map_err(|error| format!("タスクを完了できません: {error}"))?;
+
+            select_existing_task_by_id(transaction, &task_id)
+        })
+    }
+
+    fn complete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<SubtaskRecord> {
+        self.with_transaction(|transaction| {
+            let subtask = select_existing_subtask_by_id(transaction, &subtask_id)?;
+            assert_completable(&subtask.status)?;
+            if subtask.status == WorkStatus::Done {
+                return Ok(subtask);
+            }
+
+            transaction
+                .execute(
+                    "
+                    UPDATE subtasks
+                    SET status = 'done',
+                        completed_at = COALESCE(completed_at, ?1),
+                        updated_at = ?1
+                    WHERE id = ?2
+                      AND deleted_at IS NULL
+                    ",
+                    params![now, subtask_id],
+                )
+                .map_err(|error| format!("サブタスクを完了できません: {error}"))?;
+
+            select_existing_subtask_by_id(transaction, &subtask_id)
+        })
+    }
+
+    fn delete_task(&self, task_id: String, now: String) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| {
+            ensure_task_exists(transaction, &task_id)?;
+            soft_delete_task_graph(transaction, &task_id, &now)
+        })
+    }
+
+    fn delete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| {
+            ensure_subtask_exists(transaction, &subtask_id)?;
+            soft_delete_subtask_graph(transaction, &subtask_id, &now)
         })
     }
 }
@@ -437,6 +486,190 @@ fn ensure_task_exists(connection: &Connection, task_id: &str) -> RepositoryResul
     }
 }
 
+fn ensure_subtask_exists(connection: &Connection, subtask_id: &str) -> RepositoryResult<()> {
+    let exists: bool = connection
+        .query_row(
+            "
+            SELECT EXISTS(
+              SELECT 1
+              FROM subtasks
+              WHERE id = ?1
+                AND deleted_at IS NULL
+            )
+            ",
+            params![subtask_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("サブタスクを確認できません: {error}"))?;
+
+    if exists {
+        Ok(())
+    } else {
+        Err("サブタスクが存在しません".to_string())
+    }
+}
+
+fn count_incomplete_subtasks(connection: &Connection, task_id: &str) -> RepositoryResult<i64> {
+    connection
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM subtasks
+            WHERE task_id = ?1
+              AND status <> 'done'
+              AND deleted_at IS NULL
+            ",
+            params![task_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("未完了サブタスク数を取得できません: {error}"))
+}
+
+fn soft_delete_task_graph(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE tasks
+            SET deleted_at = ?1,
+                updated_at = ?1
+            WHERE id = ?2
+              AND deleted_at IS NULL
+            ",
+            params![now, task_id],
+        )
+        .map_err(|error| format!("タスクを削除できません: {error}"))?;
+
+    transaction
+        .execute(
+            "
+            UPDATE subtasks
+            SET deleted_at = ?1,
+                updated_at = ?1
+            WHERE task_id = ?2
+              AND deleted_at IS NULL
+            ",
+            params![now, task_id],
+        )
+        .map_err(|error| format!("子サブタスクを削除できません: {error}"))?;
+
+    soft_delete_timer_sessions_for_task_graph(transaction, task_id, now)?;
+    soft_delete_notification_rules_for_task_graph(transaction, task_id, now)
+}
+
+fn soft_delete_subtask_graph(
+    transaction: &Transaction<'_>,
+    subtask_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE subtasks
+            SET deleted_at = ?1,
+                updated_at = ?1
+            WHERE id = ?2
+              AND deleted_at IS NULL
+            ",
+            params![now, subtask_id],
+        )
+        .map_err(|error| format!("サブタスクを削除できません: {error}"))?;
+
+    transaction
+        .execute(
+            "
+            UPDATE timer_sessions
+            SET deleted_at = ?1
+            WHERE target_type = 'subtask'
+              AND target_id = ?2
+              AND deleted_at IS NULL
+            ",
+            params![now, subtask_id],
+        )
+        .map_err(|error| format!("サブタスクのタイマー履歴を削除できません: {error}"))?;
+
+    transaction
+        .execute(
+            "
+            UPDATE notification_rules
+            SET enabled = 0,
+                registration_status = 'disabled',
+                deleted_at = ?1,
+                updated_at = ?1
+            WHERE target_type = 'subtask'
+              AND target_id = ?2
+              AND deleted_at IS NULL
+            ",
+            params![now, subtask_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("サブタスクの通知ルールを削除できません: {error}"))
+}
+
+fn soft_delete_timer_sessions_for_task_graph(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE timer_sessions
+            SET deleted_at = ?1
+            WHERE deleted_at IS NULL
+              AND (
+                (target_type = 'task' AND target_id = ?2)
+                OR (
+                  target_type = 'subtask'
+                  AND target_id IN (
+                    SELECT id
+                    FROM subtasks
+                    WHERE task_id = ?2
+                  )
+                )
+              )
+            ",
+            params![now, task_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("関連タイマー履歴を削除できません: {error}"))
+}
+
+fn soft_delete_notification_rules_for_task_graph(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE notification_rules
+            SET enabled = 0,
+                registration_status = 'disabled',
+                deleted_at = ?1,
+                updated_at = ?1
+            WHERE deleted_at IS NULL
+              AND (
+                (target_type = 'task' AND target_id = ?2)
+                OR (
+                  target_type = 'subtask'
+                  AND target_id IN (
+                    SELECT id
+                    FROM subtasks
+                    WHERE task_id = ?2
+                  )
+                )
+              )
+            ",
+            params![now, task_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("関連通知ルールを削除できません: {error}"))
+}
+
 fn ensure_no_active_timer(connection: &Connection) -> RepositoryResult<()> {
     let exists: bool = connection
         .query_row(
@@ -569,6 +802,22 @@ fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<Task
         .map_err(|error| format!("タスクを取得できません: {error}"))
 }
 
+fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<TaskRecord> {
+    connection
+        .query_row(
+            "
+            SELECT id, title, status, planned_start_date, due_date, memo,
+                   sort_order, completed_at, deleted_at, created_at, updated_at
+            FROM tasks
+            WHERE id = ?1
+              AND deleted_at IS NULL
+            ",
+            params![id],
+            map_task_row,
+        )
+        .map_err(|error| format!("タスクを取得できません: {error}"))
+}
+
 fn select_subtask_by_id(connection: &Connection, id: &str) -> RepositoryResult<SubtaskRecord> {
     connection
         .query_row(
@@ -577,6 +826,25 @@ fn select_subtask_by_id(connection: &Connection, id: &str) -> RepositoryResult<S
                    sort_order, completed_at, deleted_at, created_at, updated_at
             FROM subtasks
             WHERE id = ?1
+            ",
+            params![id],
+            map_subtask_row,
+        )
+        .map_err(|error| format!("サブタスクを取得できません: {error}"))
+}
+
+fn select_existing_subtask_by_id(
+    connection: &Connection,
+    id: &str,
+) -> RepositoryResult<SubtaskRecord> {
+    connection
+        .query_row(
+            "
+            SELECT id, task_id, title, status, planned_start_date, due_date, memo,
+                   sort_order, completed_at, deleted_at, created_at, updated_at
+            FROM subtasks
+            WHERE id = ?1
+              AND deleted_at IS NULL
             ",
             params![id],
             map_subtask_row,
@@ -621,11 +889,26 @@ fn select_active_timer(connection: &Connection) -> RepositoryResult<Option<Activ
     connection
         .query_row(
             "
-            SELECT id, target_type, target_id, started_at, stopped_at,
-                   elapsed_seconds, deleted_at, created_at
+            SELECT timer_sessions.id,
+                   timer_sessions.target_type,
+                   timer_sessions.target_id,
+                   timer_sessions.started_at,
+                   timer_sessions.stopped_at,
+                   timer_sessions.elapsed_seconds,
+                   timer_sessions.deleted_at,
+                   timer_sessions.created_at
             FROM timer_sessions
+            LEFT JOIN tasks
+              ON timer_sessions.target_type = 'task'
+             AND timer_sessions.target_id = tasks.id
+             AND tasks.deleted_at IS NULL
+            LEFT JOIN subtasks
+              ON timer_sessions.target_type = 'subtask'
+             AND timer_sessions.target_id = subtasks.id
+             AND subtasks.deleted_at IS NULL
             WHERE stopped_at IS NULL
-              AND deleted_at IS NULL
+              AND timer_sessions.deleted_at IS NULL
+              AND COALESCE(tasks.id, subtasks.id) IS NOT NULL
             LIMIT 1
             ",
             [],
@@ -962,6 +1245,32 @@ mod tests {
         }
     }
 
+    fn insert_notification_rule(
+        database: &SqliteDatabase,
+        target_type: WorkTargetType,
+        target_id: &str,
+    ) -> String {
+        let id = Uuid::new_v4().to_string();
+        database
+            .with_connection(|connection| {
+                connection
+                    .execute(
+                        "
+                        INSERT INTO notification_rules (
+                          id, target_type, target_id, kind, notify_at, enabled,
+                          registration_status, created_at, updated_at
+                        )
+                        VALUES (?1, ?2, ?3, 'due', ?4, 1, 'registered', ?4, ?4)
+                        ",
+                        params![id, target_type.as_str(), target_id, "2026-07-06T00:00:00Z"],
+                    )
+                    .map_err(|error| format!("insert notification rule: {error}"))?;
+                Ok(())
+            })
+            .expect("insert notification rule");
+        id
+    }
+
     #[test]
     fn migration_initializes_notification_preference() {
         let connection = Connection::open_in_memory().expect("in-memory database");
@@ -1127,5 +1436,198 @@ mod tests {
         assert_eq!(tasks[0].subtasks[0].title, "画面に表示");
 
         fs::remove_dir_all(data_dir).expect("cleanup");
+    }
+
+    #[test]
+    fn complete_task_requires_confirmation_for_incomplete_subtasks() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &clock, draft("親タスク")).expect("create task");
+        let subtask = usecases::create_subtask(
+            &database,
+            &clock,
+            task.id.clone(),
+            draft("未完了サブタスク"),
+        )
+        .expect("create subtask");
+
+        let rejected = usecases::complete_task(&database, &clock, task.id.clone(), false);
+        assert!(rejected
+            .expect_err("confirmation required")
+            .contains("未完了"));
+
+        let completed =
+            usecases::complete_task(&database, &clock, task.id.clone(), true).expect("complete");
+        let unchanged_subtask = database
+            .with_connection(|connection| select_existing_subtask_by_id(connection, &subtask.id))
+            .expect("subtask");
+
+        assert_eq!(completed.status, WorkStatus::Done);
+        assert_eq!(
+            completed.completed_at.as_deref(),
+            Some("2026-07-06T00:00:00Z")
+        );
+        assert_eq!(unchanged_subtask.status, WorkStatus::Todo);
+    }
+
+    #[test]
+    fn delete_task_soft_deletes_children_active_timer_and_notifications() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &clock, draft("削除対象")).expect("create task");
+        let subtask =
+            usecases::create_subtask(&database, &clock, task.id.clone(), draft("子サブタスク"))
+                .expect("create subtask");
+        insert_notification_rule(&database, WorkTargetType::Task, &task.id);
+        insert_notification_rule(&database, WorkTargetType::Subtask, &subtask.id);
+
+        usecases::start_timer(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id.clone(),
+            },
+        )
+        .expect("start task timer");
+
+        usecases::delete_task(&database, &clock, task.id.clone()).expect("delete task");
+
+        let tasks = database
+            .list_tasks_with_subtasks(200)
+            .expect("list task tree");
+        let active_timer = database.get_active_timer().expect("active timer");
+        let (deleted_tasks, deleted_subtasks, deleted_timers, disabled_notifications): (
+            i64,
+            i64,
+            i64,
+            i64,
+        ) = database
+            .with_connection(|connection| {
+                let deleted_tasks = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM tasks WHERE id = ?1 AND deleted_at IS NOT NULL",
+                        params![task.id],
+                        |row| row.get(0),
+                    )
+                    .expect("deleted tasks");
+                let deleted_subtasks = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM subtasks WHERE task_id = ?1 AND deleted_at IS NOT NULL",
+                        params![task.id],
+                        |row| row.get(0),
+                    )
+                    .expect("deleted subtasks");
+                let deleted_timers = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM timer_sessions WHERE deleted_at IS NOT NULL",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("deleted timers");
+                let disabled_notifications = connection
+                    .query_row(
+                        "
+                        SELECT COUNT(*)
+                        FROM notification_rules
+                        WHERE deleted_at IS NOT NULL
+                          AND enabled = 0
+                          AND registration_status = 'disabled'
+                        ",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("disabled notifications");
+                Ok((
+                    deleted_tasks,
+                    deleted_subtasks,
+                    deleted_timers,
+                    disabled_notifications,
+                ))
+            })
+            .expect("deleted graph counts");
+
+        assert!(tasks.is_empty());
+        assert!(active_timer.is_none());
+        assert_eq!(deleted_tasks, 1);
+        assert_eq!(deleted_subtasks, 1);
+        assert_eq!(deleted_timers, 1);
+        assert_eq!(disabled_notifications, 2);
+    }
+
+    #[test]
+    fn delete_subtask_soft_deletes_active_timer_and_notification() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &clock, draft("親タスク")).expect("create task");
+        let subtask =
+            usecases::create_subtask(&database, &clock, task.id.clone(), draft("削除対象"))
+                .expect("create subtask");
+        insert_notification_rule(&database, WorkTargetType::Subtask, &subtask.id);
+
+        usecases::start_timer(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Subtask,
+                id: subtask.id.clone(),
+            },
+        )
+        .expect("start subtask timer");
+
+        usecases::delete_subtask(&database, &clock, subtask.id.clone()).expect("delete subtask");
+
+        let tasks = database
+            .list_tasks_with_subtasks(200)
+            .expect("list task tree");
+        let active_timer = database.get_active_timer().expect("active timer");
+        let (deleted_subtasks, deleted_timers, disabled_notifications): (i64, i64, i64) = database
+            .with_connection(|connection| {
+                let deleted_subtasks = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM subtasks WHERE id = ?1 AND deleted_at IS NOT NULL",
+                        params![subtask.id],
+                        |row| row.get(0),
+                    )
+                    .expect("deleted subtasks");
+                let deleted_timers = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM timer_sessions WHERE deleted_at IS NOT NULL",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("deleted timers");
+                let disabled_notifications = connection
+                    .query_row(
+                        "
+                        SELECT COUNT(*)
+                        FROM notification_rules
+                        WHERE deleted_at IS NOT NULL
+                          AND enabled = 0
+                          AND registration_status = 'disabled'
+                        ",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("disabled notifications");
+                Ok((deleted_subtasks, deleted_timers, disabled_notifications))
+            })
+            .expect("deleted subtask graph counts");
+
+        assert_eq!(tasks.len(), 1);
+        assert!(tasks[0].subtasks.is_empty());
+        assert!(active_timer.is_none());
+        assert_eq!(deleted_subtasks, 1);
+        assert_eq!(deleted_timers, 1);
+        assert_eq!(disabled_notifications, 1);
     }
 }

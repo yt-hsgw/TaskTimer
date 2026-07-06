@@ -32,6 +32,10 @@ export type TaskTimerGateway = {
   createSubtask(input: CreateSubtaskDraft): Promise<Subtask>;
   startTimer(target: WorkTargetRef): Promise<ActiveTimer>;
   stopActiveTimer(): Promise<TimerSession>;
+  completeTask(taskId: string, allowIncompleteSubtasks: boolean): Promise<Task>;
+  completeSubtask(subtaskId: string): Promise<Subtask>;
+  deleteTask(taskId: string): Promise<void>;
+  deleteSubtask(subtaskId: string): Promise<void>;
 };
 
 export type TaskWithSubtasks = Task & {

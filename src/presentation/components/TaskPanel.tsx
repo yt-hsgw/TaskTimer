@@ -17,6 +17,10 @@ type TaskPanelProps = {
   onCreateSubtask(taskId: string, input: WorkItemDraft): Promise<boolean>;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
   onStopTimer(): Promise<boolean>;
+  onCompleteTask(task: TaskWithSubtasks): Promise<boolean>;
+  onCompleteSubtask(subtask: Subtask): Promise<boolean>;
+  onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
+  onDeleteSubtask(subtask: Subtask): Promise<boolean>;
 };
 
 const statusLabels: Record<Task["status"], string> = {
@@ -37,6 +41,10 @@ export function TaskPanel({
   onCreateSubtask,
   onStartTimer,
   onStopTimer,
+  onCompleteTask,
+  onCompleteSubtask,
+  onDeleteTask,
+  onDeleteSubtask,
 }: TaskPanelProps) {
   const [taskDraft, setTaskDraft] = useState<WorkItemDraft>({
     title: "",
@@ -191,6 +199,10 @@ export function TaskPanel({
           onCreateSubtask={handleCreateSubtask}
           onStartTimer={onStartTimer}
           onStopTimer={onStopTimer}
+          onCompleteTask={onCompleteTask}
+          onCompleteSubtask={onCompleteSubtask}
+          onDeleteTask={onDeleteTask}
+          onDeleteSubtask={onDeleteSubtask}
         />
       ) : null}
     </section>
@@ -206,6 +218,10 @@ type TaskDetailProps = {
   onCreateSubtask(event: FormEvent<HTMLFormElement>): Promise<void>;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
   onStopTimer(): Promise<boolean>;
+  onCompleteTask(task: TaskWithSubtasks): Promise<boolean>;
+  onCompleteSubtask(subtask: Subtask): Promise<boolean>;
+  onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
+  onDeleteSubtask(subtask: Subtask): Promise<boolean>;
 };
 
 function TaskDetail({
@@ -217,6 +233,10 @@ function TaskDetail({
   onCreateSubtask,
   onStartTimer,
   onStopTimer,
+  onCompleteTask,
+  onCompleteSubtask,
+  onDeleteTask,
+  onDeleteSubtask,
 }: TaskDetailProps) {
   const taskTarget: WorkTargetRef = { type: "task", id: task.id };
   const isTaskActive = isActiveTarget(activeTimer, taskTarget);
@@ -239,6 +259,25 @@ function TaskDetail({
         />
       </div>
 
+      <div className="action-row">
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={isMutating || task.status === "done"}
+          onClick={() => void onCompleteTask(task)}
+        >
+          完了
+        </button>
+        <button
+          className="danger-button"
+          type="button"
+          disabled={isMutating}
+          onClick={() => void onDeleteTask(task)}
+        >
+          削除
+        </button>
+      </div>
+
       <div className="task-meta">
         <span>開始 {formatDateLabel(task.plannedStartDate)}</span>
         <span>終了 {formatDateLabel(task.dueDate)}</span>
@@ -246,7 +285,12 @@ function TaskDetail({
       </div>
 
       <label className="check-row">
-        <input type="checkbox" checked={task.status === "done"} readOnly />
+        <input
+          type="checkbox"
+          checked={task.status === "done"}
+          disabled={isMutating || task.status === "done"}
+          onChange={() => void onCompleteTask(task)}
+        />
         <span>{isTaskActive ? "親タスクを計測中" : "親タスク"}</span>
       </label>
 
@@ -319,6 +363,8 @@ function TaskDetail({
             isMutating={isMutating}
             onStartTimer={onStartTimer}
             onStopTimer={onStopTimer}
+            onCompleteSubtask={onCompleteSubtask}
+            onDeleteSubtask={onDeleteSubtask}
           />
         ))}
       </div>
@@ -332,6 +378,8 @@ type SubtaskRowProps = {
   isMutating: boolean;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
   onStopTimer(): Promise<boolean>;
+  onCompleteSubtask(subtask: Subtask): Promise<boolean>;
+  onDeleteSubtask(subtask: Subtask): Promise<boolean>;
 };
 
 function SubtaskRow({
@@ -340,12 +388,19 @@ function SubtaskRow({
   isMutating,
   onStartTimer,
   onStopTimer,
+  onCompleteSubtask,
+  onDeleteSubtask,
 }: SubtaskRowProps) {
   const target: WorkTargetRef = { type: "subtask", id: subtask.id };
 
   return (
     <div className="subtask-row">
-      <input type="checkbox" checked={subtask.status === "done"} readOnly />
+      <input
+        type="checkbox"
+        checked={subtask.status === "done"}
+        disabled={isMutating || subtask.status === "done"}
+        onChange={() => void onCompleteSubtask(subtask)}
+      />
       <div>
         <span>{subtask.title}</span>
         <small>
@@ -361,6 +416,16 @@ function SubtaskRow({
         onStartTimer={onStartTimer}
         onStopTimer={onStopTimer}
       />
+      <button
+        className="inline-danger-button"
+        type="button"
+        disabled={isMutating}
+        aria-label={`${subtask.title}を削除`}
+        title="サブタスクを削除"
+        onClick={() => void onDeleteSubtask(subtask)}
+      >
+        ×
+      </button>
     </div>
   );
 }
