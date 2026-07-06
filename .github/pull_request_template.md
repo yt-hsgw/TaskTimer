@@ -13,6 +13,7 @@
 - トランザクション境界への影響:
 - 検討した代替案:
 - トレードオフ:
+- 破綻シナリオ:
 
 ## セキュリティレビュー
 
@@ -21,10 +22,18 @@
 - ユーザー内容をHTMLとして描画するか: いいえ / はい:
 - 新しい権限を追加したか: いいえ / はい:
 - 入力検証を更新したか: いいえ / はい:
+- 秘密情報または個人データを含むファイルを追加したか: いいえ / はい:
 
 ## テスト証跡
 
--
+- [ ] SQLiteスキーマ検証
+- [ ] SQLiteマイグレーション検証
+- [ ] `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`
+- [ ] `cargo test --manifest-path src-tauri/Cargo.toml`
+- [ ] `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
+- [ ] `npm run build`
+- [ ] `git diff --check`
+- [ ] デスクトップ手動確認:
 
 ## 確認した危険ケース
 

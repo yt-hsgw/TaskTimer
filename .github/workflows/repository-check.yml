@@ -6,12 +6,52 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  design-check:
+  verify:
+    name: 設計・ビルド・テスト
     runs-on: ubuntu-latest
     steps:
       - name: チェックアウト
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node.jsを準備
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Rustを準備
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup component add rustfmt clippy
+
+      - name: Linuxビルド依存関係をインストール
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            sqlite3 \
+            wget
+
+      - name: Node依存関係をインストール
+        run: npm ci
 
       - name: 必須設計ファイルを確認
         run: |
@@ -24,14 +64,41 @@ jobs:
           test -f docs/database-schema.sql
           test -f docs/security.md
           test -f docs/testing.md
+          test -f docs/operations.md
+          test -f docs/release-checklist.md
           test -f docs/review/checklist.md
 
       - name: SQLiteスキーマを検証
         run: sqlite3 :memory: ".read docs/database-schema.sql"
 
+      - name: SQLiteマイグレーションを検証
+        run: sqlite3 :memory: ".read src-tauri/migrations/0001_initial.sql"
+
+      - name: Rustフォーマットを検証
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+      - name: Rustテストを実行
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Rust静的解析を実行
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: フロントエンドをビルド
+        run: npm run build
+
       - name: 秘密情報ファイルの誤コミットを確認
         run: |
-          if find . -path ./.git -prune -o -name ".env" -print -quit | grep -q .; then
-            echo ".env をコミットしてはいけません"
+          if find . -path ./.git -prune -o \( -name ".env" -o -name ".env.*" \) -print -quit | grep -q .; then
+            echo ".env または .env.* をコミットしてはいけません"
             exit 1
+          fi
+
+      - name: 空白エラーを確認
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --check "origin/${{ github.base_ref }}...HEAD"
+          elif git rev-parse HEAD^ >/dev/null 2>&1; then
+            git diff --check HEAD^ HEAD
+          else
+            git diff --check
           fi
