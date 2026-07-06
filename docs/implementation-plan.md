@@ -37,8 +37,9 @@
 現在のスキャフォールド状態:
 
 - Tauri、Vite、React、TypeScriptのファイルは配置済み。
-- Rust command境界はbootstrapコマンドのみ。
-- SQLite初期マイグレーションは配置済み。
+- Rust command境界はヘルスチェック、週カレンダー取得、アクティブタイマー取得、通知表示設定取得、タスク/サブタスク作成、タイマー開始/停止まで配置済み。
+- SQLite初期マイグレーションとRepository実装は配置済み。
+- `CreateTask`、`CreateSubtask`、`StartTimer`、`StopActiveTimer` はApplication Use Case経由で実行し、入力検証とトランザクション境界を持つ。
 - 実行時HTTP、自動更新、分析、リモートアセット機能は設定していない。
 
 ## Phase 2: ドメインと永続化
@@ -56,6 +57,17 @@
 - ドメインユニットテストが通る。
 - SQLite Repositoryテストが通る。
 - 単一アクティブタイマー制約がApplicationとDBの両方で守られる。
+
+設計判断:
+
+- Use Caseは未検証入力を検証済みコマンドへ変換する境界として実装する。
+- SQLite実装は1 Use Caseにつき1トランザクションを開始し、親存在確認、状態確認、タイマー作成/停止、対象状態更新を同一トランザクションに閉じる。
+- OS通知などの副作用は今回のUse Caseには含めず、DBコミット後副作用として後続Issueで扱う。
+
+トレードオフ:
+
+- Tauri commandから直接SQLを書かず保守性を優先する一方、Application層の型とDTOが増える。
+- `tasks` と `subtasks` を分けているため作成処理は重複するが、親タスクとサブタスクの意味を明確に保てる。
 
 ## Phase 3: コアUI
 

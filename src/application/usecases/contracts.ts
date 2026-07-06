@@ -1,6 +1,17 @@
-import type { ActiveTimer } from "../../domain/timer/types";
+import type { ActiveTimer, TimerSession } from "../../domain/timer/types";
 import type { NotificationDisplayMode } from "../../domain/notification/types";
 import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
+
+export type WorkItemDraft = {
+  title: string;
+  plannedStartDate?: string | null;
+  dueDate?: string | null;
+  memo?: string | null;
+};
+
+export type CreateSubtaskDraft = WorkItemDraft & {
+  taskId: string;
+};
 
 export type WeekCalendarItem = {
   id: string;
@@ -16,9 +27,12 @@ export type TaskTimerGateway = {
   listWeekCalendarItems(weekStartDate: string): Promise<WeekCalendarItem[]>;
   getActiveTimer(): Promise<ActiveTimer | null>;
   getNotificationDisplayMode(): Promise<NotificationDisplayMode>;
+  createTask(input: WorkItemDraft): Promise<Task>;
+  createSubtask(input: CreateSubtaskDraft): Promise<Subtask>;
+  startTimer(target: WorkTargetRef): Promise<ActiveTimer>;
+  stopActiveTimer(): Promise<TimerSession>;
 };
 
 export type TaskWithSubtasks = Task & {
   subtasks: Subtask[];
 };
-

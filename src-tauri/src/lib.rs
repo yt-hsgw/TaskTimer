@@ -3,25 +3,30 @@ mod domain;
 mod infrastructure;
 
 use application::commands::{
-    get_active_timer, get_notification_display_mode, health_check, list_week_calendar_items,
+    create_subtask, create_task, get_active_timer, get_notification_display_mode, health_check,
+    list_week_calendar_items, start_timer, stop_active_timer,
 };
-use infrastructure::sqlite::SqliteDatabase;
+use infrastructure::{clock::SystemClock, sqlite::SqliteDatabase};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let database = SqliteDatabase::open(app.handle())
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))?;
+            let database = SqliteDatabase::open(app.handle()).map_err(std::io::Error::other)?;
             app.manage(database);
+            app.manage(SystemClock);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             health_check,
             list_week_calendar_items,
             get_active_timer,
-            get_notification_display_mode
+            get_notification_display_mode,
+            create_task,
+            create_subtask,
+            start_timer,
+            stop_active_timer
         ])
         .run(tauri::generate_context!())
         .expect("TaskTimerの起動に失敗しました");
