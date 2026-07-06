@@ -138,7 +138,8 @@ button {
 
 .app-alert button,
 .primary-button,
-.secondary-button {
+.secondary-button,
+.danger-button {
   border-radius: 6px;
   min-height: 36px;
   padding: 0 12px;
@@ -153,7 +154,8 @@ button {
 .icon-button,
 .inline-icon-button,
 .segmented-control button,
-.stop-button {
+.stop-button,
+.inline-danger-button {
   align-items: center;
   background: var(--soft-green);
   border: 1px solid #c9d9d2;
@@ -172,11 +174,21 @@ button {
   color: var(--red);
 }
 
+.inline-danger-button {
+  background: var(--soft-red);
+  border-color: #e7bbb3;
+  color: var(--red);
+  height: 28px;
+  min-width: 28px;
+}
+
 .icon-button:disabled,
 .inline-icon-button:disabled,
 .stop-button:disabled,
+.inline-danger-button:disabled,
 .primary-button:disabled,
-.secondary-button:disabled {
+.secondary-button:disabled,
+.danger-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -198,6 +210,19 @@ button {
   border: 1px solid #c4d5ec;
   color: var(--blue);
   font-weight: 700;
+}
+
+.danger-button {
+  background: var(--soft-red);
+  border: 1px solid #e7bbb3;
+  color: var(--red);
+  font-weight: 700;
+}
+
+.action-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .work-form {
@@ -365,7 +390,7 @@ button {
   border: 1px solid var(--line);
   border-radius: 8px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   min-height: 44px;
   padding: 8px;
 }

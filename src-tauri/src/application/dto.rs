@@ -41,6 +41,31 @@ pub struct StartTimerRequestDto {
     pub target: WorkTargetRefDto,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteTaskRequestDto {
+    pub task_id: String,
+    pub allow_incomplete_subtasks: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompleteSubtaskRequestDto {
+    pub subtask_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteTaskRequestDto {
+    pub task_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteSubtaskRequestDto {
+    pub subtask_id: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WeekCalendarItemDto {
