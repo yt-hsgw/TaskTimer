@@ -1,5 +1,5 @@
 use crate::domain::{
-    notification::NotificationDisplayMode,
+    notification::{NotificationDisplayMode, NotificationKind, NotificationRegistrationStatus},
     task::WorkStatus,
     timer::{WorkTargetRef, WorkTargetType},
 };
@@ -88,6 +88,24 @@ pub struct TaskWithSubtasksRecord {
     pub subtasks: Vec<SubtaskRecord>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationJob {
+    pub id: String,
+    pub target: WorkTargetRef,
+    pub target_title: String,
+    pub kind: NotificationKind,
+    pub notify_at: String,
+    pub registration_status: NotificationRegistrationStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationDispatchSummary {
+    pub attempted: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub last_error: Option<String>,
+}
+
 pub type RepositoryResult<T> = Result<T, String>;
 
 pub trait CalendarRepository {
@@ -135,6 +153,24 @@ pub trait TaskTimerCommandRepository {
 
 pub trait NotificationPreferenceRepository {
     fn get_notification_display_mode(&self) -> RepositoryResult<NotificationDisplayMode>;
+}
+
+pub trait NotificationCommandRepository {
+    fn update_notification_display_mode(
+        &self,
+        display_mode: NotificationDisplayMode,
+        now: String,
+    ) -> RepositoryResult<NotificationDisplayMode>;
+
+    fn list_due_notification_jobs(
+        &self,
+        now: &str,
+        limit: i64,
+    ) -> RepositoryResult<Vec<NotificationJob>>;
+
+    fn mark_notification_registered(&self, id: &str, now: &str) -> RepositoryResult<()>;
+
+    fn mark_notification_failed(&self, id: &str, error: &str, now: &str) -> RepositoryResult<()>;
 }
 
 pub fn target_ref(target_type: WorkTargetType, id: String) -> WorkTargetRef {

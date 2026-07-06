@@ -22,6 +22,13 @@ export type WeekCalendarItem = {
   status: Task["status"];
 };
 
+export type NotificationDispatchSummary = {
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  lastError: string | null;
+};
+
 export type TaskTimerGateway = {
   healthCheck(): Promise<string>;
   listTasks(): Promise<TaskWithSubtasks[]>;
@@ -36,6 +43,10 @@ export type TaskTimerGateway = {
   completeSubtask(subtaskId: string): Promise<Subtask>;
   deleteTask(taskId: string): Promise<void>;
   deleteSubtask(subtaskId: string): Promise<void>;
+  updateNotificationDisplayMode(
+    displayMode: NotificationDisplayMode,
+  ): Promise<NotificationDisplayMode>;
+  dispatchDueNotifications(): Promise<NotificationDispatchSummary>;
 };
 
 export type TaskWithSubtasks = Task & {
