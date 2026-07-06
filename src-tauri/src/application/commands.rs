@@ -2,6 +2,7 @@ use tauri::State;
 
 type DatabaseState<'a> = State<'a, crate::infrastructure::sqlite::SqliteDatabase>;
 type ClockState<'a> = State<'a, crate::infrastructure::clock::SystemClock>;
+const TASK_LIST_LIMIT: i64 = 200;
 
 #[tauri::command]
 pub fn health_check(database: DatabaseState<'_>) -> Result<&'static str, String> {
@@ -19,6 +20,17 @@ pub fn list_week_calendar_items(
     database
         .list_week_calendar_items(&week_start_date)
         .map(|items| items.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
+pub fn list_tasks(
+    database: DatabaseState<'_>,
+) -> Result<Vec<super::dto::TaskWithSubtasksDto>, String> {
+    use crate::application::repositories::TaskReadRepository;
+
+    database
+        .list_tasks_with_subtasks(TASK_LIST_LIMIT)
+        .map(|tasks| tasks.into_iter().map(Into::into).collect())
 }
 
 #[tauri::command]

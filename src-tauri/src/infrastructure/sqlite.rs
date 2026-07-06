@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -18,8 +19,9 @@ use uuid::Uuid;
 use crate::{
     application::repositories::{
         target_ref, ActiveTimer, CalendarMarker, CalendarRepository,
-        NotificationPreferenceRepository, RepositoryResult, SubtaskRecord, TaskRecord,
-        TaskTimerCommandRepository, TimerRepository, WeekCalendarItem, WorkItemCreate,
+        NotificationPreferenceRepository, RepositoryResult, SubtaskRecord, TaskReadRepository,
+        TaskRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
+        WeekCalendarItem, WorkItemCreate,
     },
     domain::{
         notification::NotificationDisplayMode,
@@ -151,6 +153,25 @@ impl TimerRepository for SqliteDatabase {
                 )
                 .optional()
                 .map_err(|error| format!("アクティブタイマーを取得できません: {error}"))
+        })
+    }
+}
+
+impl TaskReadRepository for SqliteDatabase {
+    fn list_tasks_with_subtasks(
+        &self,
+        limit: i64,
+    ) -> RepositoryResult<Vec<TaskWithSubtasksRecord>> {
+        let limit = limit.clamp(1, 500);
+
+        self.with_connection(|connection| {
+            let tasks = select_task_list(connection, limit)?;
+            if tasks.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let subtasks = select_subtasks_for_task_list(connection, limit)?;
+            Ok(build_task_tree(tasks, subtasks))
         })
     }
 }
@@ -308,6 +329,91 @@ fn insert_subtask(
     select_subtask_by_id(transaction, &id)
 }
 
+fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec<TaskRecord>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, title, status, planned_start_date, due_date, memo,
+                   sort_order, completed_at, deleted_at, created_at, updated_at
+            FROM tasks
+            WHERE deleted_at IS NULL
+            ORDER BY sort_order ASC, created_at ASC
+            LIMIT ?1
+            ",
+        )
+        .map_err(|error| format!("タスク一覧クエリを準備できません: {error}"))?;
+
+    let rows = statement
+        .query_map(params![limit], map_task_row)
+        .map_err(|error| format!("タスク一覧を取得できません: {error}"))?;
+
+    rows.map(|row| row.map_err(|error| format!("タスク行を読めません: {error}")))
+        .collect()
+}
+
+fn select_subtasks_for_task_list(
+    connection: &Connection,
+    limit: i64,
+) -> RepositoryResult<Vec<SubtaskRecord>> {
+    let mut statement = connection
+        .prepare(
+            "
+            WITH selected_tasks AS (
+              SELECT id, sort_order
+              FROM tasks
+              WHERE deleted_at IS NULL
+              ORDER BY sort_order ASC, created_at ASC
+              LIMIT ?1
+            )
+            SELECT subtasks.id, subtasks.task_id, subtasks.title, subtasks.status,
+                   subtasks.planned_start_date, subtasks.due_date, subtasks.memo,
+                   subtasks.sort_order, subtasks.completed_at, subtasks.deleted_at,
+                   subtasks.created_at, subtasks.updated_at
+            FROM subtasks
+            INNER JOIN selected_tasks
+              ON selected_tasks.id = subtasks.task_id
+            WHERE subtasks.deleted_at IS NULL
+            ORDER BY selected_tasks.sort_order ASC,
+                     subtasks.sort_order ASC,
+                     subtasks.created_at ASC
+            ",
+        )
+        .map_err(|error| format!("サブタスク一覧クエリを準備できません: {error}"))?;
+
+    let rows = statement
+        .query_map(params![limit], map_subtask_row)
+        .map_err(|error| format!("サブタスク一覧を取得できません: {error}"))?;
+
+    rows.map(|row| row.map_err(|error| format!("サブタスク行を読めません: {error}")))
+        .collect()
+}
+
+fn build_task_tree(
+    tasks: Vec<TaskRecord>,
+    subtasks: Vec<SubtaskRecord>,
+) -> Vec<TaskWithSubtasksRecord> {
+    let mut task_index = HashMap::with_capacity(tasks.len());
+    let mut task_tree = tasks
+        .into_iter()
+        .enumerate()
+        .map(|(index, task)| {
+            task_index.insert(task.id.clone(), index);
+            TaskWithSubtasksRecord {
+                task,
+                subtasks: Vec::new(),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    for subtask in subtasks {
+        if let Some(index) = task_index.get(&subtask.task_id) {
+            task_tree[*index].subtasks.push(subtask);
+        }
+    }
+
+    task_tree
+}
+
 fn ensure_task_exists(connection: &Connection, task_id: &str) -> RepositoryResult<()> {
     let exists: bool = connection
         .query_row(
@@ -458,22 +564,7 @@ fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<Task
             WHERE id = ?1
             ",
             params![id],
-            |row| {
-                Ok(TaskRecord {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    status: WorkStatus::from_db(&row.get::<_, String>(2)?)
-                        .map_err(db_value_error)?,
-                    planned_start_date: row.get(3)?,
-                    due_date: row.get(4)?,
-                    memo: row.get(5)?,
-                    sort_order: row.get(6)?,
-                    completed_at: row.get(7)?,
-                    deleted_at: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                })
-            },
+            map_task_row,
         )
         .map_err(|error| format!("タスクを取得できません: {error}"))
 }
@@ -488,25 +579,42 @@ fn select_subtask_by_id(connection: &Connection, id: &str) -> RepositoryResult<S
             WHERE id = ?1
             ",
             params![id],
-            |row| {
-                Ok(SubtaskRecord {
-                    id: row.get(0)?,
-                    task_id: row.get(1)?,
-                    title: row.get(2)?,
-                    status: WorkStatus::from_db(&row.get::<_, String>(3)?)
-                        .map_err(db_value_error)?,
-                    planned_start_date: row.get(4)?,
-                    due_date: row.get(5)?,
-                    memo: row.get(6)?,
-                    sort_order: row.get(7)?,
-                    completed_at: row.get(8)?,
-                    deleted_at: row.get(9)?,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
-                })
-            },
+            map_subtask_row,
         )
         .map_err(|error| format!("サブタスクを取得できません: {error}"))
+}
+
+fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
+    Ok(TaskRecord {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        status: WorkStatus::from_db(&row.get::<_, String>(2)?).map_err(db_value_error)?,
+        planned_start_date: row.get(3)?,
+        due_date: row.get(4)?,
+        memo: row.get(5)?,
+        sort_order: row.get(6)?,
+        completed_at: row.get(7)?,
+        deleted_at: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+fn map_subtask_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubtaskRecord> {
+    Ok(SubtaskRecord {
+        id: row.get(0)?,
+        task_id: row.get(1)?,
+        title: row.get(2)?,
+        status: WorkStatus::from_db(&row.get::<_, String>(3)?).map_err(db_value_error)?,
+        planned_start_date: row.get(4)?,
+        due_date: row.get(5)?,
+        memo: row.get(6)?,
+        sort_order: row.get(7)?,
+        completed_at: row.get(8)?,
+        deleted_at: row.get(9)?,
+        created_at: row.get(10)?,
+        updated_at: row.get(11)?,
+    })
 }
 
 fn select_active_timer(connection: &Connection) -> RepositoryResult<Option<ActiveTimer>> {
@@ -819,7 +927,7 @@ fn db_value_error(error: String) -> rusqlite::Error {
 mod tests {
     use super::*;
     use crate::{
-        application::{clock::Clock, usecases},
+        application::{clock::Clock, repositories::TaskReadRepository, usecases},
         domain::{task::WorkStatus, timer::WorkTargetType},
     };
 
@@ -981,5 +1089,43 @@ mod tests {
         assert_eq!(stopped.stopped_at.as_deref(), Some("2026-07-06T00:02:03Z"));
         assert_eq!(stopped.elapsed_seconds, Some(123));
         assert!(database.get_active_timer().expect("active timer").is_none());
+    }
+
+    #[test]
+    fn list_tasks_with_subtasks_reopens_persisted_data() {
+        let data_dir = std::env::temp_dir().join(format!("tasktimer-test-{}", Uuid::new_v4()));
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+
+        {
+            let database = SqliteDatabase::open_in_dir(data_dir.clone()).expect("open database");
+            let task =
+                usecases::create_task(&database, &clock, draft("DB接続")).expect("create task");
+            usecases::create_subtask(
+                &database,
+                &clock,
+                task.id,
+                usecases::WorkItemDraft {
+                    title: "画面に表示".to_string(),
+                    planned_start_date: Some("2026-07-06".to_string()),
+                    due_date: Some("2026-07-07".to_string()),
+                    memo: Some("Reactではテキストとして表示する".to_string()),
+                },
+            )
+            .expect("create subtask");
+        }
+
+        let reopened = SqliteDatabase::open_in_dir(data_dir.clone()).expect("reopen database");
+        let tasks = reopened
+            .list_tasks_with_subtasks(200)
+            .expect("list task tree");
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].task.title, "DB接続");
+        assert_eq!(tasks[0].subtasks.len(), 1);
+        assert_eq!(tasks[0].subtasks[0].title, "画面に表示");
+
+        fs::remove_dir_all(data_dir).expect("cleanup");
     }
 }

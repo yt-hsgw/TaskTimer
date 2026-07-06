@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   CreateSubtaskDraft,
   TaskTimerGateway,
+  TaskWithSubtasks,
   WeekCalendarItem,
   WorkItemDraft,
 } from "../../application/usecases/contracts";
@@ -11,6 +12,7 @@ import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
 
 export const tauriTaskTimerGateway: TaskTimerGateway = {
   healthCheck: () => invoke<string>("health_check"),
+  listTasks: () => invoke<TaskWithSubtasks[]>("list_tasks"),
   listWeekCalendarItems: (weekStartDate) =>
     invoke<WeekCalendarItem[]>("list_week_calendar_items", { weekStartDate }),
   getActiveTimer: () => invoke<ActiveTimer | null>("get_active_timer"),
