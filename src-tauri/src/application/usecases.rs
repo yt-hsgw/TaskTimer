@@ -59,6 +59,43 @@ pub fn stop_active_timer(
     repository.stop_active_timer(clock.now_utc_iso8601())
 }
 
+pub fn complete_task(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    task_id: String,
+    allow_incomplete_subtasks: bool,
+) -> RepositoryResult<TaskRecord> {
+    let task_id = validate_identifier(&task_id, "タスクID")?;
+    repository.complete_task(task_id, allow_incomplete_subtasks, clock.now_utc_iso8601())
+}
+
+pub fn complete_subtask(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    subtask_id: String,
+) -> RepositoryResult<SubtaskRecord> {
+    let subtask_id = validate_identifier(&subtask_id, "サブタスクID")?;
+    repository.complete_subtask(subtask_id, clock.now_utc_iso8601())
+}
+
+pub fn delete_task(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    task_id: String,
+) -> RepositoryResult<()> {
+    let task_id = validate_identifier(&task_id, "タスクID")?;
+    repository.delete_task(task_id, clock.now_utc_iso8601())
+}
+
+pub fn delete_subtask(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    subtask_id: String,
+) -> RepositoryResult<()> {
+    let subtask_id = validate_identifier(&subtask_id, "サブタスクID")?;
+    repository.delete_subtask(subtask_id, clock.now_utc_iso8601())
+}
+
 fn validate_work_item_draft(draft: WorkItemDraft, now: String) -> RepositoryResult<WorkItemCreate> {
     let title = validate_title(&draft.title)?;
     let planned_start_date = validate_optional_date(draft.planned_start_date.as_deref(), "開始日")?;

@@ -90,3 +90,46 @@ pub fn stop_active_timer(
 ) -> Result<super::dto::ActiveTimerDto, String> {
     super::usecases::stop_active_timer(database.inner(), clock.inner()).map(Into::into)
 }
+
+#[tauri::command]
+pub fn complete_task(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::CompleteTaskRequestDto,
+) -> Result<super::dto::TaskDto, String> {
+    super::usecases::complete_task(
+        database.inner(),
+        clock.inner(),
+        request.task_id,
+        request.allow_incomplete_subtasks,
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
+pub fn complete_subtask(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::CompleteSubtaskRequestDto,
+) -> Result<super::dto::SubtaskDto, String> {
+    super::usecases::complete_subtask(database.inner(), clock.inner(), request.subtask_id)
+        .map(Into::into)
+}
+
+#[tauri::command]
+pub fn delete_task(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::DeleteTaskRequestDto,
+) -> Result<(), String> {
+    super::usecases::delete_task(database.inner(), clock.inner(), request.task_id)
+}
+
+#[tauri::command]
+pub fn delete_subtask(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::DeleteSubtaskRequestDto,
+) -> Result<(), String> {
+    super::usecases::delete_subtask(database.inner(), clock.inner(), request.subtask_id)
+}

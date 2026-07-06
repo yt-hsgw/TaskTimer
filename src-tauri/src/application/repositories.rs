@@ -118,6 +118,19 @@ pub trait TaskTimerCommandRepository {
     fn start_timer(&self, target: WorkTargetRef, now: String) -> RepositoryResult<ActiveTimer>;
 
     fn stop_active_timer(&self, now: String) -> RepositoryResult<ActiveTimer>;
+
+    fn complete_task(
+        &self,
+        task_id: String,
+        allow_incomplete_subtasks: bool,
+        now: String,
+    ) -> RepositoryResult<TaskRecord>;
+
+    fn complete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<SubtaskRecord>;
+
+    fn delete_task(&self, task_id: String, now: String) -> RepositoryResult<()>;
+
+    fn delete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<()>;
 }
 
 pub trait NotificationPreferenceRepository {

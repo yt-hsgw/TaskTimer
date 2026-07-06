@@ -3,8 +3,9 @@ mod domain;
 mod infrastructure;
 
 use application::commands::{
-    create_subtask, create_task, get_active_timer, get_notification_display_mode, health_check,
-    list_tasks, list_week_calendar_items, start_timer, stop_active_timer,
+    complete_subtask, complete_task, create_subtask, create_task, delete_subtask, delete_task,
+    get_active_timer, get_notification_display_mode, health_check, list_tasks,
+    list_week_calendar_items, start_timer, stop_active_timer,
 };
 use infrastructure::{clock::SystemClock, sqlite::SqliteDatabase};
 use tauri::Manager;
@@ -27,7 +28,11 @@ pub fn run() {
             create_task,
             create_subtask,
             start_timer,
-            stop_active_timer
+            stop_active_timer,
+            complete_task,
+            complete_subtask,
+            delete_task,
+            delete_subtask
         ])
         .run(tauri::generate_context!())
         .expect("TaskTimerの起動に失敗しました");

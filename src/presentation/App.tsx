@@ -6,7 +6,7 @@ import type {
 } from "../application/usecases/contracts";
 import type { NotificationDisplayMode } from "../domain/notification/types";
 import type { ActiveTimer, TimerSession } from "../domain/timer/types";
-import type { WorkTargetRef } from "../domain/task/types";
+import type { Subtask, WorkTargetRef } from "../domain/task/types";
 import { tauriTaskTimerGateway } from "../infrastructure/tauri/gateway";
 import { WeekCalendar } from "./components/WeekCalendar";
 import { TaskPanel } from "./components/TaskPanel";
@@ -136,6 +136,72 @@ export function App() {
     [runMutation],
   );
 
+  const handleCompleteTask = useCallback(
+    (task: TaskWithSubtasks) => {
+      const hasIncompleteSubtasks = task.subtasks.some(
+        (subtask) => subtask.status !== "done",
+      );
+      if (
+        hasIncompleteSubtasks &&
+        !window.confirm(
+          "未完了のサブタスクがあります。サブタスクは未完了のまま、親タスクだけ完了しますか？",
+        )
+      ) {
+        return Promise.resolve(false);
+      }
+
+      return runMutation(async () => {
+        await tauriTaskTimerGateway.completeTask(task.id, hasIncompleteSubtasks);
+        return task.id;
+      });
+    },
+    [runMutation],
+  );
+
+  const handleCompleteSubtask = useCallback(
+    (subtask: Subtask) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.completeSubtask(subtask.id);
+        return subtask.taskId;
+      }),
+    [runMutation],
+  );
+
+  const handleDeleteTask = useCallback(
+    (task: TaskWithSubtasks) => {
+      if (
+        !window.confirm(
+          "このタスクを削除します。サブタスク、タイマー履歴、通知ルールもソフト削除されます。",
+        )
+      ) {
+        return Promise.resolve(false);
+      }
+
+      return runMutation(async () => {
+        await tauriTaskTimerGateway.deleteTask(task.id);
+      });
+    },
+    [runMutation],
+  );
+
+  const handleDeleteSubtask = useCallback(
+    (subtask: Subtask) => {
+      if (
+        !window.confirm(
+          "このサブタスクを削除します。タイマー履歴と通知ルールもソフト削除されます。",
+        )
+      ) {
+        return Promise.resolve(false);
+      }
+
+      return runMutation(async () => {
+        await tauriTaskTimerGateway.deleteSubtask(subtask.id);
+        return subtask.taskId;
+      });
+    },
+    [runMutation],
+  );
+
   return (
     <main className="app-shell">
       <header className="top-bar">
@@ -171,6 +237,10 @@ export function App() {
           onCreateSubtask={handleCreateSubtask}
           onStartTimer={handleStartTimer}
           onStopTimer={handleStopTimer}
+          onCompleteTask={handleCompleteTask}
+          onCompleteSubtask={handleCompleteSubtask}
+          onDeleteTask={handleDeleteTask}
+          onDeleteSubtask={handleDeleteSubtask}
         />
         <WeekCalendar
           weekStartDate={weekStartDate}

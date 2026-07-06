@@ -91,3 +91,10 @@ pub fn assert_timer_startable(status: &WorkStatus) -> Result<(), String> {
         WorkStatus::Todo | WorkStatus::InProgress => Ok(()),
     }
 }
+
+pub fn assert_completable(status: &WorkStatus) -> Result<(), String> {
+    match status {
+        WorkStatus::Archived => Err("アーカイブ済みの対象は完了できません".to_string()),
+        WorkStatus::Todo | WorkStatus::InProgress | WorkStatus::Done => Ok(()),
+    }
+}
