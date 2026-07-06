@@ -74,6 +74,28 @@ flowchart TD
 - 通知送信失敗時に設定画面で失敗が分かり、再試行できる。
 - OSスリープ/復帰後も操作できる。
 
+詳細なリリース判定は [リリース前チェックリスト](release-checklist.md) に記録する。
+
+## CI確認
+
+Pull Requestと `main` へのpushでは、GitHub Actionsの `リポジトリチェック` を実行する。
+
+CIで確認するもの:
+
+- 必須設計ファイルが揃っている。
+- SQLiteスキーマと初期マイグレーションを空DBへ適用できる。
+- Rust format、test、clippyが成功する。
+- TypeScript/Vite buildが成功する。
+- `.env` と `.env.*` がコミットされていない。
+- 空白エラーがない。
+
+CIで保証しないもの:
+
+- macOS/Windows固有の通知権限。
+- インストーラーartifactの実インストール。
+- 署名なしartifactに対するOS警告。
+- オフライン起動の実機確認。
+
 ## パフォーマンス確認
 
 最小データセット:
