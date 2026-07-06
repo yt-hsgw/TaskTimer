@@ -83,6 +83,7 @@ Presentationはトランザクション挙動を決めない。
 | DeleteTask | タスク、子サブタスク、タイマーセッション、通知ルールをソフト削除する。開始中タイマーも通常検索から除外する。 |
 | DeleteSubtask | サブタスク、タイマーセッション、通知ルールをソフト削除する。開始中タイマーも通常検索から除外する。 |
 | UpdateNotificationPreference | ローカル通知表示モードを保存する。 |
+| DispatchDueNotifications | 期限到来した通知ルールを取得し、OS通知送信後に `registered` または `failed` を保存する。 |
 
 OS通知登録はDBトランザクションに含めない。DBコミット後に実行し、失敗時は再試行状態を記録する。
 
@@ -111,12 +112,14 @@ sequenceDiagram
 - TauriはElectronより実行時サイズが小さく、権限境界を作りやすい。
 - Reactは週カレンダーやタスク編集のような対話的UIに向いている。
 - OS通知をアダプターに閉じ込めることで、Windows/macOS差分をInfrastructureへ隔離できる。
+- Tauriの公式notification pluginをRust側adapterから呼び、PresentationにOS通知APIを直接公開しない。
 
 ## トレードオフ
 
 - `target_type` と `target_id` により、タイマーと通知の共通処理は簡単になるが、DBレベルの外部キー制約は弱くなる。
 - `tasks` と `subtasks` を分けることでドメイン意味は保てるが、共通処理のApplication Service設計が必要になる。
 - Tauriは実行時サイズを抑えられる一方、Rust側実装とパッケージングの複雑さが増える。
+- MVPの通知はアプリ起動中または再読み込み時に期限到来ルールをdispatchする。OS側の将来時刻スケジューリングは後続改善とする。
 
 ## 代替案
 

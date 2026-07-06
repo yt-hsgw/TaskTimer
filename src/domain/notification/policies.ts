@@ -1,12 +1,22 @@
 import type { NotificationDisplayMode } from "./types";
 
-export function buildNotificationBody(
+export type NotificationContent = {
+  title: string;
+  body: string;
+};
+
+export function buildNotificationContent(
   displayMode: NotificationDisplayMode,
   title: string,
-): string {
+): NotificationContent {
   if (displayMode === "generic") {
-    return "TaskTimerの予定時刻です";
+    return {
+      title: "TaskTimer",
+      body: "予定時刻です",
+    };
   }
-  return title.trim();
+  return {
+    title: title.trim(),
+    body: "",
+  };
 }
-

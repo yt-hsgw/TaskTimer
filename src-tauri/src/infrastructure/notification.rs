@@ -1,13 +1,34 @@
 #![allow(dead_code)]
 
-pub trait LocalNotificationGateway {
-    fn register(&self, title: &str, body: &str, notify_at: &str) -> Result<(), String>;
+use tauri::AppHandle;
+use tauri_plugin_notification::NotificationExt;
+
+use crate::application::notification::{LocalNotificationGateway, LocalNotificationMessage};
+
+pub struct TauriLocalNotificationGateway {
+    app_handle: AppHandle,
 }
 
-pub struct NotImplementedNotificationGateway;
+impl TauriLocalNotificationGateway {
+    pub fn new(app_handle: AppHandle) -> Self {
+        Self { app_handle }
+    }
+}
 
-impl LocalNotificationGateway for NotImplementedNotificationGateway {
-    fn register(&self, _title: &str, _body: &str, _notify_at: &str) -> Result<(), String> {
-        Err("通知ゲートウェイはまだ実装されていません".to_string())
+impl LocalNotificationGateway for TauriLocalNotificationGateway {
+    fn send(&self, message: &LocalNotificationMessage) -> Result<(), String> {
+        let mut builder = self
+            .app_handle
+            .notification()
+            .builder()
+            .title(&message.title);
+        if !message.body.is_empty() {
+            builder = builder.body(&message.body);
+        }
+
+        builder
+            .show()
+            .map(|_| ())
+            .map_err(|error| format!("OS通知を送信できません: {error}"))
     }
 }
