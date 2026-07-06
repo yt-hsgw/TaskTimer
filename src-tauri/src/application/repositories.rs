@@ -82,6 +82,12 @@ pub struct SubtaskRecord {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskWithSubtasksRecord {
+    pub task: TaskRecord,
+    pub subtasks: Vec<SubtaskRecord>,
+}
+
 pub type RepositoryResult<T> = Result<T, String>;
 
 pub trait CalendarRepository {
@@ -93,6 +99,11 @@ pub trait CalendarRepository {
 
 pub trait TimerRepository {
     fn get_active_timer(&self) -> RepositoryResult<Option<ActiveTimer>>;
+}
+
+pub trait TaskReadRepository {
+    fn list_tasks_with_subtasks(&self, limit: i64)
+        -> RepositoryResult<Vec<TaskWithSubtasksRecord>>;
 }
 
 pub trait TaskTimerCommandRepository {

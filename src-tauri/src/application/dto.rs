@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use crate::domain::timer::{WorkTargetRef, WorkTargetType};
 
 use super::{
-    repositories::{ActiveTimer, SubtaskRecord, TaskRecord, WeekCalendarItem},
+    repositories::{
+        ActiveTimer, SubtaskRecord, TaskRecord, TaskWithSubtasksRecord, WeekCalendarItem,
+    },
     usecases::WorkItemDraft,
 };
 
@@ -95,6 +97,23 @@ pub struct SubtaskDto {
     pub updated_at: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskWithSubtasksDto {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub planned_start_date: Option<String>,
+    pub due_date: Option<String>,
+    pub memo: String,
+    pub sort_order: i64,
+    pub completed_at: Option<String>,
+    pub deleted_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub subtasks: Vec<SubtaskDto>,
+}
+
 impl TryFrom<WorkTargetRefDto> for WorkTargetRef {
     type Error = String;
 
@@ -177,6 +196,25 @@ impl From<SubtaskRecord> for SubtaskDto {
             deleted_at: value.deleted_at,
             created_at: value.created_at,
             updated_at: value.updated_at,
+        }
+    }
+}
+
+impl From<TaskWithSubtasksRecord> for TaskWithSubtasksDto {
+    fn from(value: TaskWithSubtasksRecord) -> Self {
+        Self {
+            id: value.task.id,
+            title: value.task.title,
+            status: value.task.status.as_str().to_string(),
+            planned_start_date: value.task.planned_start_date,
+            due_date: value.task.due_date,
+            memo: value.task.memo,
+            sort_order: value.task.sort_order,
+            completed_at: value.task.completed_at,
+            deleted_at: value.task.deleted_at,
+            created_at: value.task.created_at,
+            updated_at: value.task.updated_at,
+            subtasks: value.subtasks.into_iter().map(Into::into).collect(),
         }
     }
 }
