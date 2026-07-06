@@ -132,6 +132,9 @@ erDiagram
 - `kind` は `planned_start` または `due`。
 - 有効な通知では `notify_at` が必須。
 - OS通知サービスへの登録はDBコミット後の副作用として扱う。
+- タスク/サブタスク作成時に、開始予定日と期限がある場合は通知ルールを `pending` として作成する。
+- 期限到来後のdispatchに成功した通知ルールは `registered` とする。
+- dispatchに失敗した通知ルールは `failed` とし、再試行対象に残す。
 - ソフト削除済み通知ルールは無効化され、通知登録対象から除外する。
 
 ### NotificationPreference
@@ -143,7 +146,7 @@ erDiagram
 - `display_mode` は `title_only` または `generic`。
 - デフォルトは `title_only`。
 - `title_only` はタスクまたはサブタスクのタイトルのみを表示する。
-- `generic` はタイトルを含まないプライバシー保護メッセージを表示する。
+- `generic` はタスクまたはサブタスクのタイトルをOS通知adapterへ渡さず、汎用メッセージだけを表示する。
 
 ## ドメインサービス
 

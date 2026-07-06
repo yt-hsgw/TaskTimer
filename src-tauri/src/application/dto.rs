@@ -1,10 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-use crate::domain::timer::{WorkTargetRef, WorkTargetType};
+use crate::domain::{
+    notification::NotificationDisplayMode,
+    timer::{WorkTargetRef, WorkTargetType},
+};
 
 use super::{
     repositories::{
-        ActiveTimer, SubtaskRecord, TaskRecord, TaskWithSubtasksRecord, WeekCalendarItem,
+        ActiveTimer, NotificationDispatchSummary, SubtaskRecord, TaskRecord,
+        TaskWithSubtasksRecord, WeekCalendarItem,
     },
     usecases::WorkItemDraft,
 };
@@ -64,6 +68,12 @@ pub struct DeleteTaskRequestDto {
 #[serde(rename_all = "camelCase")]
 pub struct DeleteSubtaskRequestDto {
     pub subtask_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateNotificationDisplayModeRequestDto {
+    pub display_mode: String,
 }
 
 #[derive(Serialize)]
@@ -137,6 +147,23 @@ pub struct TaskWithSubtasksDto {
     pub created_at: String,
     pub updated_at: String,
     pub subtasks: Vec<SubtaskDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationDispatchSummaryDto {
+    pub attempted: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub last_error: Option<String>,
+}
+
+impl TryFrom<UpdateNotificationDisplayModeRequestDto> for NotificationDisplayMode {
+    type Error = String;
+
+    fn try_from(value: UpdateNotificationDisplayModeRequestDto) -> Result<Self, Self::Error> {
+        NotificationDisplayMode::from_db(&value.display_mode)
+    }
 }
 
 impl TryFrom<WorkTargetRefDto> for WorkTargetRef {
@@ -257,6 +284,17 @@ impl From<ActiveTimer> for ActiveTimerDto {
             elapsed_seconds: value.elapsed_seconds,
             deleted_at: value.deleted_at,
             created_at: value.created_at,
+        }
+    }
+}
+
+impl From<NotificationDispatchSummary> for NotificationDispatchSummaryDto {
+    fn from(value: NotificationDispatchSummary) -> Self {
+        Self {
+            attempted: value.attempted,
+            succeeded: value.succeeded,
+            failed: value.failed,
+            last_error: value.last_error,
         }
     }
 }
