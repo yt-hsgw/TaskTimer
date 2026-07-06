@@ -42,6 +42,46 @@ pub struct ActiveTimer {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkItemCreate {
+    pub title: String,
+    pub planned_start_date: Option<String>,
+    pub due_date: Option<String>,
+    pub memo: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskRecord {
+    pub id: String,
+    pub title: String,
+    pub status: WorkStatus,
+    pub planned_start_date: Option<String>,
+    pub due_date: Option<String>,
+    pub memo: String,
+    pub sort_order: i64,
+    pub completed_at: Option<String>,
+    pub deleted_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubtaskRecord {
+    pub id: String,
+    pub task_id: String,
+    pub title: String,
+    pub status: WorkStatus,
+    pub planned_start_date: Option<String>,
+    pub due_date: Option<String>,
+    pub memo: String,
+    pub sort_order: i64,
+    pub completed_at: Option<String>,
+    pub deleted_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 pub type RepositoryResult<T> = Result<T, String>;
 
 pub trait CalendarRepository {
@@ -53,6 +93,20 @@ pub trait CalendarRepository {
 
 pub trait TimerRepository {
     fn get_active_timer(&self) -> RepositoryResult<Option<ActiveTimer>>;
+}
+
+pub trait TaskTimerCommandRepository {
+    fn create_task(&self, input: WorkItemCreate) -> RepositoryResult<TaskRecord>;
+
+    fn create_subtask(
+        &self,
+        task_id: String,
+        input: WorkItemCreate,
+    ) -> RepositoryResult<SubtaskRecord>;
+
+    fn start_timer(&self, target: WorkTargetRef, now: String) -> RepositoryResult<ActiveTimer>;
+
+    fn stop_active_timer(&self, now: String) -> RepositoryResult<ActiveTimer>;
 }
 
 pub trait NotificationPreferenceRepository {
