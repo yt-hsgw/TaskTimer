@@ -93,9 +93,7 @@ jobs:
 
       - name: 空白エラーを確認
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git diff --check "origin/${{ github.base_ref }}...HEAD"
-          elif git rev-parse HEAD^ >/dev/null 2>&1; then
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
             git diff --check HEAD^ HEAD
           else
             git diff --check
