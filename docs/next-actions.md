@@ -2,15 +2,19 @@
 
 ## 最優先
 
-1. Task/Subtask/Timer/NotificationのRepository実装を拡張する。
-2. `CreateTask`、`CreateSubtask`、`StartTimer`、`StopActiveTimer` のUse Caseを実装する。
-3. 単一アクティブタイマー制約をApplicationとSQLiteの両方でテストする。
-4. UIをモックデータからDB接続へ切り替える。
+1. UIをモックデータからDB接続へ切り替える。
+2. タスク一覧とタスク詳細の読み取りRepositoryを追加する。
+3. サブタスク編集とタイマー開始/停止ボタンをUse Caseへ接続する。
+4. 親タスク完了時の確認ダイアログを実装する。
+5. 削除時のソフト削除フローを実装する。
 
 ## 完了済み
 
 - SQLite接続とマイグレーション実行器の初期実装。
 - 週カレンダー、アクティブタイマー、通知表示設定のRepository境界。
+- `CreateTask`、`CreateSubtask`、`StartTimer`、`StopActiveTimer` のApplication Use Case。
+- タスク/サブタスク作成、タイマー開始/停止のSQLiteトランザクション実装。
+- 単一アクティブタイマー制約と停止時 `elapsed_seconds` 確定のテスト。
 - remote未設定時のGitHub Issue草案。
 
 ## 次に必要

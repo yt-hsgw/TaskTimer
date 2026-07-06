@@ -1,5 +1,11 @@
 #![allow(dead_code)]
 
+use time::{macros::format_description, Date};
+
+const DATE_FORMAT: &[time::format_description::FormatItem<'_>] =
+    format_description!("[year]-[month]-[day]");
+const MEMO_MAX_CHARS: usize = 10_000;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkStatus {
     Todo,
@@ -38,6 +44,43 @@ pub fn validate_title(title: &str) -> Result<String, String> {
         return Err("タイトルは120文字以内で入力してください".to_string());
     }
     Ok(trimmed.to_string())
+}
+
+pub fn validate_optional_date(
+    value: Option<&str>,
+    field_label: &str,
+) -> Result<Option<String>, String> {
+    let Some(raw_value) = value else {
+        return Ok(None);
+    };
+    let trimmed = raw_value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    Date::parse(trimmed, DATE_FORMAT)
+        .map_err(|_| format!("{field_label}はYYYY-MM-DD形式で入力してください"))?;
+    Ok(Some(trimmed.to_string()))
+}
+
+pub fn validate_date_range(
+    planned_start_date: &Option<String>,
+    due_date: &Option<String>,
+) -> Result<(), String> {
+    if let (Some(planned_start_date), Some(due_date)) = (planned_start_date, due_date) {
+        if due_date < planned_start_date {
+            return Err("期限日は開始予定日より前にできません".to_string());
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_memo(value: Option<&str>) -> Result<String, String> {
+    let memo = value.unwrap_or_default();
+    if memo.chars().count() > MEMO_MAX_CHARS {
+        return Err(format!("メモは{MEMO_MAX_CHARS}文字以内で入力してください"));
+    }
+    Ok(memo.to_string())
 }
 
 pub fn assert_timer_startable(status: &WorkStatus) -> Result<(), String> {
