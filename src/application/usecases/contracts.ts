@@ -24,6 +24,7 @@ export type WeekCalendarItem = {
 
 export type TaskTimerGateway = {
   healthCheck(): Promise<string>;
+  listTasks(): Promise<TaskWithSubtasks[]>;
   listWeekCalendarItems(weekStartDate: string): Promise<WeekCalendarItem[]>;
   getActiveTimer(): Promise<ActiveTimer | null>;
   getNotificationDisplayMode(): Promise<NotificationDisplayMode>;

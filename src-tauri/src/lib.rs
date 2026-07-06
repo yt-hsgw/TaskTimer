@@ -4,7 +4,7 @@ mod infrastructure;
 
 use application::commands::{
     create_subtask, create_task, get_active_timer, get_notification_display_mode, health_check,
-    list_week_calendar_items, start_timer, stop_active_timer,
+    list_tasks, list_week_calendar_items, start_timer, stop_active_timer,
 };
 use infrastructure::{clock::SystemClock, sqlite::SqliteDatabase};
 use tauri::Manager;
@@ -20,6 +20,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             health_check,
+            list_tasks,
             list_week_calendar_items,
             get_active_timer,
             get_notification_display_mode,
