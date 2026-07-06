@@ -78,7 +78,7 @@ flowchart TD
 
 ## CI確認
 
-Pull Requestと `main` へのpushでは、GitHub Actionsの `リポジトリチェック` を実行する。
+Pull Requestとブランチpushでは、GitHub Actionsの `リポジトリチェック` を実行する。
 
 CIで確認するもの:
 

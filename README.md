@@ -77,7 +77,7 @@ git diff --check
 
 ## リリース運用
 
-GitHub Actionsの `リポジトリチェック` は、PRと `main` へのpushで基本チェックを実行します。
+GitHub Actionsの `リポジトリチェック` は、PRとブランチpushで基本チェックを実行します。
 
 配布形式:
 
