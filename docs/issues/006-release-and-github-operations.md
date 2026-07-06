@@ -22,7 +22,7 @@ GitHub上でIssue/PR/Releaseを管理し、Windows/macOS向けの配布準備を
 
 ## 実装方針
 
-- PRと `main` pushで `リポジトリチェック` を実行する。
+- PRとブランチpushで `リポジトリチェック` を実行する。
 - CIでは設計ファイル、SQLiteスキーマ、初期マイグレーション、Rust format/test/clippy、TypeScript/Vite build、秘密情報ファイル、空白エラーを確認する。
 - OS固有の通知権限、インストーラー、署名警告はCIでは保証しない。`docs/release-checklist.md` とリリースIssueテンプレートで手動確認する。
 - 配布形式は現在のTauri設定に合わせ、macOSは `dmg`、Windowsは `nsis` とする。
