@@ -15,6 +15,9 @@
   --blue: #2d66b3;
   --red: #b64a3c;
   --gold: #8a6a19;
+  --soft-green: #eef4f1;
+  --soft-blue: #edf3fb;
+  --soft-red: #fbefed;
 }
 
 * {
@@ -93,7 +96,7 @@ button {
 .workspace-grid {
   display: grid;
   gap: 16px;
-  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr) minmax(240px, 280px);
+  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr) minmax(240px, 280px);
   margin: 0 auto;
   max-width: 1240px;
 }
@@ -114,11 +117,45 @@ button {
   margin-bottom: 16px;
 }
 
+.app-alert {
+  align-items: center;
+  background: var(--soft-red);
+  border: 1px solid #e7bbb3;
+  border-radius: 8px;
+  color: var(--ink);
+  display: flex;
+  gap: 10px;
+  margin: 0 auto 16px;
+  max-width: 1240px;
+  padding: 10px 12px;
+}
+
+.app-alert span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.app-alert button,
+.primary-button,
+.secondary-button {
+  border-radius: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+.app-alert button {
+  background: #ffffff;
+  border: 1px solid #dca49a;
+  color: var(--red);
+}
+
 .icon-button,
 .inline-icon-button,
-.segmented-control button {
+.segmented-control button,
+.stop-button {
   align-items: center;
-  background: #eef4f1;
+  background: var(--soft-green);
   border: 1px solid #c9d9d2;
   border-radius: 6px;
   color: var(--green);
@@ -129,9 +166,152 @@ button {
   min-width: 36px;
 }
 
+.stop-button {
+  background: var(--soft-red);
+  border-color: #e7bbb3;
+  color: var(--red);
+}
+
+.icon-button:disabled,
+.inline-icon-button:disabled,
+.stop-button:disabled,
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .inline-icon-button {
   height: 28px;
   min-width: 28px;
+}
+
+.primary-button {
+  background: var(--green);
+  border: 1px solid var(--green);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.secondary-button {
+  background: var(--soft-blue);
+  border: 1px solid #c4d5ec;
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.work-form {
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+}
+
+.compact-form {
+  border-top: 1px solid var(--line);
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.work-form label {
+  display: grid;
+  gap: 5px;
+}
+
+.work-form label span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.work-form input,
+.work-form textarea {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  min-height: 36px;
+  min-width: 0;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.work-form textarea {
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.date-fields {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.task-list {
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+}
+
+.task-list-item {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  display: grid;
+  gap: 3px;
+  min-height: 48px;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.task-list-item.is-selected {
+  background: #f8fbfa;
+  border-color: #9bc4b4;
+}
+
+.task-list-item span,
+.subtask-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-list-item small,
+.subtask-row small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.empty-state,
+.calendar-empty {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.task-detail {
+  display: grid;
+  gap: 10px;
+}
+
+.task-detail-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.task-detail h3 {
+  font-size: 17px;
+  letter-spacing: 0;
+  line-height: 1.25;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .task-meta {
@@ -162,6 +342,19 @@ button {
   padding-bottom: 14px;
 }
 
+.memo-text {
+  background: #f8fafb;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 10px;
+  white-space: pre-wrap;
+}
+
 .subtask-list {
   display: grid;
   gap: 10px;
@@ -171,17 +364,16 @@ button {
 .subtask-row {
   border: 1px solid var(--line);
   border-radius: 8px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   min-height: 44px;
   padding: 8px;
 }
 
-.subtask-row span {
-  flex: 1;
+.subtask-row div {
+  display: grid;
+  gap: 2px;
   min-width: 0;
-}
-
-.subtask-row small {
-  color: var(--muted);
 }
 
 .segmented-control {
@@ -306,5 +498,14 @@ button {
 
   .week-grid {
     grid-template-columns: 1fr;
+  }
+
+  .date-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .app-alert {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
