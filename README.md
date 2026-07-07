@@ -28,6 +28,7 @@ MVPの決定事項:
 - [セキュリティ設計](docs/security.md)
 - [テスト戦略](docs/testing.md)
 - [運用方針](docs/operations.md)
+- [リリース前チェックリスト](docs/release-checklist.md)
 - [設定方針](docs/configuration.md)
 - [実装計画](docs/implementation-plan.md)
 - [次の作業](docs/next-actions.md)
@@ -56,7 +57,7 @@ MVPの決定事項:
 依存関係をインストールした後に起動します。
 
 ```bash
-npm install
+npm ci
 npm run tauri:dev
 ```
 
@@ -67,7 +68,20 @@ npm run build
 sqlite3 :memory: ".read docs/database-schema.sql"
 sqlite3 :memory: ".read src-tauri/migrations/0001_initial.sql"
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+git diff --check
 ```
 
 アプリ実行時はオフライン前提です。依存関係のインストールやGitHub Actionsは開発時の通信であり、アプリ実行時の外部通信ではありません。
+
+## リリース運用
+
+GitHub Actionsの `リポジトリチェック` は、PRとブランチpushで基本チェックを実行します。
+
+配布形式:
+
+- macOS: `dmg`
+- Windows: `nsis`
+
+リリース前には [リリース前チェックリスト](docs/release-checklist.md) を使い、macOS/Windowsの手動確認、通知権限、オフライン起動、外部通信なしの方針を確認します。

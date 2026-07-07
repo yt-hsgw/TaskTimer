@@ -12,6 +12,24 @@ GitHubで管理するもの:
 
 GitHubをアプリ実行時データの保存先には使わない。
 
+## GitHub Actions
+
+`リポジトリチェック` ワークフローをPRとブランチpushで実行する。必要に応じてGitHub Actions画面から手動実行する。
+
+確認するもの:
+
+- 必須設計ファイル。
+- SQLiteスキーマと初期マイグレーション。
+- Rust format、test、clippy。
+- TypeScript/Vite build。
+- `.env` と `.env.*` の誤コミット。
+- 空白エラー。
+
+注意:
+
+- Actions内の依存取得やGitHub通信は開発・運用時の通信であり、アプリ実行時の外部通信ではない。
+- OS固有の通知権限、インストーラー、署名警告はCIだけでは保証しない。リリース前チェックリストで手動確認する。
+
 ## ブランチ運用
 
 推奨:
@@ -20,6 +38,7 @@ GitHubをアプリ実行時データの保存先には使わない。
 - `feature/<short-name>`: 機能開発。
 - `fix/<short-name>`: 不具合修正。
 - `docs/<short-name>`: 設計・資料更新。
+- Codex作業ブランチ: `codex/<short-name>`。
 
 ## Pull Request要件
 
@@ -37,12 +56,38 @@ GitHubをアプリ実行時データの保存先には使わない。
 
 リリース前に確認する。
 
+- `docs/release-checklist.md` を確認する。
 - `docs/review/checklist.md` を確認する。
 - 自動テストを実行する。
 - Windows/macOSで手動デスクトップ確認を行う。
 - アプリ実行時の外部通信がないことを確認する。
 - ユーザー内容をログへ出していないことを確認する。
 - ローカル通知挙動を確認する。
+
+## 配布形式
+
+MVPの配布形式:
+
+- macOS: `dmg`。
+- Windows: `nsis`。
+
+理由:
+
+- 現在のTauri設定 `src-tauri/tauri.conf.json` と一致する。
+- macOSでは一般的なドラッグ&ドロップ配布にできる。
+- WindowsではNSISによりインストール/アンインストール導線を用意できる。
+- 自動更新artifactはMVPでは作成しないため、リモート更新エンドポイントを必要としない。
+
+トレードオフ:
+
+- 署名なしartifactではOSの警告が出る可能性がある。
+- `msi` やストア配布よりも企業端末での一括配布には弱い。
+- 公開配布前には署名とインストール手順を別ADRで再検討する。
+
+代替案:
+
+- Windowsを `msi` にする。企業配布には向くが、MVPでは運用準備が増える。
+- GitHub Releasesで自動更新artifactを作る。利便性は上がるが、アプリ実行時の外部通信禁止方針と衝突するためMVPでは採用しない。
 
 ## ローカル通知手動確認
 
