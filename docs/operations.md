@@ -6,6 +6,7 @@ GitHubで管理するもの:
 
 - Issue。
 - Pull Request。
+- Discussions。
 - 設計レビューの議論。
 - Release tag。
 - Release notes。
@@ -34,9 +35,9 @@ GitHubをアプリ実行時データの保存先には使わない。
 
 ライセンス方針:
 
-- OSSライセンスは未選定。
-- 明示承認があるまで、`LICENSE` で権利を留保する。
-- OSSライセンスを採用する場合は、別ADRで理由、トレードオフ、採用ライセンスを記録する。
+- MIT Licenseを採用する。
+- ライセンス判断は [ADR 0004](adr/0004-public-distribution-license.md) に記録する。
+- 外部からの貢献はMIT Licenseで提供されるものとして扱う。
 
 依存関係運用:
 
@@ -63,6 +64,18 @@ GitHubをアプリ実行時データの保存先には使わない。
 
 - Actions内の依存取得やGitHub通信は開発・運用時の通信であり、アプリ実行時の外部通信ではない。
 - OS固有の通知権限、インストーラー、署名警告はCIだけでは保証しない。リリース前チェックリストで手動確認する。
+
+`リリースビルド` ワークフローは、`app-v*` タグまたは手動実行でWindows/macOS向けartifactをビルドし、Draft Releaseへ添付する。
+
+Release workflowの権限:
+
+- `contents: write`。Releaseとartifact作成に必要な最小権限として扱う。
+
+Release workflowの制約:
+
+- Draft Releaseとして作成する。
+- 自動更新artifactは作成しない。
+- 公開前に `docs/release-checklist.md` の手動確認を完了する。
 
 ## ブランチ運用
 
@@ -91,6 +104,7 @@ GitHubをアプリ実行時データの保存先には使わない。
 リリース前に確認する。
 
 - `docs/public-readiness.md` を確認する。
+- `docs/public-operations.md` を確認する。
 - `docs/release-checklist.md` を確認する。
 - `docs/review/checklist.md` を確認する。
 - 自動テストを実行する。
@@ -98,6 +112,7 @@ GitHubをアプリ実行時データの保存先には使わない。
 - アプリ実行時の外部通信がないことを確認する。
 - ユーザー内容をログへ出していないことを確認する。
 - ローカル通知挙動を確認する。
+- Draft Releaseのartifact名、Release notes、既知制限を確認する。
 
 ## 配布形式
 

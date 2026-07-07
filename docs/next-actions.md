@@ -7,6 +7,7 @@
 3. 表示件数上限に到達した場合のUI表示を追加する。
 4. macOS/Windowsの通知手動確認を実行する。
 5. リリース前に署名方針と配布手順をADR化する。
+6. 初回GitHub ReleaseをDraftで作成し、Windows/macOS artifactを確認する。
 
 ## 完了済み
 
@@ -29,6 +30,10 @@
 - GitHub Issue、PRテンプレート、ラベル運用。
 - GitHub Actionsによる設計/スキーマ/Rust/TypeScript基本チェック。
 - リリース前チェックリストとリリースIssueテンプレート。
+- MIT Licenseによる外部利用許諾。
+- 外部利用者向けREADME、SUPPORT、CONTRIBUTING、CHANGELOG。
+- GitHub Releases向け `リリースビルド` workflow。
+- 公開運用方針とADR 0004。
 
 ## 次に必要
 
@@ -37,6 +42,7 @@
 3. 表示件数上限に到達した場合のUI表示を追加する。
 4. OSへの将来時刻スケジューリング方式を検討する。
 5. macOS/Windowsの通知手動確認結果を記録する。
+6. 初回Release notesを作成し、Draft Releaseでartifactを確認する。
 
 ## 通知まわり
 
@@ -47,11 +53,11 @@
 
 ## 実務運用前に必要
 
-1. パブリック公開前にGit履歴の著者情報を公開してよいか判断する。
-2. Windows/macOSの手動確認手順を実行する。
-3. 実行時に外部通信していないことを確認する。
-4. ログにタスク名・メモ本文・通知本文が出ないことを確認する。
-5. GitHub Actionsのチェック結果をリリースIssueに記録する。
+1. Windows/macOSの手動確認手順を実行する。
+2. 実行時に外部通信していないことを確認する。
+3. ログにタスク名・メモ本文・通知本文が出ないことを確認する。
+4. GitHub Actionsのチェック結果をリリースIssueに記録する。
+5. Draft ReleaseのartifactとRelease notesを確認する。
 6. リリース前に署名方針とインストール手順をADR化する。
 
 ## 危険ケース
