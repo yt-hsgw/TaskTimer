@@ -50,11 +50,16 @@ jobs:
       - name: Node依存関係をインストール
         run: npm ci
 
+      - name: npm脆弱性監査を実行
+        run: npm audit --audit-level=moderate
+
       - name: 必須設計ファイルを確認
         run: |
           test -f README.md
           test -f AGENTS.md
+          test -f LICENSE
           test -f SECURITY.md
+          test -f .github/dependabot.yml
           test -f docs/mvp-spec.md
           test -f docs/architecture.md
           test -f docs/domain-model.md
@@ -62,6 +67,7 @@ jobs:
           test -f docs/security.md
           test -f docs/testing.md
           test -f docs/operations.md
+          test -f docs/public-readiness.md
           test -f docs/release-checklist.md
           test -f docs/review/checklist.md
 
@@ -87,8 +93,19 @@ jobs:
 
       - name: 秘密情報ファイルの誤コミットを確認
         run: |
-          if find . -path ./.git -prune -o \( -name ".env" -o -name ".env.*" \) -print -quit | grep -q .; then
-            echo ".env または .env.* をコミットしてはいけません"
+          if git ls-files | grep -E '(^|/)(\.env(\..*)?|.*\.(db|sqlite|sqlite3|pem|key|p12|mobileprovision|log))$'; then
+            echo "公開リポジトリへ秘密情報、DB、鍵、証明書、ログをコミットしてはいけません"
+            exit 1
+          fi
+
+      - name: 個人環境情報の誤コミットを確認
+        run: |
+          if git grep -n -E '(/[U]sers/|[A-Za-z]:\\[U]sers\\|/[h]ome/[^/]+/)' -- . ':!package-lock.json' ':!src-tauri/Cargo.lock'; then
+            echo "公開リポジトリへ個人環境の絶対パスをコミットしてはいけません"
+            exit 1
+          fi
+          if git grep -n -E '[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}' -- . ':!package-lock.json' ':!src-tauri/Cargo.lock'; then
+            echo "公開リポジトリへメールアドレスを含む追跡ファイルをコミットしてはいけません"
             exit 1
           fi
 
