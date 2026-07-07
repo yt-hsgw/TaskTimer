@@ -12,6 +12,38 @@ GitHubで管理するもの:
 
 GitHubをアプリ実行時データの保存先には使わない。
 
+## パブリック公開
+
+公開前に [パブリック公開前チェック](public-readiness.md) を確認する。
+
+公開してよいもの:
+
+- ソースコード。
+- 設計資料。
+- IssueとPull Requestの議論。
+- CI結果。
+- Release notes。
+
+公開してはいけないもの:
+
+- 秘密情報。
+- ローカルSQLiteデータベース。
+- タスク名、メモ本文、通知本文などの実データ。
+- 個人環境の絶対パス。
+- 署名用証明書、秘密鍵、APIキー。
+
+ライセンス方針:
+
+- OSSライセンスは未選定。
+- 明示承認があるまで、`LICENSE` で権利を留保する。
+- OSSライセンスを採用する場合は、別ADRで理由、トレードオフ、採用ライセンスを記録する。
+
+依存関係運用:
+
+- Dependabotでnpm、Cargo、GitHub Actionsの更新を追跡する。
+- DependabotやActionsの通信は開発・運用時の通信であり、アプリ実行時の外部通信ではない。
+- 依存更新PRでは、Tauri権限、外部通信、ログ出力、通知プライバシーへの影響を確認する。
+
 ## GitHub Actions
 
 `リポジトリチェック` ワークフローをPRとブランチpushで実行する。必要に応じてGitHub Actions画面から手動実行する。
@@ -22,7 +54,9 @@ GitHubをアプリ実行時データの保存先には使わない。
 - SQLiteスキーマと初期マイグレーション。
 - Rust format、test、clippy。
 - TypeScript/Vite build。
-- `.env` と `.env.*` の誤コミット。
+- npm audit。
+- `.env`、DB、鍵、証明書、ログの誤コミット。
+- 個人環境パスとメールアドレスの誤コミット。
 - 空白エラー。
 
 注意:
@@ -56,6 +90,7 @@ GitHubをアプリ実行時データの保存先には使わない。
 
 リリース前に確認する。
 
+- `docs/public-readiness.md` を確認する。
 - `docs/release-checklist.md` を確認する。
 - `docs/review/checklist.md` を確認する。
 - 自動テストを実行する。
