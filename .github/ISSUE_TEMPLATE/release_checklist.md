@@ -15,6 +15,7 @@ assignees: ""
 ## 自動チェック
 
 - [ ] GitHub Actions: リポジトリチェック
+- [ ] GitHub Actions: リリースビルド
 - [ ] SQLiteスキーマ検証
 - [ ] SQLiteマイグレーション検証
 - [ ] Rust format
@@ -61,8 +62,12 @@ assignees: ""
 
 ## 配布判断
 
+- [ ] GitHub Release tagが `app-vX.Y.Z` 形式
+- [ ] Draft Releaseとして作成されている
 - [ ] Release notesに変更点を記載した
 - [ ] Release notesに既知制限を記載した
+- [ ] Release notesに外部通信なしと自動更新なしを記載した
+- [ ] 署名なしartifactのOS警告を既知制限に記載した
 - [ ] Release artifactを手動インストール確認した
 - [ ] ロールバック判断基準を確認した
 

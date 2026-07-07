@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 質問・使い方相談
+    url: https://github.com/yt-hsgw/TaskTimer/discussions
+    about: 使い方の質問や相談はDiscussionsへ投稿してください。
+  - name: 脆弱性報告
+    url: https://github.com/yt-hsgw/TaskTimer/security/policy
+    about: 秘密情報や個人データを含む報告は公開Issueに投稿しないでください。

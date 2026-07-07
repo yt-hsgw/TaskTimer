@@ -1,8 +1,8 @@
 # Issue草案
 
-このディレクトリは、GitHub remote設定前のIssue草案置き場です。
+このディレクトリは、GitHub Issue化した作業や、Issue化前の設計メモを残す場所です。
 
-現状、このローカルリポジトリにはGitHub remoteが未設定のため、`gh issue create` で実Issueを作成できません。GitHubリポジトリ作成後に、各Markdownの内容をGitHub Issueへ移してください。
+GitHub上のIssueを正とし、このディレクトリは設計理由、トレードオフ、危険ケースを後から追える補助資料として扱います。
 
 ## 草案一覧
 
@@ -12,11 +12,10 @@
 - [004 タイマー完了・削除・復元の境界ケースを固める](004-timer-delete-edge-cases.md)
 - [005 ローカル通知を実装する](005-local-notification.md)
 - [006 リリース運用とGitHub管理を整える](006-release-and-github-operations.md)
+- [007 外部利用者向けGitHub運用](007-public-user-operations.md)
 
-## GitHub Issue化の前提
+## 運用
 
-1. GitHub上にリポジトリを作成する。
-2. このローカルリポジトリに `origin` を設定する。
-3. 必要なlabelを作成する。
-4. 各草案を `gh issue create` またはGitHub UIで登録する。
-
+1. GitHub IssueまたはPRに作業単位を作る。
+2. 非自明な判断は、このディレクトリまたは `docs/adr` に理由、トレードオフ、代替案を残す。
+3. 実装後はGitHub Issue/PRのリンクを必要に応じて追記する。

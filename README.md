@@ -2,6 +2,25 @@
 
 Windows/macOS向けの、オフライン前提TODO・タイマー管理デスクトップアプリです。
 
+## 利用方法
+
+外部利用者は [GitHub Releases](https://github.com/yt-hsgw/TaskTimer/releases) から最新版を入手します。
+
+- Windows: NSISインストーラーをダウンロードします。
+- macOS: 利用しているCPUに合うDMGをダウンロードします。
+- 自動更新はありません。新しいバージョンはGitHub Releasesで確認してください。
+- 署名なしビルドでは、Windows SmartScreenやmacOS Gatekeeperの警告が出る場合があります。
+
+現時点では初回Release準備中です。Releaseがない場合は、開発者向け手順でソースから起動してください。
+
+## 利用者向けサポート
+
+- 不具合報告: [Issues](https://github.com/yt-hsgw/TaskTimer/issues)
+- 質問や使い方相談: [Discussions](https://github.com/yt-hsgw/TaskTimer/discussions)
+- 脆弱性報告: [Security Policy](SECURITY.md)
+
+公開IssueやDiscussionsには、実データを含むSQLiteファイル、タスク名、メモ本文、通知本文、秘密情報、個人的なスクリーンショットを貼らないでください。
+
 ## プロダクト範囲
 
 TaskTimerは、タスク、サブタスク、予定日、ローカル通知、タイマー履歴を端末内だけで管理します。アプリ実行時の外部通信は行いません。
@@ -19,6 +38,10 @@ MVPの決定事項:
 - GitHubはソースコード、Issue、Pull Request、Release管理に使う。
 - アプリ実行時に外部API、分析、リモートフォント、リモート画像、自動更新エンドポイントへ接続しない。
 
+## 現在の状態
+
+MVP実装中です。業務利用前には、Release notes、既知制限、手動確認結果を確認してください。
+
 ## ドキュメント
 
 - [MVP仕様](docs/mvp-spec.md)
@@ -28,6 +51,7 @@ MVPの決定事項:
 - [セキュリティ設計](docs/security.md)
 - [テスト戦略](docs/testing.md)
 - [運用方針](docs/operations.md)
+- [外部利用者向け公開運用](docs/public-operations.md)
 - [パブリック公開前チェック](docs/public-readiness.md)
 - [リリース前チェックリスト](docs/release-checklist.md)
 - [設定方針](docs/configuration.md)
@@ -37,6 +61,10 @@ MVPの決定事項:
 - [ADR 0001: デスクトップ技術構成](docs/adr/0001-desktop-stack.md)
 - [ADR 0002: オフライン優先ローカル保存](docs/adr/0002-offline-first-local-storage.md)
 - [ADR 0003: 単一アクティブタイマー](docs/adr/0003-single-active-timer.md)
+- [ADR 0004: パブリック配布とライセンス](docs/adr/0004-public-distribution-license.md)
+- [コントリビュート方針](CONTRIBUTING.md)
+- [サポート方針](SUPPORT.md)
+- [変更履歴](CHANGELOG.md)
 
 ## 開発ルール
 
@@ -89,13 +117,15 @@ git diff --check
 
 GitHub Actionsの `リポジトリチェック` は、PRとブランチpushで基本チェックを実行します。
 
+GitHub Actionsの `リリースビルド` は、`app-v*` タグまたは手動実行でWindows/macOS向けartifactをビルドし、Draft Releaseへ添付します。
+
 配布形式:
 
 - macOS: `dmg`
 - Windows: `nsis`
 
-リリース前には [リリース前チェックリスト](docs/release-checklist.md) を使い、macOS/Windowsの手動確認、通知権限、オフライン起動、外部通信なしの方針を確認します。
+リリース前には [リリース前チェックリスト](docs/release-checklist.md) を使い、macOS/Windowsの手動確認、通知権限、オフライン起動、外部通信なしの方針を確認します。Draft Releaseは手動確認が終わるまで公開しません。
 
 ## ライセンス
 
-現時点ではOSSライセンスを採用していません。明示的な許諾がない限り、利用、複製、改変、再配布は許可されません。詳細は [LICENSE](LICENSE) を確認してください。
+TaskTimerはMIT Licenseで公開します。詳細は [LICENSE](LICENSE) を確認してください。

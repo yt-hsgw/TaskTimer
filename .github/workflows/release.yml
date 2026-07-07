@@ -1,0 +1,84 @@
+name: リリースビルド
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "app-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS Apple Silicon
+            platform: macos-latest
+            rustTarget: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - label: macOS Intel
+            platform: macos-latest
+            rustTarget: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+          - label: Windows
+            platform: windows-latest
+            rustTarget: ""
+            args: ""
+
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v5
+
+      - name: Node.jsを準備
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Rustを準備
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          if [ -n "${{ matrix.rustTarget }}" ]; then
+            rustup target add "${{ matrix.rustTarget }}"
+          fi
+
+      - name: Node依存関係をインストール
+        run: npm ci
+
+      - name: npm脆弱性監査を実行
+        run: npm audit --audit-level=moderate
+
+      - name: フロントエンドをビルド
+        run: npm run build
+
+      - name: TauriアプリをビルドしてDraft Releaseへ添付
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'app-v__VERSION__' }}
+          releaseName: TaskTimer ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseBody: |
+            ## ダウンロード
+
+            - Windows: NSISインストーラーを利用してください。
+            - macOS: 利用中のCPUに合うDMGを利用してください。
+
+            ## 注意
+
+            - アプリ実行時の外部通信はありません。
+            - 自動更新はありません。新しいバージョンはGitHub Releasesで確認してください。
+            - 署名なしビルドでは、OSの警告が表示される場合があります。
+          releaseDraft: true
+          prerelease: false
+          uploadUpdaterJson: false
+          tauriScript: npm run tauri
+          args: ${{ matrix.args }}
+          releaseAssetNamePattern: "TaskTimer_[version]_[platform]_[arch][setup][ext]"

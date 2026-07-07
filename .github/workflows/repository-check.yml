@@ -59,7 +59,11 @@ jobs:
           test -f AGENTS.md
           test -f LICENSE
           test -f SECURITY.md
+          test -f SUPPORT.md
+          test -f CONTRIBUTING.md
+          test -f CHANGELOG.md
           test -f .github/dependabot.yml
+          test -f .github/workflows/release.yml
           test -f docs/mvp-spec.md
           test -f docs/architecture.md
           test -f docs/domain-model.md
@@ -67,9 +71,11 @@ jobs:
           test -f docs/security.md
           test -f docs/testing.md
           test -f docs/operations.md
+          test -f docs/public-operations.md
           test -f docs/public-readiness.md
           test -f docs/release-checklist.md
           test -f docs/review/checklist.md
+          test -f docs/adr/0004-public-distribution-license.md
 
       - name: SQLiteスキーマを検証
         run: |
