@@ -76,6 +76,7 @@ jobs:
           test -f docs/release-checklist.md
           test -f docs/review/checklist.md
           test -f docs/adr/0004-public-distribution-license.md
+          test -f src-tauri/icons/icon.ico
 
       - name: SQLiteスキーマを検証
         run: |
