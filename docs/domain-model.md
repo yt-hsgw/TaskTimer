@@ -6,10 +6,13 @@
 erDiagram
   TASK {
     string id PK
+    string list_id FK
     string title
     string status
+    bool is_favorite
     date planned_start_date
     date due_date
+    int timer_target_seconds
     text memo
     int sort_order
     datetime completed_at
@@ -25,6 +28,7 @@ erDiagram
     string status
     date planned_start_date
     date due_date
+    int timer_target_seconds
     text memo
     int sort_order
     datetime completed_at
@@ -41,6 +45,14 @@ erDiagram
     datetime stopped_at
     int elapsed_seconds
     datetime deleted_at
+    datetime created_at
+  }
+
+  TIMER_PAUSE {
+    string id PK
+    string timer_session_id FK
+    datetime paused_at
+    datetime resumed_at
     datetime created_at
   }
 
@@ -64,10 +76,49 @@ erDiagram
     datetime updated_at
   }
 
+  RECURRENCE_RULE {
+    string id PK
+    string target_type
+    string target_id
+    string frequency
+    int interval
+    datetime deleted_at
+    datetime created_at
+    datetime updated_at
+  }
+
+  TASK_LIST {
+    string id PK
+    string name
+    int sort_order
+    datetime deleted_at
+    datetime created_at
+    datetime updated_at
+  }
+
+  UI_PREFERENCE {
+    string key PK
+    string value
+    datetime updated_at
+  }
+
+  TASK_LIST ||--o{ TASK : 含む
   TASK ||--o{ SUBTASK : 持つ
+  TIMER_SESSION ||--o{ TIMER_PAUSE : 持つ
 ```
 
 ## エンティティ
+
+### TaskList
+
+左ペインに表示するタスクリストを表す。
+
+ルール:
+
+- 初期リストとして `タスク` を持つ。
+- タスクは1つのリストに所属する。
+- 削除済みリストは通常のリスト一覧に表示しない。
+- リスト削除時のタスク移動または削除方針は、実装前に個別Issueで決定する。
 
 ### Task
 
@@ -76,10 +127,13 @@ erDiagram
 フィールド:
 
 - `id`
+- `list_id`
 - `title`
 - `status`: `todo`, `in_progress`, `done`, `archived`
+- `is_favorite`
 - `planned_start_date`
 - `due_date`
+- `timer_target_seconds`
 - `memo`
 - `sort_order`
 - `completed_at`
@@ -95,6 +149,8 @@ erDiagram
 - 未完了サブタスクがあるタスクの完了には明示確認が必要。確認後は完了可能だが、サブタスク状態は変更しない。
 - タスク削除時は、タスク、子サブタスク、タイマーセッション、通知ルールを同一トランザクションでソフト削除する。
 - タスク削除時に対象タスクまたは子サブタスクでタイマー開始中の場合、そのタイマーセッションもソフト削除して通常のアクティブタイマー検索から除外する。
+- お気に入り状態はタスク単位で保持する。
+- 完了済みタスクは完了セクションへ表示されるが、データ上は `status` と `completed_at` を正とする。
 
 ### Subtask
 
@@ -107,6 +163,7 @@ erDiagram
 - 期限日は開始予定日より前にできない。
 - 完了済みまたはアーカイブ済みサブタスクはタイマー開始不可。
 - サブタスクは独自のタイマー履歴を持てる。
+- サブタスクは独自の開始予定日、期限、タイマー目標時間を持てる。
 - サブタスク削除時は、サブタスク、タイマーセッション、通知ルールを同一トランザクションでソフト削除する。
 - サブタスク削除時にタイマー開始中の場合、そのタイマーセッションもソフト削除して通常のアクティブタイマー検索から除外する。
 
@@ -121,7 +178,20 @@ erDiagram
 - `stopped_at` がnullの行だけがアクティブタイマー。
 - タスク/サブタスク全体でアクティブタイマーは1件だけ。
 - `elapsed_seconds` は停止時に確定する。
+- 一時停止/再開を扱う場合、停止中区間は `TimerPause` または同等のセグメントとして保持し、経過時間から除外する。
+- UI上の「終了」はタイマーセッションを確定し、`stopped_at` と `elapsed_seconds` を保存する操作とする。
 - ソフト削除済みタイマーセッションは通常の履歴表示とアクティブタイマー検索から除外する。
+
+### TimerPause
+
+タイマー一時停止区間を表す。
+
+ルール:
+
+- 1つのアクティブタイマーに対して、未再開の一時停止区間は最大1件。
+- 一時停止中のタイマーはアクティブタイマー制約上は実行中として扱い、別対象のタイマー開始はできない。
+- 再開時に `resumed_at` を記録する。
+- 終了時に未再開の一時停止区間がある場合、終了時刻を `resumed_at` 相当として扱うか、終了処理で閉じる。
 
 ### NotificationRule
 
@@ -148,6 +218,28 @@ erDiagram
 - `title_only` はタスクまたはサブタスクのタイトルのみを表示する。
 - `generic` はタスクまたはサブタスクのタイトルをOS通知adapterへ渡さず、汎用メッセージだけを表示する。
 
+### RecurrenceRule
+
+タスクまたはサブタスクの繰り返し設定を表す。
+
+ルール:
+
+- `target_type` は `task` または `subtask`。
+- `frequency` は `daily`, `weekly`, `monthly` などの許可値に限定する。
+- `interval` は1以上の整数とする。
+- 繰り返しタスクの次回生成または期限更新は、完了操作の副作用ではなくApplication Use Caseで明示的に扱う。
+- 無限生成を避けるため、1回の操作で作成する次回タスクは最大1件とする。
+
+### UiPreference
+
+画面状態のローカル設定を表す。
+
+ルール:
+
+- 左ペイン開閉、最後に開いたビュー、最後に選択したリストなどを保存する。
+- 業務データではないが、オフライン復元性のためSQLiteに保存する。
+- ユーザーのメモ本文やタスク内容を値に保存しない。
+
 ## ドメインサービス
 
 ### TimerPolicy
@@ -165,6 +257,7 @@ erDiagram
 - 開始予定日と期限日の順序。
 - 通知時刻の妥当性。
 - カレンダー項目が指定週に含まれること。
+- 繰り返し設定の頻度と間隔の妥当性。
 
 ### NotificationContentPolicy
 
@@ -173,6 +266,23 @@ erDiagram
 - 表示モードが妥当。
 - `title_only` のときだけタイトルを含める。
 - メモ本文を通知に含めない。
+
+### TaskListPolicy
+
+確認内容:
+
+- 初期リストが存在する。
+- タスク作成時の所属リストが存在する。
+- リスト削除時にタスクが孤立しない。
+
+### TimerPausePolicy
+
+確認内容:
+
+- アクティブタイマーが存在する。
+- 一時停止中のタイマーを二重に一時停止しない。
+- 一時停止していないタイマーだけを再開できる。
+- 一時停止中も単一アクティブタイマー制約を維持する。
 
 ## 状態遷移
 
