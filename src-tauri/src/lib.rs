@@ -6,7 +6,7 @@ use application::commands::{
     complete_subtask, complete_task, create_subtask, create_task, delete_subtask, delete_task,
     dispatch_due_notifications, get_active_timer, get_notification_display_mode, health_check,
     list_task_lists, list_task_rows, list_tasks, list_week_calendar_items, start_timer,
-    stop_active_timer, update_notification_display_mode,
+    stop_active_timer, toggle_task_favorite, update_notification_display_mode,
 };
 use infrastructure::{
     clock::SystemClock, notification::TauriLocalNotificationGateway, sqlite::SqliteDatabase,
@@ -38,6 +38,7 @@ pub fn run() {
             stop_active_timer,
             complete_task,
             complete_subtask,
+            toggle_task_favorite,
             delete_task,
             delete_subtask,
             update_notification_display_mode,

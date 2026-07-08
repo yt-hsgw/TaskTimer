@@ -189,6 +189,13 @@ pub trait TaskTimerCommandRepository {
 
     fn complete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<SubtaskRecord>;
 
+    fn toggle_task_favorite(
+        &self,
+        task_id: String,
+        is_favorite: bool,
+        now: String,
+    ) -> RepositoryResult<TaskRecord>;
+
     fn delete_task(&self, task_id: String, now: String) -> RepositoryResult<()>;
 
     fn delete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<()>;

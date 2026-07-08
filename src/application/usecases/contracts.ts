@@ -73,6 +73,7 @@ export type TaskTimerGateway = {
   stopActiveTimer(): Promise<TimerSession>;
   completeTask(taskId: string, allowIncompleteSubtasks: boolean): Promise<Task>;
   completeSubtask(subtaskId: string): Promise<Subtask>;
+  toggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<Task>;
   deleteTask(taskId: string): Promise<void>;
   deleteSubtask(subtaskId: string): Promise<void>;
   updateNotificationDisplayMode(
