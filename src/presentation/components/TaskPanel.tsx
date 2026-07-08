@@ -10,6 +10,10 @@ type TaskPanelProps = {
   tasks: TaskWithSubtasks[];
   selectedTaskId: string | null;
   activeTimer: ActiveTimer | null;
+  eyebrow?: string;
+  title?: string;
+  emptyMessage?: string;
+  showTaskForm?: boolean;
   isLoading: boolean;
   isMutating: boolean;
   onSelectTask(taskId: string): void;
@@ -34,6 +38,10 @@ export function TaskPanel({
   tasks,
   selectedTaskId,
   activeTimer,
+  eyebrow = "DB接続済みタスク",
+  title = "タスク",
+  emptyMessage = "まだタスクはありません。",
+  showTaskForm = true,
   isLoading,
   isMutating,
   onSelectTask,
@@ -96,81 +104,86 @@ export function TaskPanel({
     <section className="panel task-panel" aria-labelledby="task-panel-title">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">DB接続済みタスク</p>
-          <h2 id="task-panel-title">タスク</h2>
+          <p className="eyebrow">{eyebrow}</p>
+          <h2 id="task-panel-title">{title}</h2>
         </div>
       </div>
 
-      <form className="work-form" onSubmit={(event) => void handleCreateTask(event)}>
-        <label>
-          <span>タスク名</span>
-          <input
-            value={taskDraft.title}
-            onChange={(event) =>
-              setTaskDraft((current) => ({
-                ...current,
-                title: event.target.value,
-              }))
-            }
-            placeholder="例: 週次レビュー"
-            disabled={isMutating}
-            maxLength={120}
-            required
-          />
-        </label>
-        <div className="date-fields">
+      {showTaskForm ? (
+        <form
+          className="work-form"
+          onSubmit={(event) => void handleCreateTask(event)}
+        >
           <label>
-            <span>開始日</span>
+            <span>タスク名</span>
             <input
-              type="date"
-              value={taskDraft.plannedStartDate ?? ""}
+              value={taskDraft.title}
               onChange={(event) =>
                 setTaskDraft((current) => ({
                   ...current,
-                  plannedStartDate: event.target.value,
+                  title: event.target.value,
                 }))
               }
+              placeholder="例: 週次レビュー"
               disabled={isMutating}
+              maxLength={120}
+              required
             />
           </label>
+          <div className="date-fields">
+            <label>
+              <span>開始日</span>
+              <input
+                type="date"
+                value={taskDraft.plannedStartDate ?? ""}
+                onChange={(event) =>
+                  setTaskDraft((current) => ({
+                    ...current,
+                    plannedStartDate: event.target.value,
+                  }))
+                }
+                disabled={isMutating}
+              />
+            </label>
+            <label>
+              <span>終了日</span>
+              <input
+                type="date"
+                value={taskDraft.dueDate ?? ""}
+                onChange={(event) =>
+                  setTaskDraft((current) => ({
+                    ...current,
+                    dueDate: event.target.value,
+                  }))
+                }
+                disabled={isMutating}
+              />
+            </label>
+          </div>
           <label>
-            <span>終了日</span>
-            <input
-              type="date"
-              value={taskDraft.dueDate ?? ""}
+            <span>メモ</span>
+            <textarea
+              value={taskDraft.memo ?? ""}
               onChange={(event) =>
                 setTaskDraft((current) => ({
                   ...current,
-                  dueDate: event.target.value,
+                  memo: event.target.value,
                 }))
               }
               disabled={isMutating}
+              rows={3}
             />
           </label>
-        </div>
-        <label>
-          <span>メモ</span>
-          <textarea
-            value={taskDraft.memo ?? ""}
-            onChange={(event) =>
-              setTaskDraft((current) => ({
-                ...current,
-                memo: event.target.value,
-              }))
-            }
-            disabled={isMutating}
-            rows={3}
-          />
-        </label>
-        <button className="primary-button" type="submit" disabled={isMutating}>
-          タスク追加
-        </button>
-      </form>
+          <button className="primary-button" type="submit" disabled={isMutating}>
+            タスク追加
+          </button>
+        </form>
+      ) : null}
 
       <div className="task-list" aria-label="タスク一覧">
         {isLoading ? <p className="empty-state">タスクを読み込み中です。</p> : null}
         {!isLoading && tasks.length === 0 ? (
-          <p className="empty-state">まだタスクはありません。</p>
+          <p className="empty-state">{emptyMessage}</p>
         ) : null}
         {tasks.map((task) => (
           <button

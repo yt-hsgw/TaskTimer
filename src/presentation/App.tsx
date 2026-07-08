@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   NotificationDispatchSummary,
+  TaskListItem,
   TaskWithSubtasks,
   WeekCalendarItem,
   WorkItemDraft,
@@ -12,13 +13,20 @@ import { tauriTaskTimerGateway } from "../infrastructure/tauri/gateway";
 import { WeekCalendar } from "./components/WeekCalendar";
 import { TaskPanel } from "./components/TaskPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { LeftNavigation, type AppView } from "./components/LeftNavigation";
 
 export function App() {
   const [health, setHealth] = useState("frontend-only");
   const [tasks, setTasks] = useState<TaskWithSubtasks[]>([]);
+  const [taskLists, setTaskLists] = useState<TaskListItem[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [items, setItems] = useState<WeekCalendarItem[]>([]);
   const [activeTimer, setActiveTimer] = useState<ActiveTimer | null>(null);
+  const [activeView, setActiveView] = useState<AppView>({
+    kind: "list",
+    listId: "default",
+  });
+  const [isNavigationOpen, setIsNavigationOpen] = useState(true);
   const [displayMode, setDisplayMode] =
     useState<NotificationDisplayMode>("title_only");
   const [notificationSummary, setNotificationSummary] =
@@ -41,15 +49,44 @@ export function App() {
     return health;
   }, [health]);
 
+  const favoriteCount = useMemo(
+    () => tasks.filter((task) => task.isFavorite).length,
+    [tasks],
+  );
+
+  const activeTaskList = useMemo(() => {
+    if (activeView.kind !== "list") {
+      return null;
+    }
+    return taskLists.find((list) => list.id === activeView.listId) ?? null;
+  }, [activeView, taskLists]);
+
+  const visibleTasks = useMemo(() => {
+    if (activeView.kind === "favorites") {
+      return tasks.filter((task) => task.isFavorite);
+    }
+    if (activeView.kind === "list") {
+      return tasks.filter((task) => task.listId === activeView.listId);
+    }
+    return tasks;
+  }, [activeView, tasks]);
+
   const loadSnapshot = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
 
     try {
       const nextHealth = await tauriTaskTimerGateway.healthCheck();
-      const [nextTasks, nextItems, nextActiveTimer, nextDisplayMode] =
+      const [
+        nextTasks,
+        nextTaskLists,
+        nextItems,
+        nextActiveTimer,
+        nextDisplayMode,
+      ] =
         await Promise.all([
           tauriTaskTimerGateway.listTasks(),
+          tauriTaskTimerGateway.listTaskLists(),
           tauriTaskTimerGateway.listWeekCalendarItems(weekStartDate),
           tauriTaskTimerGateway.getActiveTimer(),
           tauriTaskTimerGateway.getNotificationDisplayMode(),
@@ -57,6 +94,7 @@ export function App() {
 
       setHealth(nextHealth);
       setTasks(nextTasks);
+      setTaskLists(nextTaskLists);
       setItems(nextItems);
       setActiveTimer(nextActiveTimer);
       setDisplayMode(nextDisplayMode);
@@ -80,6 +118,40 @@ export function App() {
   useEffect(() => {
     void loadSnapshot();
   }, [loadSnapshot]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.ctrlKey && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        setIsNavigationOpen((current) => !current);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (activeView.kind !== "list" || taskLists.length === 0) {
+      return;
+    }
+    if (!taskLists.some((list) => list.id === activeView.listId)) {
+      setActiveView({ kind: "list", listId: taskLists[0].id });
+    }
+  }, [activeView, taskLists]);
+
+  useEffect(() => {
+    if (activeView.kind !== "list" && activeView.kind !== "favorites") {
+      return;
+    }
+
+    setSelectedTaskId((currentTaskId) => {
+      if (visibleTasks.some((task) => task.id === currentTaskId)) {
+        return currentTaskId;
+      }
+      return visibleTasks[0]?.id ?? null;
+    });
+  }, [activeView.kind, visibleTasks]);
 
   const runMutation = useCallback(
     async (operation: () => Promise<string | void>) => {
@@ -226,12 +298,34 @@ export function App() {
     [runMutation],
   );
 
+  const handleSelectView = useCallback((view: AppView) => {
+    setActiveView(view);
+    if (window.matchMedia("(max-width: 767px)").matches) {
+      setIsNavigationOpen(false);
+    }
+  }, []);
+
   return (
-    <main className="app-shell">
+    <main
+      className={`app-shell ${
+        isNavigationOpen ? "is-nav-open" : "is-nav-collapsed"
+      }`}
+    >
       <header className="top-bar">
-        <div>
-          <p className="eyebrow">オフライン対応デスクトップタスクタイマー</p>
-          <h1>TaskTimer</h1>
+        <div className="top-bar-title">
+          <button
+            className="top-nav-toggle"
+            type="button"
+            aria-label={isNavigationOpen ? "左ペインを閉じる" : "左ペインを開く"}
+            title="左ペインを開閉"
+            onClick={() => setIsNavigationOpen((current) => !current)}
+          >
+            ☰
+          </button>
+          <div>
+            <p className="eyebrow">オフライン対応デスクトップタスクタイマー</p>
+            <h1>TaskTimer</h1>
+          </div>
         </div>
         <div className="runtime-status">
           <span>実行環境</span>
@@ -249,40 +343,81 @@ export function App() {
         </div>
       ) : null}
 
-      <section className="workspace-grid" aria-label="TaskTimer作業画面">
-        <TaskPanel
-          tasks={tasks}
-          selectedTaskId={selectedTaskId}
-          activeTimer={activeTimer}
-          isLoading={isLoading}
-          isMutating={isMutating}
-          onSelectTask={setSelectedTaskId}
-          onCreateTask={handleCreateTask}
-          onCreateSubtask={handleCreateSubtask}
-          onStartTimer={handleStartTimer}
-          onStopTimer={handleStopTimer}
-          onCompleteTask={handleCompleteTask}
-          onCompleteSubtask={handleCompleteSubtask}
-          onDeleteTask={handleDeleteTask}
-          onDeleteSubtask={handleDeleteSubtask}
+      <div className="app-layout" aria-label="TaskTimer作業画面">
+        {isNavigationOpen ? (
+          <button
+            className="nav-backdrop"
+            type="button"
+            aria-label="左ペインを閉じる"
+            onClick={() => setIsNavigationOpen(false)}
+          />
+        ) : null}
+        <LeftNavigation
+          activeView={activeView}
+          favoriteCount={favoriteCount}
+          isOpen={isNavigationOpen}
+          taskLists={taskLists}
+          onSelectView={handleSelectView}
+          onToggle={() => setIsNavigationOpen((current) => !current)}
         />
-        <WeekCalendar
-          weekStartDate={weekStartDate}
-          items={items}
-          isLoading={isLoading}
-          onPreviousWeek={() =>
-            setWeekStartDate((current) => shiftDate(current, -7))
-          }
-          onNextWeek={() => setWeekStartDate((current) => shiftDate(current, 7))}
-        />
-        <SettingsPanel
-          displayMode={displayMode}
-          isMutating={isMutating}
-          notificationSummary={notificationSummary}
-          onUpdateDisplayMode={handleUpdateNotificationDisplayMode}
-          onRetryNotifications={handleRetryNotifications}
-        />
-      </section>
+
+        <section className="workspace-main" aria-label="現在のビュー">
+          {(activeView.kind === "list" || activeView.kind === "favorites") ? (
+            <TaskPanel
+              tasks={visibleTasks}
+              selectedTaskId={selectedTaskId}
+              activeTimer={activeTimer}
+              eyebrow={activeView.kind === "favorites" ? "お気に入り" : "リスト"}
+              title={
+                activeView.kind === "favorites"
+                  ? "お気に入り"
+                  : activeTaskList?.name ?? "タスク"
+              }
+              emptyMessage={
+                activeView.kind === "favorites"
+                  ? "お気に入りにしたタスクはまだありません。"
+                  : "まだタスクはありません。"
+              }
+              showTaskForm={activeView.kind === "list"}
+              isLoading={isLoading}
+              isMutating={isMutating}
+              onSelectTask={setSelectedTaskId}
+              onCreateTask={handleCreateTask}
+              onCreateSubtask={handleCreateSubtask}
+              onStartTimer={handleStartTimer}
+              onStopTimer={handleStopTimer}
+              onCompleteTask={handleCompleteTask}
+              onCompleteSubtask={handleCompleteSubtask}
+              onDeleteTask={handleDeleteTask}
+              onDeleteSubtask={handleDeleteSubtask}
+            />
+          ) : null}
+
+          {activeView.kind === "calendar" ? (
+            <WeekCalendar
+              weekStartDate={weekStartDate}
+              items={items}
+              isLoading={isLoading}
+              onPreviousWeek={() =>
+                setWeekStartDate((current) => shiftDate(current, -7))
+              }
+              onNextWeek={() =>
+                setWeekStartDate((current) => shiftDate(current, 7))
+              }
+            />
+          ) : null}
+
+          {activeView.kind === "settings" ? (
+            <SettingsPanel
+              displayMode={displayMode}
+              isMutating={isMutating}
+              notificationSummary={notificationSummary}
+              onUpdateDisplayMode={handleUpdateNotificationDisplayMode}
+              onRetryNotifications={handleRetryNotifications}
+            />
+          ) : null}
+        </section>
+      </div>
     </main>
   );
 }
