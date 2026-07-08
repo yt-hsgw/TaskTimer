@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   NotificationDispatchSummary,
   TaskListItem,
+  TaskRow,
   TaskWithSubtasks,
   WeekCalendarItem,
   WorkItemDraft,
@@ -18,6 +19,7 @@ import { LeftNavigation, type AppView } from "./components/LeftNavigation";
 export function App() {
   const [health, setHealth] = useState("frontend-only");
   const [tasks, setTasks] = useState<TaskWithSubtasks[]>([]);
+  const [taskRows, setTaskRows] = useState<TaskRow[]>([]);
   const [taskLists, setTaskLists] = useState<TaskListItem[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [items, setItems] = useState<WeekCalendarItem[]>([]);
@@ -71,14 +73,27 @@ export function App() {
     return tasks;
   }, [activeView, tasks]);
 
+  const visibleTaskRows = useMemo(() => {
+    if (activeView.kind === "favorites") {
+      return taskRows.filter((task) => task.isFavorite);
+    }
+    if (activeView.kind === "list") {
+      return taskRows.filter((task) => task.listId === activeView.listId);
+    }
+    return taskRows;
+  }, [activeView, taskRows]);
+
   const loadSnapshot = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage(null);
 
     try {
       const nextHealth = await tauriTaskTimerGateway.healthCheck();
+      const listId =
+        activeView.kind === "list" ? activeView.listId : undefined;
       const [
         nextTasks,
+        nextTaskRows,
         nextTaskLists,
         nextItems,
         nextActiveTimer,
@@ -86,6 +101,7 @@ export function App() {
       ] =
         await Promise.all([
           tauriTaskTimerGateway.listTasks(),
+          tauriTaskTimerGateway.listTaskRows(listId),
           tauriTaskTimerGateway.listTaskLists(),
           tauriTaskTimerGateway.listWeekCalendarItems(weekStartDate),
           tauriTaskTimerGateway.getActiveTimer(),
@@ -94,6 +110,7 @@ export function App() {
 
       setHealth(nextHealth);
       setTasks(nextTasks);
+      setTaskRows(nextTaskRows);
       setTaskLists(nextTaskLists);
       setItems(nextItems);
       setActiveTimer(nextActiveTimer);
@@ -101,19 +118,13 @@ export function App() {
       setNotificationSummary(
         await tauriTaskTimerGateway.dispatchDueNotifications(),
       );
-      setSelectedTaskId((currentTaskId) => {
-        if (nextTasks.some((task) => task.id === currentTaskId)) {
-          return currentTaskId;
-        }
-        return nextTasks[0]?.id ?? null;
-      });
     } catch (error) {
       setHealth("tauri-unavailable");
       setErrorMessage(toErrorMessage(error));
     } finally {
       setIsLoading(false);
     }
-  }, [weekStartDate]);
+  }, [activeView, weekStartDate]);
 
   useEffect(() => {
     void loadSnapshot();
@@ -146,12 +157,12 @@ export function App() {
     }
 
     setSelectedTaskId((currentTaskId) => {
-      if (visibleTasks.some((task) => task.id === currentTaskId)) {
+      if (visibleTaskRows.some((task) => task.id === currentTaskId)) {
         return currentTaskId;
       }
-      return visibleTasks[0]?.id ?? null;
+      return visibleTaskRows[0]?.id ?? null;
     });
-  }, [activeView.kind, visibleTasks]);
+  }, [activeView.kind, visibleTaskRows]);
 
   const runMutation = useCallback(
     async (operation: () => Promise<string | void>) => {
@@ -241,6 +252,15 @@ export function App() {
       runMutation(async () => {
         await tauriTaskTimerGateway.completeSubtask(subtask.id);
         return subtask.taskId;
+      }),
+    [runMutation],
+  );
+
+  const handleToggleTaskFavorite = useCallback(
+    (taskId: string, isFavorite: boolean) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.toggleTaskFavorite(taskId, isFavorite);
+        return taskId;
       }),
     [runMutation],
   );
@@ -365,6 +385,7 @@ export function App() {
           {(activeView.kind === "list" || activeView.kind === "favorites") ? (
             <TaskPanel
               tasks={visibleTasks}
+              taskRows={visibleTaskRows}
               selectedTaskId={selectedTaskId}
               activeTimer={activeTimer}
               eyebrow={activeView.kind === "favorites" ? "お気に入り" : "リスト"}
@@ -388,6 +409,7 @@ export function App() {
               onStopTimer={handleStopTimer}
               onCompleteTask={handleCompleteTask}
               onCompleteSubtask={handleCompleteSubtask}
+              onToggleTaskFavorite={handleToggleTaskFavorite}
               onDeleteTask={handleDeleteTask}
               onDeleteSubtask={handleDeleteSubtask}
             />

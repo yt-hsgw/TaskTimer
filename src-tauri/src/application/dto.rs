@@ -60,6 +60,13 @@ pub struct CompleteSubtaskRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ToggleTaskFavoriteRequestDto {
+    pub task_id: String,
+    pub is_favorite: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeleteTaskRequestDto {
     pub task_id: String,
 }

@@ -83,6 +83,16 @@ pub fn complete_subtask(
     repository.complete_subtask(subtask_id, clock.now_utc_iso8601())
 }
 
+pub fn toggle_task_favorite(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    task_id: String,
+    is_favorite: bool,
+) -> RepositoryResult<TaskRecord> {
+    let task_id = validate_identifier(&task_id, "タスクID")?;
+    repository.toggle_task_favorite(task_id, is_favorite, clock.now_utc_iso8601())
+}
+
 pub fn delete_task(
     repository: &impl TaskTimerCommandRepository,
     clock: &impl Clock,
