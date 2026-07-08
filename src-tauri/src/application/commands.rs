@@ -99,6 +99,28 @@ pub fn create_subtask(
 }
 
 #[tauri::command]
+pub fn update_task(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::UpdateTaskRequestDto,
+) -> Result<super::dto::TaskDto, String> {
+    let task_id = request.task_id.clone();
+    super::usecases::update_task(database.inner(), clock.inner(), task_id, request.into())
+        .map(Into::into)
+}
+
+#[tauri::command]
+pub fn update_subtask(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::UpdateSubtaskRequestDto,
+) -> Result<super::dto::SubtaskDto, String> {
+    let subtask_id = request.subtask_id.clone();
+    super::usecases::update_subtask(database.inner(), clock.inner(), subtask_id, request.into())
+        .map(Into::into)
+}
+
+#[tauri::command]
 pub fn start_timer(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,

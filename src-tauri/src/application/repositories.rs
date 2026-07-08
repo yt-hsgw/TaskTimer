@@ -52,6 +52,16 @@ pub struct WorkItemCreate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkItemUpdate {
+    pub title: String,
+    pub planned_start_date: Option<String>,
+    pub due_date: Option<String>,
+    pub timer_target_seconds: Option<i64>,
+    pub memo: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskListRecord {
     pub id: String,
     pub name: String,
@@ -174,6 +184,14 @@ pub trait TaskTimerCommandRepository {
         &self,
         task_id: String,
         input: WorkItemCreate,
+    ) -> RepositoryResult<SubtaskRecord>;
+
+    fn update_task(&self, task_id: String, input: WorkItemUpdate) -> RepositoryResult<TaskRecord>;
+
+    fn update_subtask(
+        &self,
+        subtask_id: String,
+        input: WorkItemUpdate,
     ) -> RepositoryResult<SubtaskRecord>;
 
     fn start_timer(&self, target: WorkTargetRef, now: String) -> RepositoryResult<ActiveTimer>;

@@ -6,6 +6,7 @@ import type {
   TaskWithSubtasks,
   WeekCalendarItem,
   WorkItemDraft,
+  WorkItemUpdateDraft,
 } from "../application/usecases/contracts";
 import type { NotificationDisplayMode } from "../domain/notification/types";
 import type { ActiveTimer, TimerSession } from "../domain/timer/types";
@@ -13,6 +14,7 @@ import type { Subtask, WorkTargetRef } from "../domain/task/types";
 import { tauriTaskTimerGateway } from "../infrastructure/tauri/gateway";
 import { WeekCalendar } from "./components/WeekCalendar";
 import { TaskPanel } from "./components/TaskPanel";
+import { TaskDetailPane } from "./components/TaskDetailPane";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { LeftNavigation, type AppView } from "./components/LeftNavigation";
 
@@ -82,6 +84,13 @@ export function App() {
     }
     return taskRows;
   }, [activeView, taskRows]);
+
+  const selectedTask = useMemo(() => {
+    if (!selectedTaskId) {
+      return null;
+    }
+    return visibleTasks.find((task) => task.id === selectedTaskId) ?? null;
+  }, [selectedTaskId, visibleTasks]);
 
   const loadSnapshot = useCallback(async () => {
     setIsLoading(true);
@@ -153,6 +162,7 @@ export function App() {
 
   useEffect(() => {
     if (activeView.kind !== "list" && activeView.kind !== "favorites") {
+      setSelectedTaskId(null);
       return;
     }
 
@@ -160,7 +170,7 @@ export function App() {
       if (visibleTaskRows.some((task) => task.id === currentTaskId)) {
         return currentTaskId;
       }
-      return visibleTaskRows[0]?.id ?? null;
+      return null;
     });
   }, [activeView.kind, visibleTaskRows]);
 
@@ -200,6 +210,30 @@ export function App() {
       runMutation(async () => {
         await tauriTaskTimerGateway.createSubtask({ ...input, taskId });
         return taskId;
+      }),
+    [runMutation],
+  );
+
+  const handleUpdateTask = useCallback(
+    (taskId: string, input: WorkItemUpdateDraft) =>
+      runMutation(async () => {
+        const task = await tauriTaskTimerGateway.updateTask({
+          ...input,
+          taskId,
+        });
+        return task.id;
+      }),
+    [runMutation],
+  );
+
+  const handleUpdateSubtask = useCallback(
+    (subtaskId: string, input: WorkItemUpdateDraft) =>
+      runMutation(async () => {
+        const subtask = await tauriTaskTimerGateway.updateSubtask({
+          ...input,
+          subtaskId,
+        });
+        return subtask.taskId;
       }),
     [runMutation],
   );
@@ -383,36 +417,53 @@ export function App() {
 
         <section className="workspace-main" aria-label="現在のビュー">
           {(activeView.kind === "list" || activeView.kind === "favorites") ? (
-            <TaskPanel
-              tasks={visibleTasks}
-              taskRows={visibleTaskRows}
-              selectedTaskId={selectedTaskId}
-              activeTimer={activeTimer}
-              eyebrow={activeView.kind === "favorites" ? "お気に入り" : "リスト"}
-              title={
-                activeView.kind === "favorites"
-                  ? "お気に入り"
-                  : activeTaskList?.name ?? "タスク"
-              }
-              emptyMessage={
-                activeView.kind === "favorites"
-                  ? "お気に入りにしたタスクはまだありません。"
-                  : "まだタスクはありません。"
-              }
-              showTaskForm={activeView.kind === "list"}
-              isLoading={isLoading}
-              isMutating={isMutating}
-              onSelectTask={setSelectedTaskId}
-              onCreateTask={handleCreateTask}
-              onCreateSubtask={handleCreateSubtask}
-              onStartTimer={handleStartTimer}
-              onStopTimer={handleStopTimer}
-              onCompleteTask={handleCompleteTask}
-              onCompleteSubtask={handleCompleteSubtask}
-              onToggleTaskFavorite={handleToggleTaskFavorite}
-              onDeleteTask={handleDeleteTask}
-              onDeleteSubtask={handleDeleteSubtask}
-            />
+            <div
+              className={`task-workspace ${
+                selectedTask ? "is-detail-open" : ""
+              }`}
+            >
+              <TaskPanel
+                tasks={visibleTasks}
+                taskRows={visibleTaskRows}
+                selectedTaskId={selectedTaskId}
+                eyebrow={activeView.kind === "favorites" ? "お気に入り" : "リスト"}
+                title={
+                  activeView.kind === "favorites"
+                    ? "お気に入り"
+                    : activeTaskList?.name ?? "タスク"
+                }
+                emptyMessage={
+                  activeView.kind === "favorites"
+                    ? "お気に入りにしたタスクはまだありません。"
+                    : "まだタスクはありません。"
+                }
+                showTaskForm={activeView.kind === "list"}
+                isLoading={isLoading}
+                isMutating={isMutating}
+                onSelectTask={setSelectedTaskId}
+                onCreateTask={handleCreateTask}
+                onCompleteTask={handleCompleteTask}
+                onToggleTaskFavorite={handleToggleTaskFavorite}
+              />
+              {selectedTask ? (
+                <TaskDetailPane
+                  task={selectedTask}
+                  activeTimer={activeTimer}
+                  displayMode={displayMode}
+                  isMutating={isMutating}
+                  onClose={() => setSelectedTaskId(null)}
+                  onUpdateTask={handleUpdateTask}
+                  onUpdateSubtask={handleUpdateSubtask}
+                  onCreateSubtask={handleCreateSubtask}
+                  onStartTimer={handleStartTimer}
+                  onStopTimer={handleStopTimer}
+                  onCompleteTask={handleCompleteTask}
+                  onCompleteSubtask={handleCompleteSubtask}
+                  onDeleteTask={handleDeleteTask}
+                  onDeleteSubtask={handleDeleteSubtask}
+                />
+              ) : null}
+            </div>
           ) : null}
 
           {activeView.kind === "calendar" ? (

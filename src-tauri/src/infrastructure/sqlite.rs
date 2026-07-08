@@ -21,7 +21,7 @@ use crate::{
         target_ref, ActiveTimer, CalendarMarker, CalendarRepository, NotificationCommandRepository,
         NotificationJob, NotificationPreferenceRepository, RepositoryResult, SubtaskRecord,
         TaskListRecord, TaskReadRepository, TaskRecord, TaskRowRecord, TaskTimerCommandRepository,
-        TaskWithSubtasksRecord, TimerRepository, WeekCalendarItem, WorkItemCreate,
+        TaskWithSubtasksRecord, TimerRepository, WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
     },
     domain::{
         notification::{NotificationDisplayMode, NotificationKind, NotificationRegistrationStatus},
@@ -178,6 +178,18 @@ impl TaskTimerCommandRepository for SqliteDatabase {
             ensure_task_exists(transaction, &task_id)?;
             insert_subtask(transaction, &task_id, input)
         })
+    }
+
+    fn update_task(&self, task_id: String, input: WorkItemUpdate) -> RepositoryResult<TaskRecord> {
+        self.with_transaction(|transaction| update_task_detail(transaction, &task_id, input))
+    }
+
+    fn update_subtask(
+        &self,
+        subtask_id: String,
+        input: WorkItemUpdate,
+    ) -> RepositoryResult<SubtaskRecord> {
+        self.with_transaction(|transaction| update_subtask_detail(transaction, &subtask_id, input))
     }
 
     fn start_timer(&self, target: WorkTargetRef, now: String) -> RepositoryResult<ActiveTimer> {
@@ -534,6 +546,110 @@ fn insert_subtask(
     select_subtask_by_id(transaction, &id)
 }
 
+fn update_task_detail(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    input: WorkItemUpdate,
+) -> RepositoryResult<TaskRecord> {
+    ensure_task_exists(transaction, task_id)?;
+    let planned_start_date = input.planned_start_date.clone();
+    let due_date = input.due_date.clone();
+    let now = input.now.clone();
+
+    let updated = transaction
+        .execute(
+            "
+            UPDATE tasks
+            SET title = ?1,
+                planned_start_date = ?2,
+                due_date = ?3,
+                timer_target_seconds = ?4,
+                memo = ?5,
+                updated_at = ?6
+            WHERE id = ?7
+              AND deleted_at IS NULL
+            ",
+            params![
+                input.title,
+                input.planned_start_date,
+                input.due_date,
+                input.timer_target_seconds,
+                input.memo,
+                input.now,
+                task_id
+            ],
+        )
+        .map_err(|error| format!("タスク詳細を更新できません: {error}"))?;
+    if updated != 1 {
+        return Err("更新対象のタスクが存在しません".to_string());
+    }
+
+    sync_notification_rules_for_target(
+        transaction,
+        &WorkTargetRef {
+            target_type: WorkTargetType::Task,
+            id: task_id.to_string(),
+        },
+        planned_start_date.as_deref(),
+        due_date.as_deref(),
+        &now,
+    )?;
+
+    select_existing_task_by_id(transaction, task_id)
+}
+
+fn update_subtask_detail(
+    transaction: &Transaction<'_>,
+    subtask_id: &str,
+    input: WorkItemUpdate,
+) -> RepositoryResult<SubtaskRecord> {
+    ensure_subtask_exists(transaction, subtask_id)?;
+    let planned_start_date = input.planned_start_date.clone();
+    let due_date = input.due_date.clone();
+    let now = input.now.clone();
+
+    let updated = transaction
+        .execute(
+            "
+            UPDATE subtasks
+            SET title = ?1,
+                planned_start_date = ?2,
+                due_date = ?3,
+                timer_target_seconds = ?4,
+                memo = ?5,
+                updated_at = ?6
+            WHERE id = ?7
+              AND deleted_at IS NULL
+            ",
+            params![
+                input.title,
+                input.planned_start_date,
+                input.due_date,
+                input.timer_target_seconds,
+                input.memo,
+                input.now,
+                subtask_id
+            ],
+        )
+        .map_err(|error| format!("サブタスク詳細を更新できません: {error}"))?;
+    if updated != 1 {
+        return Err("更新対象のサブタスクが存在しません".to_string());
+    }
+
+    sync_notification_rules_for_target(
+        transaction,
+        &WorkTargetRef {
+            target_type: WorkTargetType::Subtask,
+            id: subtask_id.to_string(),
+        },
+        planned_start_date.as_deref(),
+        due_date.as_deref(),
+        &now,
+    )?;
+
+    select_existing_subtask_by_id(transaction, subtask_id)
+}
+
 fn insert_notification_rules_for_target(
     transaction: &Transaction<'_>,
     target: &WorkTargetRef,
@@ -562,6 +678,173 @@ fn insert_notification_rules_for_target(
     }
 
     Ok(())
+}
+
+fn sync_notification_rules_for_target(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    planned_start_date: Option<&str>,
+    due_date: Option<&str>,
+    now: &str,
+) -> RepositoryResult<()> {
+    sync_notification_rule_for_kind(
+        transaction,
+        target,
+        NotificationKind::PlannedStart,
+        planned_start_date,
+        now,
+    )?;
+    sync_notification_rule_for_kind(transaction, target, NotificationKind::Due, due_date, now)
+}
+
+fn sync_notification_rule_for_kind(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    kind: NotificationKind,
+    date: Option<&str>,
+    now: &str,
+) -> RepositoryResult<()> {
+    let existing = select_active_notification_rule_for_kind(transaction, target, &kind)?;
+    let Some(date) = date else {
+        return disable_notification_rules_for_kind(transaction, target, &kind, now);
+    };
+    let notify_at = notification_time_for_date(date);
+
+    if let Some(existing) = existing {
+        disable_duplicate_notification_rules_for_kind(
+            transaction,
+            target,
+            &kind,
+            &existing.id,
+            now,
+        )?;
+        if existing.notify_at == notify_at && existing.enabled {
+            return Ok(());
+        }
+
+        transaction
+            .execute(
+                "
+                UPDATE notification_rules
+                SET notify_at = ?1,
+                    enabled = 1,
+                    registration_status = 'pending',
+                    last_error = NULL,
+                    updated_at = ?2
+                WHERE id = ?3
+                  AND deleted_at IS NULL
+                ",
+                params![notify_at, now, existing.id],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("通知ルールを更新できません: {error}"))
+    } else {
+        insert_notification_rule(transaction, target, kind, &notify_at, now)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ExistingNotificationRule {
+    id: String,
+    notify_at: String,
+    enabled: bool,
+}
+
+fn select_active_notification_rule_for_kind(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    kind: &NotificationKind,
+) -> RepositoryResult<Option<ExistingNotificationRule>> {
+    transaction
+        .query_row(
+            "
+            SELECT id, notify_at, enabled
+            FROM notification_rules
+            WHERE target_type = ?1
+              AND target_id = ?2
+              AND kind = ?3
+              AND deleted_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 1
+            ",
+            params![
+                target.target_type.as_str(),
+                target.id.as_str(),
+                kind.as_str()
+            ],
+            |row| {
+                Ok(ExistingNotificationRule {
+                    id: row.get(0)?,
+                    notify_at: row.get(1)?,
+                    enabled: row.get::<_, i64>(2)? != 0,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| format!("通知ルールを取得できません: {error}"))
+}
+
+fn disable_notification_rules_for_kind(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    kind: &NotificationKind,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE notification_rules
+            SET enabled = 0,
+                registration_status = 'disabled',
+                deleted_at = ?1,
+                updated_at = ?1
+            WHERE target_type = ?2
+              AND target_id = ?3
+              AND kind = ?4
+              AND deleted_at IS NULL
+            ",
+            params![
+                now,
+                target.target_type.as_str(),
+                target.id.as_str(),
+                kind.as_str()
+            ],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("通知ルールを無効化できません: {error}"))
+}
+
+fn disable_duplicate_notification_rules_for_kind(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    kind: &NotificationKind,
+    keep_rule_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE notification_rules
+            SET enabled = 0,
+                registration_status = 'disabled',
+                deleted_at = ?1,
+                updated_at = ?1
+            WHERE target_type = ?2
+              AND target_id = ?3
+              AND kind = ?4
+              AND id <> ?5
+              AND deleted_at IS NULL
+            ",
+            params![
+                now,
+                target.target_type.as_str(),
+                target.id.as_str(),
+                kind.as_str(),
+                keep_rule_id
+            ],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("重複通知ルールを無効化できません: {error}"))
 }
 
 fn insert_notification_rule(
@@ -2316,6 +2599,180 @@ mod tests {
             .expect("unfavorite task");
 
         assert!(!unfavorited.is_favorite);
+    }
+
+    #[test]
+    fn update_task_detail_syncs_notification_rules_and_timer_target() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let update_clock = FixedClock {
+            now: "2026-07-06T00:10:00Z",
+        };
+        let task = usecases::create_task(
+            &database,
+            &create_clock,
+            usecases::WorkItemDraft {
+                title: "更新前".to_string(),
+                planned_start_date: Some("2026-07-06".to_string()),
+                due_date: Some("2026-07-07".to_string()),
+                memo: Some("古いメモ".to_string()),
+            },
+        )
+        .expect("create task");
+
+        let updated = usecases::update_task(
+            &database,
+            &update_clock,
+            task.id.clone(),
+            usecases::WorkItemUpdateDraft {
+                title: "更新後".to_string(),
+                planned_start_date: Some("2026-07-08".to_string()),
+                due_date: None,
+                timer_target_seconds: Some(1_800),
+                memo: Some("新しいメモ".to_string()),
+            },
+        )
+        .expect("update task");
+
+        let (active_rules, disabled_due_rules): (Vec<(String, String, String)>, i64) = database
+            .with_connection(|connection| {
+                let mut statement = connection
+                    .prepare(
+                        "
+                        SELECT kind, notify_at, registration_status
+                        FROM notification_rules
+                        WHERE target_type = 'task'
+                          AND target_id = ?1
+                          AND deleted_at IS NULL
+                        ORDER BY kind ASC
+                        ",
+                    )
+                    .map_err(|error| format!("active rules query: {error}"))?;
+                let active_rules = statement
+                    .query_map(params![task.id.as_str()], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                    })
+                    .map_err(|error| format!("active rules: {error}"))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| format!("active rule row: {error}"))?;
+                let disabled_due_rules = connection
+                    .query_row(
+                        "
+                        SELECT COUNT(*)
+                        FROM notification_rules
+                        WHERE target_type = 'task'
+                          AND target_id = ?1
+                          AND kind = 'due'
+                          AND enabled = 0
+                          AND registration_status = 'disabled'
+                          AND deleted_at IS NOT NULL
+                        ",
+                        params![task.id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("disabled due count: {error}"))?;
+                Ok((active_rules, disabled_due_rules))
+            })
+            .expect("notification rules");
+
+        assert_eq!(updated.title, "更新後");
+        assert_eq!(updated.planned_start_date.as_deref(), Some("2026-07-08"));
+        assert_eq!(updated.due_date, None);
+        assert_eq!(updated.timer_target_seconds, Some(1_800));
+        assert_eq!(updated.memo, "新しいメモ");
+        assert_eq!(active_rules.len(), 1);
+        assert_eq!(
+            active_rules[0],
+            (
+                "planned_start".to_string(),
+                "2026-07-08T00:00:00Z".to_string(),
+                "pending".to_string(),
+            )
+        );
+        assert_eq!(disabled_due_rules, 1);
+    }
+
+    #[test]
+    fn update_subtask_detail_syncs_due_notification_and_timer_target() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &clock, draft("親タスク")).expect("create task");
+        let subtask =
+            usecases::create_subtask(&database, &clock, task.id.clone(), draft("子タスク"))
+                .expect("create subtask");
+
+        let updated = usecases::update_subtask(
+            &database,
+            &clock,
+            subtask.id.clone(),
+            usecases::WorkItemUpdateDraft {
+                title: "子タスク更新".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-09".to_string()),
+                timer_target_seconds: Some(900),
+                memo: Some("サブタスクメモ".to_string()),
+            },
+        )
+        .expect("update subtask");
+
+        let due_rule: (String, String) = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "
+                        SELECT notify_at, registration_status
+                        FROM notification_rules
+                        WHERE target_type = 'subtask'
+                          AND target_id = ?1
+                          AND kind = 'due'
+                          AND deleted_at IS NULL
+                        ",
+                        params![subtask.id.as_str()],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .map_err(|error| format!("subtask due rule: {error}"))
+            })
+            .expect("subtask due rule");
+
+        assert_eq!(updated.title, "子タスク更新");
+        assert_eq!(updated.due_date.as_deref(), Some("2026-07-09"));
+        assert_eq!(updated.timer_target_seconds, Some(900));
+        assert_eq!(
+            due_rule,
+            ("2026-07-09T00:00:00Z".to_string(), "pending".to_string())
+        );
+    }
+
+    #[test]
+    fn update_task_rejects_invalid_timer_target() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &clock, draft("目標時間")).expect("create task");
+
+        let result = usecases::update_task(
+            &database,
+            &clock,
+            task.id,
+            usecases::WorkItemUpdateDraft {
+                title: "目標時間".to_string(),
+                planned_start_date: None,
+                due_date: None,
+                timer_target_seconds: Some(0),
+                memo: None,
+            },
+        );
+
+        assert!(result
+            .expect_err("invalid target")
+            .contains("タイマー目標時間"));
     }
 
     #[test]

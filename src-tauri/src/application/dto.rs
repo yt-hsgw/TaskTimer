@@ -10,7 +10,7 @@ use super::{
         ActiveTimer, NotificationDispatchSummary, SubtaskRecord, TaskListRecord, TaskRecord,
         TaskRowRecord, TaskWithSubtasksRecord, WeekCalendarItem,
     },
-    usecases::WorkItemDraft,
+    usecases::{WorkItemDraft, WorkItemUpdateDraft},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -36,6 +36,28 @@ pub struct CreateSubtaskRequestDto {
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub memo: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTaskRequestDto {
+    pub task_id: String,
+    pub title: String,
+    pub planned_start_date: Option<String>,
+    pub due_date: Option<String>,
+    pub timer_target_seconds: Option<i64>,
+    pub memo: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSubtaskRequestDto {
+    pub subtask_id: String,
+    pub title: String,
+    pub planned_start_date: Option<String>,
+    pub due_date: Option<String>,
+    pub timer_target_seconds: Option<i64>,
     pub memo: Option<String>,
 }
 
@@ -242,6 +264,30 @@ impl From<CreateSubtaskRequestDto> for WorkItemDraft {
             title: value.title,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
+            memo: value.memo,
+        }
+    }
+}
+
+impl From<UpdateTaskRequestDto> for WorkItemUpdateDraft {
+    fn from(value: UpdateTaskRequestDto) -> Self {
+        Self {
+            title: value.title,
+            planned_start_date: value.planned_start_date,
+            due_date: value.due_date,
+            timer_target_seconds: value.timer_target_seconds,
+            memo: value.memo,
+        }
+    }
+}
+
+impl From<UpdateSubtaskRequestDto> for WorkItemUpdateDraft {
+    fn from(value: UpdateSubtaskRequestDto) -> Self {
+        Self {
+            title: value.title,
+            planned_start_date: value.planned_start_date,
+            due_date: value.due_date,
+            timer_target_seconds: value.timer_target_seconds,
             memo: value.memo,
         }
     }

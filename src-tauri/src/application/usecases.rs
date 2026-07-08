@@ -10,17 +10,27 @@ use super::{
     repositories::{
         ActiveTimer, NotificationCommandRepository, NotificationDispatchSummary,
         NotificationPreferenceRepository, RepositoryResult, SubtaskRecord, TaskRecord,
-        TaskTimerCommandRepository, WorkItemCreate,
+        TaskTimerCommandRepository, WorkItemCreate, WorkItemUpdate,
     },
 };
 
 const NOTIFICATION_DISPATCH_LIMIT: i64 = 20;
+const TIMER_TARGET_MAX_SECONDS: i64 = 60 * 60 * 24 * 30;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItemDraft {
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub memo: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkItemUpdateDraft {
+    pub title: String,
+    pub planned_start_date: Option<String>,
+    pub due_date: Option<String>,
+    pub timer_target_seconds: Option<i64>,
     pub memo: Option<String>,
 }
 
@@ -42,6 +52,32 @@ pub fn create_subtask(
     repository.create_subtask(
         task_id,
         validate_work_item_draft(draft, clock.now_utc_iso8601())?,
+    )
+}
+
+pub fn update_task(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    task_id: String,
+    draft: WorkItemUpdateDraft,
+) -> RepositoryResult<TaskRecord> {
+    let task_id = validate_identifier(&task_id, "タスクID")?;
+    repository.update_task(
+        task_id,
+        validate_work_item_update_draft(draft, clock.now_utc_iso8601())?,
+    )
+}
+
+pub fn update_subtask(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    subtask_id: String,
+    draft: WorkItemUpdateDraft,
+) -> RepositoryResult<SubtaskRecord> {
+    let subtask_id = validate_identifier(&subtask_id, "サブタスクID")?;
+    repository.update_subtask(
+        subtask_id,
+        validate_work_item_update_draft(draft, clock.now_utc_iso8601())?,
     )
 }
 
@@ -172,6 +208,40 @@ fn validate_work_item_draft(draft: WorkItemDraft, now: String) -> RepositoryResu
         memo,
         now,
     })
+}
+
+fn validate_work_item_update_draft(
+    draft: WorkItemUpdateDraft,
+    now: String,
+) -> RepositoryResult<WorkItemUpdate> {
+    let title = validate_title(&draft.title)?;
+    let planned_start_date = validate_optional_date(draft.planned_start_date.as_deref(), "開始日")?;
+    let due_date = validate_optional_date(draft.due_date.as_deref(), "終了日")?;
+    validate_date_range(&planned_start_date, &due_date)?;
+    let timer_target_seconds = validate_timer_target_seconds(draft.timer_target_seconds)?;
+    let memo = validate_memo(draft.memo.as_deref())?;
+
+    Ok(WorkItemUpdate {
+        title,
+        planned_start_date,
+        due_date,
+        timer_target_seconds,
+        memo,
+        now,
+    })
+}
+
+fn validate_timer_target_seconds(value: Option<i64>) -> RepositoryResult<Option<i64>> {
+    let Some(seconds) = value else {
+        return Ok(None);
+    };
+    if seconds <= 0 {
+        return Err("タイマー目標時間は1秒以上で入力してください".to_string());
+    }
+    if seconds > TIMER_TARGET_MAX_SECONDS {
+        return Err("タイマー目標時間は30日以内で入力してください".to_string());
+    }
+    Ok(Some(seconds))
 }
 
 fn validate_identifier(value: &str, field_label: &str) -> RepositoryResult<String> {

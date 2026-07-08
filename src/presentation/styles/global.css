@@ -117,6 +117,17 @@ button {
   min-width: 0;
 }
 
+.task-workspace {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.task-workspace.is-detail-open {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+}
+
 .left-navigation {
   align-self: stretch;
   background: #f9fbfb;
@@ -435,6 +446,178 @@ button {
   gap: 6px;
   margin-bottom: 14px;
   padding-bottom: 14px;
+}
+
+.task-detail-pane {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  max-height: calc(100vh - 108px);
+  min-width: 0;
+  overflow-y: auto;
+  padding: 16px;
+  position: sticky;
+  top: 20px;
+}
+
+.detail-pane-header,
+.detail-section-heading,
+.subtask-editor-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.detail-pane-header h2,
+.detail-section h3 {
+  letter-spacing: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail-pane-header h2 {
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.detail-section h3 {
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.detail-form {
+  display: grid;
+  gap: 10px;
+}
+
+.detail-form label {
+  display: grid;
+  gap: 5px;
+}
+
+.detail-form label span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.detail-form input,
+.detail-form textarea {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  min-height: 36px;
+  min-width: 0;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.detail-form textarea {
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.detail-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.detail-section {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+}
+
+.detail-metrics,
+.notification-plan-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-metrics span,
+.detail-chip,
+.notification-plan {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.3;
+  min-width: 0;
+  padding: 7px 8px;
+}
+
+.detail-chip {
+  background: #f8fafb;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.notification-plan {
+  display: grid;
+  gap: 2px;
+}
+
+.notification-plan strong {
+  color: var(--ink);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.notification-plan.is-enabled {
+  background: var(--soft-green);
+  border-color: #c9d9d2;
+}
+
+.subtask-create-form {
+  background: #f8fafb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.detail-subtask-list {
+  display: grid;
+  gap: 10px;
+}
+
+.subtask-editor {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.subtask-editor-tools {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.round-check-row {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 8px;
+  min-width: 0;
+}
+
+.round-check-row input {
+  accent-color: var(--green);
+  height: 18px;
+  width: 18px;
+}
+
+.subtask-edit-form {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
 }
 
 .task-row {
@@ -867,6 +1050,21 @@ button {
   .week-grid {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
   }
+
+  .task-workspace.is-detail-open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .task-detail-pane {
+    bottom: 16px;
+    box-shadow: 0 14px 36px rgb(23 32 38 / 22%);
+    max-height: none;
+    position: fixed;
+    right: 16px;
+    top: 88px;
+    width: min(380px, calc(100vw - 32px));
+    z-index: 12;
+  }
 }
 
 @media (max-width: 767px) {
@@ -902,6 +1100,16 @@ button {
     position: fixed;
     z-index: 10;
   }
+
+  .task-detail-pane {
+    border-radius: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: 0;
+    width: auto;
+    z-index: 30;
+  }
 }
 
 @media (max-width: 560px) {
@@ -934,6 +1142,12 @@ button {
 
   .composer-actions {
     display: grid;
+  }
+
+  .detail-actions,
+  .detail-metrics,
+  .notification-plan-grid {
+    grid-template-columns: 1fr;
   }
 
   .app-alert {
