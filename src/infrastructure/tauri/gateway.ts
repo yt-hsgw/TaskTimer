@@ -37,6 +37,10 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     }),
   completeSubtask: (subtaskId: string) =>
     invoke<Subtask>("complete_subtask", { request: { subtaskId } }),
+  toggleTaskFavorite: (taskId: string, isFavorite: boolean) =>
+    invoke<Task>("toggle_task_favorite", {
+      request: { taskId, isFavorite },
+    }),
   deleteTask: (taskId: string) =>
     invoke<void>("delete_task", { request: { taskId } }),
   deleteSubtask: (subtaskId: string) =>

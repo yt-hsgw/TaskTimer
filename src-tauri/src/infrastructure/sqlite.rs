@@ -298,6 +298,34 @@ impl TaskTimerCommandRepository for SqliteDatabase {
         })
     }
 
+    fn toggle_task_favorite(
+        &self,
+        task_id: String,
+        is_favorite: bool,
+        now: String,
+    ) -> RepositoryResult<TaskRecord> {
+        self.with_transaction(|transaction| {
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE tasks
+                    SET is_favorite = ?1,
+                        updated_at = ?2
+                    WHERE id = ?3
+                      AND deleted_at IS NULL
+                    ",
+                    params![is_favorite, now, task_id],
+                )
+                .map_err(|error| format!("お気に入り状態を更新できません: {error}"))?;
+
+            if updated != 1 {
+                return Err("お気に入り更新対象のタスクが存在しません".to_string());
+            }
+
+            select_existing_task_by_id(transaction, &task_id)
+        })
+    }
+
     fn delete_task(&self, task_id: String, now: String) -> RepositoryResult<()> {
         self.with_transaction(|transaction| {
             ensure_task_exists(transaction, &task_id)?;
@@ -2263,6 +2291,31 @@ mod tests {
             Some("2026-07-06T00:00:00Z")
         );
         assert_eq!(unchanged_subtask.status, WorkStatus::Todo);
+    }
+
+    #[test]
+    fn toggle_task_favorite_updates_task_and_read_model() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task = usecases::create_task(&database, &clock, draft("お気に入り対象")).expect("task");
+
+        let favorited = usecases::toggle_task_favorite(&database, &clock, task.id.clone(), true)
+            .expect("favorite task");
+        let rows = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("task rows");
+
+        assert!(favorited.is_favorite);
+        assert_eq!(favorited.updated_at, "2026-07-06T00:00:00Z");
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].is_favorite);
+
+        let unfavorited = usecases::toggle_task_favorite(&database, &clock, task.id.clone(), false)
+            .expect("unfavorite task");
+
+        assert!(!unfavorited.is_favorite);
     }
 
     #[test]

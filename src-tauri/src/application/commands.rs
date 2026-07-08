@@ -142,6 +142,21 @@ pub fn complete_subtask(
 }
 
 #[tauri::command]
+pub fn toggle_task_favorite(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::ToggleTaskFavoriteRequestDto,
+) -> Result<super::dto::TaskDto, String> {
+    super::usecases::toggle_task_favorite(
+        database.inner(),
+        clock.inner(),
+        request.task_id,
+        request.is_favorite,
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
 pub fn delete_task(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,

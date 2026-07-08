@@ -325,6 +325,9 @@ button {
 .inline-icon-button:disabled,
 .stop-button:disabled,
 .inline-danger-button:disabled,
+.favorite-button:disabled,
+.task-add-button:disabled,
+.task-check-button:disabled,
 .primary-button:disabled,
 .secondary-button:disabled,
 .danger-button:disabled {
@@ -411,40 +414,222 @@ button {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.task-list {
+.task-count-badge {
+  align-items: center;
+  background: #edf3f1;
+  border: 1px solid #c9d9d2;
+  border-radius: 999px;
+  color: var(--green);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 28px;
+  min-width: 36px;
+  padding: 0 10px;
+}
+
+.task-board {
   border-bottom: 1px solid var(--line);
   display: grid;
-  gap: 8px;
+  gap: 6px;
   margin-bottom: 14px;
   padding-bottom: 14px;
 }
 
-.task-list-item {
+.task-row {
+  align-items: center;
   background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--ink);
   display: grid;
-  gap: 3px;
-  min-height: 48px;
+  gap: 10px;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  min-height: 58px;
   min-width: 0;
-  padding: 8px 10px;
-  text-align: left;
+  padding: 8px;
 }
 
-.task-list-item.is-selected {
+.task-row.is-selected {
   background: #f8fbfa;
   border-color: #9bc4b4;
 }
 
-.task-list-item span,
+.task-row.is-done {
+  opacity: 0.62;
+}
+
+.task-row.is-done .task-row-title {
+  text-decoration: line-through;
+}
+
+.task-check-button {
+  align-items: center;
+  background: #ffffff;
+  border: 2px solid #8a9aa5;
+  border-radius: 50%;
+  color: var(--green);
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 900;
+  height: 24px;
+  justify-content: center;
+  justify-self: center;
+  min-width: 24px;
+  padding: 0;
+}
+
+.task-row.is-done .task-check-button {
+  background: var(--green);
+  border-color: var(--green);
+  color: #ffffff;
+}
+
+.task-row-content {
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.task-row-title {
+  font-weight: 700;
+  line-height: 1.25;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-row-meta {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 7px;
+  line-height: 1.25;
+}
+
+.task-progress {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(80px, 1fr) auto;
+  max-width: 280px;
+}
+
+.task-progress-bar {
+  background: #e7edf0;
+  border-radius: 999px;
+  display: block;
+  height: 6px;
+  overflow: hidden;
+}
+
+.task-progress-bar span {
+  background: var(--green);
+  display: block;
+  height: 100%;
+}
+
+.task-progress-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.favorite-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 18px;
+  height: 34px;
+  justify-content: center;
+  min-width: 34px;
+  padding: 0;
+}
+
+.favorite-button.is-favorite {
+  color: var(--gold);
+}
+
+.task-composer {
+  display: grid;
+  margin-top: 4px;
+}
+
+.task-add-button {
+  align-items: center;
+  background: #f8fbfa;
+  border: 1px dashed #b9c8c2;
+  border-radius: 6px;
+  color: var(--green);
+  display: inline-flex;
+  font-weight: 800;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.inline-create-form {
+  background: #f8fafb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin: 0;
+  padding: 12px;
+}
+
+.composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.completed-task-section {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 10px;
+}
+
+.completed-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  display: inline-flex;
+  font-weight: 800;
+  gap: 8px;
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 0;
+  text-align: left;
+}
+
+.completed-toggle strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.completed-task-list {
+  display: grid;
+  gap: 6px;
+}
+
 .subtask-row span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.task-list-item small,
 .subtask-row small {
   color: var(--muted);
   font-size: 12px;
@@ -735,6 +920,20 @@ button {
 
   .date-fields {
     grid-template-columns: 1fr;
+  }
+
+  .task-row {
+    grid-template-columns: 30px minmax(0, 1fr) 30px;
+    gap: 8px;
+  }
+
+  .task-progress {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .composer-actions {
+    display: grid;
   }
 
   .app-alert {
