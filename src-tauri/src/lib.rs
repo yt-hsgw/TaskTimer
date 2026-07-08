@@ -5,8 +5,8 @@ mod infrastructure;
 use application::commands::{
     complete_subtask, complete_task, create_subtask, create_task, delete_subtask, delete_task,
     dispatch_due_notifications, get_active_timer, get_notification_display_mode, health_check,
-    list_tasks, list_week_calendar_items, start_timer, stop_active_timer,
-    update_notification_display_mode,
+    list_task_lists, list_task_rows, list_tasks, list_week_calendar_items, start_timer,
+    stop_active_timer, update_notification_display_mode,
 };
 use infrastructure::{
     clock::SystemClock, notification::TauriLocalNotificationGateway, sqlite::SqliteDatabase,
@@ -27,6 +27,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             health_check,
             list_tasks,
+            list_task_lists,
+            list_task_rows,
             list_week_calendar_items,
             get_active_timer,
             get_notification_display_mode,

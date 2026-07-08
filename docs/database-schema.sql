@@ -4,18 +4,33 @@
 
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE task_lists (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE tasks (
   id TEXT PRIMARY KEY,
+  list_id TEXT NOT NULL DEFAULT 'default',
   title TEXT NOT NULL CHECK (length(trim(title)) > 0),
   status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
+  is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1)),
   planned_start_date TEXT NULL,
   due_date TEXT NULL,
+  timer_target_seconds INTEGER NULL CHECK (
+    timer_target_seconds IS NULL OR timer_target_seconds >= 0
+  ),
   memo TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0,
   completed_at TEXT NULL,
   deleted_at TEXT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  FOREIGN KEY (list_id) REFERENCES task_lists(id) ON DELETE RESTRICT,
   CHECK (
     planned_start_date IS NULL
     OR due_date IS NULL
@@ -30,6 +45,9 @@ CREATE TABLE subtasks (
   status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
   planned_start_date TEXT NULL,
   due_date TEXT NULL,
+  timer_target_seconds INTEGER NULL CHECK (
+    timer_target_seconds IS NULL OR timer_target_seconds >= 0
+  ),
   memo TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0,
   completed_at TEXT NULL,
@@ -95,8 +113,30 @@ CREATE TABLE notification_preferences (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE ui_preferences (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX task_lists_order_idx
+ON task_lists (sort_order, created_at)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX tasks_list_status_idx
+ON tasks (list_id, status, sort_order, created_at)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX tasks_favorite_idx
+ON tasks (is_favorite, sort_order, created_at)
+WHERE deleted_at IS NULL AND is_favorite = 1;
+
 CREATE INDEX tasks_calendar_idx
 ON tasks (planned_start_date, due_date)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX subtasks_task_status_idx
+ON subtasks (task_id, status)
 WHERE deleted_at IS NULL;
 
 CREATE INDEX subtasks_calendar_idx

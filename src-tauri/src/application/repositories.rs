@@ -52,12 +52,27 @@ pub struct WorkItemCreate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskListRecord {
+    pub id: String,
+    pub name: String,
+    pub sort_order: i64,
+    pub task_count: i64,
+    pub active_task_count: i64,
+    pub completed_task_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskRecord {
     pub id: String,
+    pub list_id: String,
     pub title: String,
     pub status: WorkStatus,
+    pub is_favorite: bool,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub timer_target_seconds: Option<i64>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -74,6 +89,7 @@ pub struct SubtaskRecord {
     pub status: WorkStatus,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub timer_target_seconds: Option<i64>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -86,6 +102,25 @@ pub struct SubtaskRecord {
 pub struct TaskWithSubtasksRecord {
     pub task: TaskRecord,
     pub subtasks: Vec<SubtaskRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskRowRecord {
+    pub id: String,
+    pub list_id: String,
+    pub title: String,
+    pub status: WorkStatus,
+    pub is_favorite: bool,
+    pub planned_start_date: Option<String>,
+    pub due_date: Option<String>,
+    pub timer_target_seconds: Option<i64>,
+    pub sort_order: i64,
+    pub completed_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub subtask_total_count: i64,
+    pub completed_subtask_count: i64,
+    pub active_timer_target: Option<WorkTargetRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,6 +157,14 @@ pub trait TimerRepository {
 pub trait TaskReadRepository {
     fn list_tasks_with_subtasks(&self, limit: i64)
         -> RepositoryResult<Vec<TaskWithSubtasksRecord>>;
+
+    fn list_task_lists(&self) -> RepositoryResult<Vec<TaskListRecord>>;
+
+    fn list_task_rows(
+        &self,
+        list_id: Option<&str>,
+        limit: i64,
+    ) -> RepositoryResult<Vec<TaskRowRecord>>;
 }
 
 pub trait TaskTimerCommandRepository {

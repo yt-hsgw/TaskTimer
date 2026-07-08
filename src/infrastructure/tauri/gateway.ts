@@ -3,6 +3,8 @@ import type {
   CreateSubtaskDraft,
   NotificationDispatchSummary,
   TaskTimerGateway,
+  TaskListItem,
+  TaskRow,
   TaskWithSubtasks,
   WeekCalendarItem,
   WorkItemDraft,
@@ -14,6 +16,9 @@ import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
 export const tauriTaskTimerGateway: TaskTimerGateway = {
   healthCheck: () => invoke<string>("health_check"),
   listTasks: () => invoke<TaskWithSubtasks[]>("list_tasks"),
+  listTaskLists: () => invoke<TaskListItem[]>("list_task_lists"),
+  listTaskRows: (listId?: string | null) =>
+    invoke<TaskRow[]>("list_task_rows", { listId: listId ?? null }),
   listWeekCalendarItems: (weekStartDate) =>
     invoke<WeekCalendarItem[]>("list_week_calendar_items", { weekStartDate }),
   getActiveTimer: () => invoke<ActiveTimer | null>("get_active_timer"),

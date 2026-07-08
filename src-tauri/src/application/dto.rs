@@ -7,8 +7,8 @@ use crate::domain::{
 
 use super::{
     repositories::{
-        ActiveTimer, NotificationDispatchSummary, SubtaskRecord, TaskRecord,
-        TaskWithSubtasksRecord, WeekCalendarItem,
+        ActiveTimer, NotificationDispatchSummary, SubtaskRecord, TaskListRecord, TaskRecord,
+        TaskRowRecord, TaskWithSubtasksRecord, WeekCalendarItem,
     },
     usecases::WorkItemDraft,
 };
@@ -103,10 +103,13 @@ pub struct ActiveTimerDto {
 #[serde(rename_all = "camelCase")]
 pub struct TaskDto {
     pub id: String,
+    pub list_id: String,
     pub title: String,
     pub status: String,
+    pub is_favorite: bool,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub timer_target_seconds: Option<i64>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -124,6 +127,7 @@ pub struct SubtaskDto {
     pub status: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub timer_target_seconds: Option<i64>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -136,10 +140,13 @@ pub struct SubtaskDto {
 #[serde(rename_all = "camelCase")]
 pub struct TaskWithSubtasksDto {
     pub id: String,
+    pub list_id: String,
     pub title: String,
     pub status: String,
+    pub is_favorite: bool,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub timer_target_seconds: Option<i64>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -147,6 +154,40 @@ pub struct TaskWithSubtasksDto {
     pub created_at: String,
     pub updated_at: String,
     pub subtasks: Vec<SubtaskDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskListDto {
+    pub id: String,
+    pub name: String,
+    pub sort_order: i64,
+    pub task_count: i64,
+    pub active_task_count: i64,
+    pub completed_task_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRowDto {
+    pub id: String,
+    pub list_id: String,
+    pub title: String,
+    pub status: String,
+    pub is_favorite: bool,
+    pub planned_start_date: Option<String>,
+    pub due_date: Option<String>,
+    pub timer_target_seconds: Option<i64>,
+    pub sort_order: i64,
+    pub completed_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub subtask_total_count: i64,
+    pub completed_subtask_count: i64,
+    pub active_timer_target: Option<WorkTargetRefDto>,
+    pub is_timer_active: bool,
 }
 
 #[derive(Serialize)]
@@ -219,10 +260,13 @@ impl From<TaskRecord> for TaskDto {
     fn from(value: TaskRecord) -> Self {
         Self {
             id: value.id,
+            list_id: value.list_id,
             title: value.title,
             status: value.status.as_str().to_string(),
+            is_favorite: value.is_favorite,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
+            timer_target_seconds: value.timer_target_seconds,
             memo: value.memo,
             sort_order: value.sort_order,
             completed_at: value.completed_at,
@@ -242,6 +286,7 @@ impl From<SubtaskRecord> for SubtaskDto {
             status: value.status.as_str().to_string(),
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
+            timer_target_seconds: value.timer_target_seconds,
             memo: value.memo,
             sort_order: value.sort_order,
             completed_at: value.completed_at,
@@ -256,10 +301,13 @@ impl From<TaskWithSubtasksRecord> for TaskWithSubtasksDto {
     fn from(value: TaskWithSubtasksRecord) -> Self {
         Self {
             id: value.task.id,
+            list_id: value.task.list_id,
             title: value.task.title,
             status: value.task.status.as_str().to_string(),
+            is_favorite: value.task.is_favorite,
             planned_start_date: value.task.planned_start_date,
             due_date: value.task.due_date,
+            timer_target_seconds: value.task.timer_target_seconds,
             memo: value.task.memo,
             sort_order: value.task.sort_order,
             completed_at: value.task.completed_at,
@@ -267,6 +315,50 @@ impl From<TaskWithSubtasksRecord> for TaskWithSubtasksDto {
             created_at: value.task.created_at,
             updated_at: value.task.updated_at,
             subtasks: value.subtasks.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<TaskListRecord> for TaskListDto {
+    fn from(value: TaskListRecord) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            sort_order: value.sort_order,
+            task_count: value.task_count,
+            active_task_count: value.active_task_count,
+            completed_task_count: value.completed_task_count,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+impl From<TaskRowRecord> for TaskRowDto {
+    fn from(value: TaskRowRecord) -> Self {
+        let active_timer_target = value.active_timer_target.map(|target| WorkTargetRefDto {
+            r#type: target.target_type.as_str().to_string(),
+            id: target.id,
+        });
+        let is_timer_active = active_timer_target.is_some();
+
+        Self {
+            id: value.id,
+            list_id: value.list_id,
+            title: value.title,
+            status: value.status.as_str().to_string(),
+            is_favorite: value.is_favorite,
+            planned_start_date: value.planned_start_date,
+            due_date: value.due_date,
+            timer_target_seconds: value.timer_target_seconds,
+            sort_order: value.sort_order,
+            completed_at: value.completed_at,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            subtask_total_count: value.subtask_total_count,
+            completed_subtask_count: value.completed_subtask_count,
+            active_timer_target,
+            is_timer_active,
         }
     }
 }
