@@ -3,10 +3,13 @@ export type WorkTargetType = "task" | "subtask";
 
 export type Task = {
   id: string;
+  listId: string;
   title: string;
   status: WorkStatus;
+  isFavorite: boolean;
   plannedStartDate: string | null;
   dueDate: string | null;
+  timerTargetSeconds: number | null;
   memo: string;
   sortOrder: number;
   completedAt: string | null;
@@ -22,6 +25,7 @@ export type Subtask = {
   status: WorkStatus;
   plannedStartDate: string | null;
   dueDate: string | null;
+  timerTargetSeconds: number | null;
   memo: string;
   sortOrder: number;
   completedAt: string | null;
@@ -34,4 +38,3 @@ export type WorkTargetRef = {
   type: WorkTargetType;
   id: string;
 };
-

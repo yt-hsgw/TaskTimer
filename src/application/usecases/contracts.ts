@@ -29,9 +29,41 @@ export type NotificationDispatchSummary = {
   lastError: string | null;
 };
 
+export type TaskListItem = {
+  id: string;
+  name: string;
+  sortOrder: number;
+  taskCount: number;
+  activeTaskCount: number;
+  completedTaskCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TaskRow = {
+  id: string;
+  listId: string;
+  title: string;
+  status: Task["status"];
+  isFavorite: boolean;
+  plannedStartDate: string | null;
+  dueDate: string | null;
+  timerTargetSeconds: number | null;
+  sortOrder: number;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  subtaskTotalCount: number;
+  completedSubtaskCount: number;
+  activeTimerTarget: WorkTargetRef | null;
+  isTimerActive: boolean;
+};
+
 export type TaskTimerGateway = {
   healthCheck(): Promise<string>;
   listTasks(): Promise<TaskWithSubtasks[]>;
+  listTaskLists(): Promise<TaskListItem[]>;
+  listTaskRows(listId?: string | null): Promise<TaskRow[]>;
   listWeekCalendarItems(weekStartDate: string): Promise<WeekCalendarItem[]>;
   getActiveTimer(): Promise<ActiveTimer | null>;
   getNotificationDisplayMode(): Promise<NotificationDisplayMode>;

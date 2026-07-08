@@ -1,17 +1,32 @@
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS task_lists (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
+  list_id TEXT NOT NULL DEFAULT 'default',
   title TEXT NOT NULL CHECK (length(trim(title)) > 0),
   status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
+  is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1)),
   planned_start_date TEXT NULL,
   due_date TEXT NULL,
+  timer_target_seconds INTEGER NULL CHECK (
+    timer_target_seconds IS NULL OR timer_target_seconds >= 0
+  ),
   memo TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0,
   completed_at TEXT NULL,
   deleted_at TEXT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  FOREIGN KEY (list_id) REFERENCES task_lists(id) ON DELETE RESTRICT,
   CHECK (
     planned_start_date IS NULL
     OR due_date IS NULL
@@ -26,6 +41,9 @@ CREATE TABLE IF NOT EXISTS subtasks (
   status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
   planned_start_date TEXT NULL,
   due_date TEXT NULL,
+  timer_target_seconds INTEGER NULL CHECK (
+    timer_target_seconds IS NULL OR timer_target_seconds >= 0
+  ),
   memo TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0,
   completed_at TEXT NULL,
@@ -88,6 +106,12 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
   id TEXT PRIMARY KEY CHECK (id = 'default'),
   display_mode TEXT NOT NULL CHECK (display_mode IN ('title_only', 'generic')),
   created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ui_preferences (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 

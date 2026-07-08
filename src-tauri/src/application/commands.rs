@@ -36,6 +36,29 @@ pub fn list_tasks(
 }
 
 #[tauri::command]
+pub fn list_task_lists(
+    database: DatabaseState<'_>,
+) -> Result<Vec<super::dto::TaskListDto>, String> {
+    use crate::application::repositories::TaskReadRepository;
+
+    database
+        .list_task_lists()
+        .map(|lists| lists.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
+pub fn list_task_rows(
+    database: DatabaseState<'_>,
+    list_id: Option<String>,
+) -> Result<Vec<super::dto::TaskRowDto>, String> {
+    use crate::application::repositories::TaskReadRepository;
+
+    database
+        .list_task_rows(list_id.as_deref(), TASK_LIST_LIMIT)
+        .map(|rows| rows.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
 pub fn get_active_timer(
     database: DatabaseState<'_>,
 ) -> Result<Option<super::dto::ActiveTimerDto>, String> {

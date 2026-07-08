@@ -20,8 +20,8 @@ use crate::{
     application::repositories::{
         target_ref, ActiveTimer, CalendarMarker, CalendarRepository, NotificationCommandRepository,
         NotificationJob, NotificationPreferenceRepository, RepositoryResult, SubtaskRecord,
-        TaskReadRepository, TaskRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord,
-        TimerRepository, WeekCalendarItem, WorkItemCreate,
+        TaskListRecord, TaskReadRepository, TaskRecord, TaskRowRecord, TaskTimerCommandRepository,
+        TaskWithSubtasksRecord, TimerRepository, WeekCalendarItem, WorkItemCreate,
     },
     domain::{
         notification::{NotificationDisplayMode, NotificationKind, NotificationRegistrationStatus},
@@ -32,6 +32,8 @@ use crate::{
 
 pub const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 
+const DEFAULT_TASK_LIST_ID: &str = "default";
+const DEFAULT_TASK_LIST_NAME: &str = "タスク";
 const DATE_FORMAT: &[time::format_description::FormatItem<'_>] =
     format_description!("[year]-[month]-[day]");
 
@@ -144,6 +146,21 @@ impl TaskReadRepository for SqliteDatabase {
             let subtasks = select_subtasks_for_task_list(connection, limit)?;
             Ok(build_task_tree(tasks, subtasks))
         })
+    }
+
+    fn list_task_lists(&self) -> RepositoryResult<Vec<TaskListRecord>> {
+        self.with_connection(select_task_lists)
+    }
+
+    fn list_task_rows(
+        &self,
+        list_id: Option<&str>,
+        limit: i64,
+    ) -> RepositoryResult<Vec<TaskRowRecord>> {
+        let limit = limit.clamp(1, 500);
+        let list_id = normalize_list_id(list_id);
+
+        self.with_connection(|connection| select_task_rows(connection, &list_id, limit))
     }
 }
 
@@ -403,7 +420,8 @@ fn insert_task(
     input: WorkItemCreate,
 ) -> RepositoryResult<TaskRecord> {
     let id = Uuid::new_v4().to_string();
-    let sort_order = next_task_sort_order(transaction)?;
+    ensure_default_task_list(transaction, &input.now)?;
+    let sort_order = next_task_sort_order(transaction, DEFAULT_TASK_LIST_ID)?;
     let planned_start_date = input.planned_start_date.clone();
     let due_date = input.due_date.clone();
     let now = input.now.clone();
@@ -411,13 +429,15 @@ fn insert_task(
         .execute(
             "
             INSERT INTO tasks (
-              id, title, status, planned_start_date, due_date, memo,
+              id, list_id, title, status, is_favorite,
+              planned_start_date, due_date, timer_target_seconds, memo,
               sort_order, created_at, updated_at
             )
-            VALUES (?1, ?2, 'todo', ?3, ?4, ?5, ?6, ?7, ?7)
+            VALUES (?1, ?2, ?3, 'todo', 0, ?4, ?5, NULL, ?6, ?7, ?8, ?8)
             ",
             params![
                 id,
+                DEFAULT_TASK_LIST_ID,
                 input.title,
                 input.planned_start_date,
                 input.due_date,
@@ -455,10 +475,10 @@ fn insert_subtask(
         .execute(
             "
             INSERT INTO subtasks (
-              id, task_id, title, status, planned_start_date, due_date, memo,
-              sort_order, created_at, updated_at
+              id, task_id, title, status, planned_start_date, due_date,
+              timer_target_seconds, memo, sort_order, created_at, updated_at
             )
-            VALUES (?1, ?2, ?3, 'todo', ?4, ?5, ?6, ?7, ?8, ?8)
+            VALUES (?1, ?2, ?3, 'todo', ?4, ?5, NULL, ?6, ?7, ?8, ?8)
             ",
             params![
                 id,
@@ -617,7 +637,8 @@ fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec
     let mut statement = connection
         .prepare(
             "
-            SELECT id, title, status, planned_start_date, due_date, memo,
+            SELECT id, list_id, title, status, is_favorite,
+                   planned_start_date, due_date, timer_target_seconds, memo,
                    sort_order, completed_at, deleted_at, created_at, updated_at
             FROM tasks
             WHERE deleted_at IS NULL
@@ -632,6 +653,138 @@ fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec
         .map_err(|error| format!("タスク一覧を取得できません: {error}"))?;
 
     rows.map(|row| row.map_err(|error| format!("タスク行を読めません: {error}")))
+        .collect()
+}
+
+fn select_task_lists(connection: &Connection) -> RepositoryResult<Vec<TaskListRecord>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT task_lists.id,
+                   task_lists.name,
+                   task_lists.sort_order,
+                   task_lists.created_at,
+                   task_lists.updated_at,
+                   COUNT(tasks.id) AS task_count,
+                   COALESCE(SUM(CASE WHEN tasks.status NOT IN ('done', 'archived') THEN 1 ELSE 0 END), 0)
+                     AS active_task_count,
+                   COALESCE(SUM(CASE WHEN tasks.status = 'done' THEN 1 ELSE 0 END), 0)
+                     AS completed_task_count
+            FROM task_lists
+            LEFT JOIN tasks
+              ON tasks.list_id = task_lists.id
+             AND tasks.deleted_at IS NULL
+            WHERE task_lists.deleted_at IS NULL
+            GROUP BY task_lists.id,
+                     task_lists.name,
+                     task_lists.sort_order,
+                     task_lists.created_at,
+                     task_lists.updated_at
+            ORDER BY task_lists.sort_order ASC,
+                     task_lists.created_at ASC
+            ",
+        )
+        .map_err(|error| format!("タスクリスト一覧クエリを準備できません: {error}"))?;
+
+    let rows = statement
+        .query_map([], |row| {
+            Ok(TaskListRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                sort_order: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+                task_count: row.get(5)?,
+                active_task_count: row.get(6)?,
+                completed_task_count: row.get(7)?,
+            })
+        })
+        .map_err(|error| format!("タスクリスト一覧を取得できません: {error}"))?;
+
+    rows.map(|row| row.map_err(|error| format!("タスクリスト行を読めません: {error}")))
+        .collect()
+}
+
+fn select_task_rows(
+    connection: &Connection,
+    list_id: &str,
+    limit: i64,
+) -> RepositoryResult<Vec<TaskRowRecord>> {
+    let mut statement = connection
+        .prepare(
+            "
+            WITH active_timer AS (
+              SELECT timer_sessions.target_type,
+                     timer_sessions.target_id,
+                     subtasks.task_id AS parent_task_id
+              FROM timer_sessions
+              LEFT JOIN subtasks
+                ON timer_sessions.target_type = 'subtask'
+               AND timer_sessions.target_id = subtasks.id
+               AND subtasks.deleted_at IS NULL
+              WHERE timer_sessions.stopped_at IS NULL
+                AND timer_sessions.deleted_at IS NULL
+              LIMIT 1
+            )
+            SELECT tasks.id,
+                   tasks.list_id,
+                   tasks.title,
+                   tasks.status,
+                   tasks.is_favorite,
+                   tasks.planned_start_date,
+                   tasks.due_date,
+                   tasks.timer_target_seconds,
+                   tasks.sort_order,
+                   tasks.completed_at,
+                   tasks.created_at,
+                   tasks.updated_at,
+                   COUNT(subtasks.id) AS subtask_total_count,
+                   COALESCE(SUM(CASE WHEN subtasks.status = 'done' THEN 1 ELSE 0 END), 0)
+                     AS completed_subtask_count,
+                   active_timer.target_type AS active_target_type,
+                   active_timer.target_id AS active_target_id
+            FROM tasks
+            LEFT JOIN subtasks
+              ON subtasks.task_id = tasks.id
+             AND subtasks.deleted_at IS NULL
+            LEFT JOIN active_timer
+              ON (
+                active_timer.target_type = 'task'
+                AND active_timer.target_id = tasks.id
+              )
+              OR (
+                active_timer.target_type = 'subtask'
+                AND active_timer.parent_task_id = tasks.id
+              )
+            WHERE tasks.deleted_at IS NULL
+              AND tasks.list_id = ?1
+            GROUP BY tasks.id,
+                     tasks.list_id,
+                     tasks.title,
+                     tasks.status,
+                     tasks.is_favorite,
+                     tasks.planned_start_date,
+                     tasks.due_date,
+                     tasks.timer_target_seconds,
+                     tasks.sort_order,
+                     tasks.completed_at,
+                     tasks.created_at,
+                     tasks.updated_at,
+                     active_timer.target_type,
+                     active_timer.target_id
+            ORDER BY CASE WHEN tasks.status = 'done' THEN 1 ELSE 0 END ASC,
+                     tasks.sort_order ASC,
+                     tasks.created_at ASC
+            LIMIT ?2
+            ",
+        )
+        .map_err(|error| format!("タスク行Read Modelクエリを準備できません: {error}"))?;
+
+    let rows = statement
+        .query_map(params![list_id, limit], map_task_read_model_row)
+        .map_err(|error| format!("タスク行Read Modelを取得できません: {error}"))?;
+
+    rows.map(|row| row.map_err(|error| format!("タスク行Read Modelを読めません: {error}")))
         .collect()
 }
 
@@ -650,9 +803,10 @@ fn select_subtasks_for_task_list(
               LIMIT ?1
             )
             SELECT subtasks.id, subtasks.task_id, subtasks.title, subtasks.status,
-                   subtasks.planned_start_date, subtasks.due_date, subtasks.memo,
-                   subtasks.sort_order, subtasks.completed_at, subtasks.deleted_at,
-                   subtasks.created_at, subtasks.updated_at
+                   subtasks.planned_start_date, subtasks.due_date,
+                   subtasks.timer_target_seconds, subtasks.memo, subtasks.sort_order,
+                   subtasks.completed_at, subtasks.deleted_at, subtasks.created_at,
+                   subtasks.updated_at
             FROM subtasks
             INNER JOIN selected_tasks
               ON selected_tasks.id = subtasks.task_id
@@ -928,15 +1082,16 @@ fn ensure_no_active_timer(connection: &Connection) -> RepositoryResult<()> {
     }
 }
 
-fn next_task_sort_order(connection: &Connection) -> RepositoryResult<i64> {
+fn next_task_sort_order(connection: &Connection, list_id: &str) -> RepositoryResult<i64> {
     connection
         .query_row(
             "
             SELECT COALESCE(MAX(sort_order), -1) + 1
             FROM tasks
-            WHERE deleted_at IS NULL
+            WHERE list_id = ?1
+              AND deleted_at IS NULL
             ",
-            [],
+            params![list_id],
             |row| row.get(0),
         )
         .map_err(|error| format!("タスクの並び順を取得できません: {error}"))
@@ -1026,7 +1181,8 @@ fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<Task
     connection
         .query_row(
             "
-            SELECT id, title, status, planned_start_date, due_date, memo,
+            SELECT id, list_id, title, status, is_favorite,
+                   planned_start_date, due_date, timer_target_seconds, memo,
                    sort_order, completed_at, deleted_at, created_at, updated_at
             FROM tasks
             WHERE id = ?1
@@ -1041,7 +1197,8 @@ fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryRe
     connection
         .query_row(
             "
-            SELECT id, title, status, planned_start_date, due_date, memo,
+            SELECT id, list_id, title, status, is_favorite,
+                   planned_start_date, due_date, timer_target_seconds, memo,
                    sort_order, completed_at, deleted_at, created_at, updated_at
             FROM tasks
             WHERE id = ?1
@@ -1057,8 +1214,9 @@ fn select_subtask_by_id(connection: &Connection, id: &str) -> RepositoryResult<S
     connection
         .query_row(
             "
-            SELECT id, task_id, title, status, planned_start_date, due_date, memo,
-                   sort_order, completed_at, deleted_at, created_at, updated_at
+            SELECT id, task_id, title, status, planned_start_date, due_date,
+                   timer_target_seconds, memo, sort_order, completed_at, deleted_at,
+                   created_at, updated_at
             FROM subtasks
             WHERE id = ?1
             ",
@@ -1075,8 +1233,9 @@ fn select_existing_subtask_by_id(
     connection
         .query_row(
             "
-            SELECT id, task_id, title, status, planned_start_date, due_date, memo,
-                   sort_order, completed_at, deleted_at, created_at, updated_at
+            SELECT id, task_id, title, status, planned_start_date, due_date,
+                   timer_target_seconds, memo, sort_order, completed_at, deleted_at,
+                   created_at, updated_at
             FROM subtasks
             WHERE id = ?1
               AND deleted_at IS NULL
@@ -1090,16 +1249,19 @@ fn select_existing_subtask_by_id(
 fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
     Ok(TaskRecord {
         id: row.get(0)?,
-        title: row.get(1)?,
-        status: WorkStatus::from_db(&row.get::<_, String>(2)?).map_err(db_value_error)?,
-        planned_start_date: row.get(3)?,
-        due_date: row.get(4)?,
-        memo: row.get(5)?,
-        sort_order: row.get(6)?,
-        completed_at: row.get(7)?,
-        deleted_at: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        list_id: row.get(1)?,
+        title: row.get(2)?,
+        status: WorkStatus::from_db(&row.get::<_, String>(3)?).map_err(db_value_error)?,
+        is_favorite: row.get::<_, i64>(4)? != 0,
+        planned_start_date: row.get(5)?,
+        due_date: row.get(6)?,
+        timer_target_seconds: row.get(7)?,
+        memo: row.get(8)?,
+        sort_order: row.get(9)?,
+        completed_at: row.get(10)?,
+        deleted_at: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
 
@@ -1111,12 +1273,43 @@ fn map_subtask_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubtaskRecord> {
         status: WorkStatus::from_db(&row.get::<_, String>(3)?).map_err(db_value_error)?,
         planned_start_date: row.get(4)?,
         due_date: row.get(5)?,
-        memo: row.get(6)?,
-        sort_order: row.get(7)?,
-        completed_at: row.get(8)?,
-        deleted_at: row.get(9)?,
+        timer_target_seconds: row.get(6)?,
+        memo: row.get(7)?,
+        sort_order: row.get(8)?,
+        completed_at: row.get(9)?,
+        deleted_at: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+    })
+}
+
+fn map_task_read_model_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRowRecord> {
+    let active_target_type_text: Option<String> = row.get(14)?;
+    let active_target_id: Option<String> = row.get(15)?;
+    let active_timer_target = match (active_target_type_text, active_target_id) {
+        (Some(target_type_text), Some(target_id)) => Some(target_ref(
+            WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?,
+            target_id,
+        )),
+        _ => None,
+    };
+
+    Ok(TaskRowRecord {
+        id: row.get(0)?,
+        list_id: row.get(1)?,
+        title: row.get(2)?,
+        status: WorkStatus::from_db(&row.get::<_, String>(3)?).map_err(db_value_error)?,
+        is_favorite: row.get::<_, i64>(4)? != 0,
+        planned_start_date: row.get(5)?,
+        due_date: row.get(6)?,
+        timer_target_seconds: row.get(7)?,
+        sort_order: row.get(8)?,
+        completed_at: row.get(9)?,
         created_at: row.get(10)?,
         updated_at: row.get(11)?,
+        subtask_total_count: row.get(12)?,
+        completed_subtask_count: row.get(13)?,
+        active_timer_target,
     })
 }
 
@@ -1225,10 +1418,185 @@ fn configure_connection(connection: &Connection) -> RepositoryResult<()> {
 fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
     connection
         .execute_batch(INITIAL_SCHEMA)
-        .map_err(|error| format!("SQLite初期マイグレーションに失敗しました: {error}"))
+        .map_err(|error| format!("SQLite初期マイグレーションに失敗しました: {error}"))?;
+    run_ui_read_model_migration(connection)
+}
+
+fn run_ui_read_model_migration(connection: &Connection) -> RepositoryResult<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS task_lists (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              deleted_at TEXT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ui_preferences (
+              key TEXT PRIMARY KEY,
+              value TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            ",
+        )
+        .map_err(|error| format!("UI Read Model用テーブルを作成できません: {error}"))?;
+
+    ensure_column(
+        connection,
+        "tasks",
+        "list_id",
+        "ALTER TABLE tasks ADD COLUMN list_id TEXT NULL",
+    )?;
+    ensure_column(
+        connection,
+        "tasks",
+        "is_favorite",
+        "ALTER TABLE tasks ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1))",
+    )?;
+    ensure_column(
+        connection,
+        "tasks",
+        "timer_target_seconds",
+        "ALTER TABLE tasks ADD COLUMN timer_target_seconds INTEGER NULL CHECK (timer_target_seconds IS NULL OR timer_target_seconds >= 0)",
+    )?;
+    ensure_column(
+        connection,
+        "subtasks",
+        "timer_target_seconds",
+        "ALTER TABLE subtasks ADD COLUMN timer_target_seconds INTEGER NULL CHECK (timer_target_seconds IS NULL OR timer_target_seconds >= 0)",
+    )?;
+
+    let now = current_timestamp_value(connection)?;
+    ensure_default_task_list(connection, &now)?;
+    connection
+        .execute(
+            "
+            UPDATE tasks
+            SET list_id = ?1
+            WHERE list_id IS NULL
+               OR length(trim(list_id)) = 0
+            ",
+            params![DEFAULT_TASK_LIST_ID],
+        )
+        .map_err(|error| format!("既存タスクの初期リスト移行に失敗しました: {error}"))?;
+
+    connection
+        .execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS task_lists_order_idx
+            ON task_lists (sort_order, created_at)
+            WHERE deleted_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS tasks_list_status_idx
+            ON tasks (list_id, status, sort_order, created_at)
+            WHERE deleted_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS tasks_favorite_idx
+            ON tasks (is_favorite, sort_order, created_at)
+            WHERE deleted_at IS NULL AND is_favorite = 1;
+
+            CREATE INDEX IF NOT EXISTS subtasks_task_status_idx
+            ON subtasks (task_id, status)
+            WHERE deleted_at IS NULL;
+            ",
+        )
+        .map_err(|error| format!("UI Read Model用インデックスを作成できません: {error}"))?;
+
+    seed_default_ui_preferences(connection)
+}
+
+fn ensure_column(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+    alter_sql: &str,
+) -> RepositoryResult<()> {
+    if column_exists(connection, table_name, column_name)? {
+        return Ok(());
+    }
+
+    connection
+        .execute(alter_sql, [])
+        .map(|_| ())
+        .map_err(|error| format!("{table_name}.{column_name} カラムを追加できません: {error}"))
+}
+
+fn column_exists(
+    connection: &Connection,
+    table_name: &str,
+    column_name: &str,
+) -> RepositoryResult<bool> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table_name})"))
+        .map_err(|error| format!("{table_name} のカラム一覧を取得できません: {error}"))?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| format!("{table_name} のカラム一覧を読めません: {error}"))?;
+
+    for column in columns {
+        if column.map_err(|error| format!("{table_name} のカラム名を読めません: {error}"))?
+            == column_name
+        {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn ensure_default_task_list(connection: &Connection, now: &str) -> RepositoryResult<()> {
+    connection
+        .execute(
+            "
+            INSERT OR IGNORE INTO task_lists (
+              id, name, sort_order, created_at, updated_at
+            )
+            VALUES (?1, ?2, 0, ?3, ?3)
+            ",
+            params![DEFAULT_TASK_LIST_ID, DEFAULT_TASK_LIST_NAME, now],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("初期タスクリストを保存できません: {error}"))
+}
+
+fn seed_default_ui_preferences(connection: &Connection) -> RepositoryResult<()> {
+    connection
+        .execute(
+            "
+            INSERT OR IGNORE INTO ui_preferences (key, value, updated_at)
+            VALUES ('left_pane_open', 'true', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                   ('last_view', 'tasks', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                   ('last_task_list_id', ?1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            ",
+            params![DEFAULT_TASK_LIST_ID],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("UI設定の初期化に失敗しました: {error}"))
+}
+
+fn normalize_list_id(list_id: Option<&str>) -> String {
+    list_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_TASK_LIST_ID)
+        .to_string()
+}
+
+fn current_timestamp_value(connection: &Connection) -> RepositoryResult<String> {
+    connection
+        .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", [], |row| {
+            row.get(0)
+        })
+        .map_err(|error| format!("現在時刻を取得できません: {error}"))
 }
 
 fn seed_default_preferences(connection: &Connection) -> RepositoryResult<()> {
+    let now = current_timestamp_value(connection)?;
+    ensure_default_task_list(connection, &now)?;
+    seed_default_ui_preferences(connection)?;
     connection
         .execute(
             "
@@ -1569,6 +1937,89 @@ mod tests {
     }
 
     #[test]
+    fn migration_backfills_ui_read_model_defaults_for_existing_database() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        configure_connection(&connection).expect("configure");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE tasks (
+                  id TEXT PRIMARY KEY,
+                  title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+                  status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
+                  planned_start_date TEXT NULL,
+                  due_date TEXT NULL,
+                  memo TEXT NOT NULL DEFAULT '',
+                  sort_order INTEGER NOT NULL DEFAULT 0,
+                  completed_at TEXT NULL,
+                  deleted_at TEXT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE subtasks (
+                  id TEXT PRIMARY KEY,
+                  task_id TEXT NOT NULL,
+                  title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+                  status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
+                  planned_start_date TEXT NULL,
+                  due_date TEXT NULL,
+                  memo TEXT NOT NULL DEFAULT '',
+                  sort_order INTEGER NOT NULL DEFAULT 0,
+                  completed_at TEXT NULL,
+                  deleted_at TEXT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE RESTRICT
+                );
+
+                INSERT INTO tasks (
+                  id, title, status, memo, sort_order, created_at, updated_at
+                )
+                VALUES (
+                  'legacy-task', '既存タスク', 'todo', '', 0,
+                  '2026-07-06T00:00:00Z', '2026-07-06T00:00:00Z'
+                );
+                ",
+            )
+            .expect("legacy schema");
+
+        run_initial_migration(&connection).expect("migrate legacy database");
+
+        let (list_id, is_favorite, timer_target_seconds): (String, i64, Option<i64>) = connection
+            .query_row(
+                "
+                SELECT list_id, is_favorite, timer_target_seconds
+                FROM tasks
+                WHERE id = 'legacy-task'
+                ",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("migrated task");
+        let task_list_name: String = connection
+            .query_row(
+                "SELECT name FROM task_lists WHERE id = 'default'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("default task list");
+        let ui_preference_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM ui_preferences", [], |row| row.get(0))
+            .expect("ui preferences");
+
+        assert_eq!(list_id, DEFAULT_TASK_LIST_ID);
+        assert_eq!(is_favorite, 0);
+        assert_eq!(timer_target_seconds, None);
+        assert_eq!(task_list_name, DEFAULT_TASK_LIST_NAME);
+        assert_eq!(ui_preference_count, 3);
+        assert!(
+            column_exists(&connection, "subtasks", "timer_target_seconds")
+                .expect("subtask timer target column")
+        );
+    }
+
+    #[test]
     fn schema_allows_only_one_active_timer() {
         let connection = Connection::open_in_memory().expect("in-memory database");
         configure_connection(&connection).expect("configure");
@@ -1715,6 +2166,68 @@ mod tests {
         assert_eq!(tasks[0].subtasks[0].title, "画面に表示");
 
         fs::remove_dir_all(data_dir).expect("cleanup");
+    }
+
+    #[test]
+    fn task_row_read_model_aggregates_subtask_progress_and_active_timer() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let start_clock = FixedClock {
+            now: "2026-07-06T00:05:00Z",
+        };
+        let task = usecases::create_task(
+            &database,
+            &create_clock,
+            usecases::WorkItemDraft {
+                title: "UI設計".to_string(),
+                planned_start_date: Some("2026-07-06".to_string()),
+                due_date: Some("2026-07-07".to_string()),
+                memo: Some("Read Modelに含めない".to_string()),
+            },
+        )
+        .expect("create task");
+        let first_subtask =
+            usecases::create_subtask(&database, &create_clock, task.id.clone(), draft("調査"))
+                .expect("create first subtask");
+        let second_subtask =
+            usecases::create_subtask(&database, &create_clock, task.id.clone(), draft("反映"))
+                .expect("create second subtask");
+
+        usecases::complete_subtask(&database, &create_clock, first_subtask.id)
+            .expect("complete first subtask");
+        usecases::start_timer(
+            &database,
+            &start_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Subtask,
+                id: second_subtask.id.clone(),
+            },
+        )
+        .expect("start subtask timer");
+
+        let lists = database.list_task_lists().expect("list task lists");
+        let rows = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("list task rows");
+
+        assert_eq!(lists.len(), 1);
+        assert_eq!(lists[0].id, DEFAULT_TASK_LIST_ID);
+        assert_eq!(lists[0].task_count, 1);
+        assert_eq!(lists[0].active_task_count, 1);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, "UI設計");
+        assert_eq!(rows[0].list_id, DEFAULT_TASK_LIST_ID);
+        assert_eq!(rows[0].subtask_total_count, 2);
+        assert_eq!(rows[0].completed_subtask_count, 1);
+        assert_eq!(
+            rows[0].active_timer_target,
+            Some(WorkTargetRef {
+                target_type: WorkTargetType::Subtask,
+                id: second_subtask.id,
+            })
+        );
     }
 
     #[test]
