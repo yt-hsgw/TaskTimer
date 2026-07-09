@@ -1,11 +1,14 @@
 import type { WeekCalendarItem } from "../../application/usecases/contracts";
+import type { WorkTargetRef } from "../../domain/task/types";
 
 type WeekCalendarProps = {
   weekStartDate: string;
   items: WeekCalendarItem[];
   isLoading: boolean;
+  selectedTarget: WorkTargetRef | null;
   onPreviousWeek(): void;
   onNextWeek(): void;
+  onSelectItem(item: WeekCalendarItem): void;
 };
 
 const dayLabels = ["月", "火", "水", "木", "金", "土", "日"];
@@ -19,8 +22,10 @@ export function WeekCalendar({
   weekStartDate,
   items,
   isLoading,
+  selectedTarget,
   onPreviousWeek,
   onNextWeek,
+  onSelectItem,
 }: WeekCalendarProps) {
   const days = buildWeekDays(weekStartDate);
 
@@ -61,9 +66,16 @@ export function WeekCalendar({
                 ) : null}
                 {dayItems.map((item) => (
                   <button
-                    className={`calendar-item marker-${item.marker}`}
+                    className={`calendar-item marker-${item.marker} ${
+                      isSameTarget(item.target, selectedTarget)
+                        ? "is-selected"
+                        : ""
+                    }`}
                     type="button"
                     key={item.id}
+                    aria-pressed={isSameTarget(item.target, selectedTarget)}
+                    aria-label={`${item.title}の${markerLabels[item.marker]}を開く`}
+                    onClick={() => onSelectItem(item)}
                   >
                     <span>{item.title}</span>
                     <small>{markerLabels[item.marker]}</small>
@@ -75,6 +87,12 @@ export function WeekCalendar({
         })}
       </div>
     </section>
+  );
+}
+
+function isSameTarget(target: WorkTargetRef, selectedTarget: WorkTargetRef | null) {
+  return (
+    selectedTarget?.type === target.type && selectedTarget.id === target.id
   );
 }
 
