@@ -24,6 +24,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [016 glib advisory監視を自動化する](016-glib-advisory-watch.md) / GitHub #22
 - [017 v0.1.0のRelease target検証を追加する](017-release-target-guard.md) / GitHub #20
 - [018 macOS署名・公証preflightを追加する](018-macos-signing-preflight.md) / GitHub #24
+- [019 次の作業リストを現状に合わせて更新する](019-next-actions-refresh.md) / GitHub #20
 
 ## 運用
 
