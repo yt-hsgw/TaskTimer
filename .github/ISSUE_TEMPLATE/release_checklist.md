@@ -69,7 +69,9 @@ assignees: ""
 ## 配布判断
 
 - [ ] GitHub Release tagが `app-vX.Y.Z` 形式
+- [ ] Release tagが意図したリリース対象commitを指している
 - [ ] Draft Releaseとして作成されている
+- [ ] Draft Release artifactがRelease tagと同じcommitから生成されている
 - [ ] macOS署名・公証SecretsがGitHub Secretsに登録されている
 - [ ] `docs/releases/<version>.md` のRelease notes草案を確認した
 - [ ] Release notesに変更点を記載した

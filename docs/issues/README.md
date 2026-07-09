@@ -22,6 +22,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [014 macOS署名と公証を設定する](014-release-macos-signing-notarization.md) / GitHub #24
 - [015 v0.1.0公開判定資料を整える](015-release-v010-readiness.md) / GitHub #20
 - [016 glib advisory監視を自動化する](016-glib-advisory-watch.md) / GitHub #22
+- [017 v0.1.0のRelease target検証を追加する](017-release-target-guard.md) / GitHub #20
 
 ## 運用
 
