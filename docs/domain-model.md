@@ -53,6 +53,7 @@ erDiagram
     string timer_session_id FK
     datetime paused_at
     datetime resumed_at
+    datetime deleted_at
     datetime created_at
   }
 
@@ -191,7 +192,9 @@ erDiagram
 - 1つのアクティブタイマーに対して、未再開の一時停止区間は最大1件。
 - 一時停止中のタイマーはアクティブタイマー制約上は実行中として扱い、別対象のタイマー開始はできない。
 - 再開時に `resumed_at` を記録する。
-- 終了時に未再開の一時停止区間がある場合、終了時刻を `resumed_at` 相当として扱うか、終了処理で閉じる。
+- 終了時に未再開の一時停止区間がある場合、終了時刻で `resumed_at` を閉じる。
+- `elapsed_seconds` は一時停止区間の合計秒数を除外して確定する。
+- ソフト削除済みタイマーの一時停止区間は通常の計算対象から除外する。
 
 ### NotificationRule
 
@@ -227,6 +230,8 @@ erDiagram
 - `target_type` は `task` または `subtask`。
 - `frequency` は `daily`, `weekly`, `monthly` などの許可値に限定する。
 - `interval` は1以上の整数とする。
+- MVPでは `frequency` は `daily`, `weekly`, `monthly` に限定し、`interval` は1以上365以下とする。
+- 繰り返しを有効化する場合、開始予定日または期限日の少なくとも一方が必要。
 - 繰り返しタスクの次回生成または期限更新は、完了操作の副作用ではなくApplication Use Caseで明示的に扱う。
 - 無限生成を避けるため、1回の操作で作成する次回タスクは最大1件とする。
 

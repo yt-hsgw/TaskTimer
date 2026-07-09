@@ -1,5 +1,6 @@
 use crate::domain::{
     notification::{build_notification_content, NotificationDisplayMode},
+    recurrence::RecurrenceFrequency,
     task::{validate_date_range, validate_memo, validate_optional_date, validate_title},
     timer::WorkTargetRef,
 };
@@ -9,13 +10,14 @@ use super::{
     notification::{LocalNotificationGateway, LocalNotificationMessage},
     repositories::{
         ActiveTimer, NotificationCommandRepository, NotificationDispatchSummary,
-        NotificationPreferenceRepository, RepositoryResult, SubtaskRecord, TaskRecord,
-        TaskTimerCommandRepository, WorkItemCreate, WorkItemUpdate,
+        NotificationPreferenceRepository, RecurrenceRuleInput, RepositoryResult, SubtaskRecord,
+        TaskRecord, TaskTimerCommandRepository, WorkItemCreate, WorkItemUpdate,
     },
 };
 
 const NOTIFICATION_DISPATCH_LIMIT: i64 = 20;
 const TIMER_TARGET_MAX_SECONDS: i64 = 60 * 60 * 24 * 30;
+const RECURRENCE_INTERVAL_MAX: i64 = 365;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItemDraft {
@@ -31,7 +33,14 @@ pub struct WorkItemUpdateDraft {
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
+    pub recurrence_rule: Option<RecurrenceRuleDraft>,
     pub memo: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecurrenceRuleDraft {
+    pub frequency: String,
+    pub interval: i64,
 }
 
 pub fn create_task(
@@ -91,6 +100,20 @@ pub fn start_timer(
         id: validate_identifier(&target.id, "対象ID")?,
     };
     repository.start_timer(target, clock.now_utc_iso8601())
+}
+
+pub fn pause_active_timer(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+) -> RepositoryResult<ActiveTimer> {
+    repository.pause_active_timer(clock.now_utc_iso8601())
+}
+
+pub fn resume_active_timer(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+) -> RepositoryResult<ActiveTimer> {
+    repository.resume_active_timer(clock.now_utc_iso8601())
 }
 
 pub fn stop_active_timer(
@@ -219,6 +242,8 @@ fn validate_work_item_update_draft(
     let due_date = validate_optional_date(draft.due_date.as_deref(), "終了日")?;
     validate_date_range(&planned_start_date, &due_date)?;
     let timer_target_seconds = validate_timer_target_seconds(draft.timer_target_seconds)?;
+    let recurrence_rule =
+        validate_recurrence_rule(draft.recurrence_rule, &planned_start_date, &due_date)?;
     let memo = validate_memo(draft.memo.as_deref())?;
 
     Ok(WorkItemUpdate {
@@ -226,6 +251,7 @@ fn validate_work_item_update_draft(
         planned_start_date,
         due_date,
         timer_target_seconds,
+        recurrence_rule,
         memo,
         now,
     })
@@ -242,6 +268,28 @@ fn validate_timer_target_seconds(value: Option<i64>) -> RepositoryResult<Option<
         return Err("タイマー目標時間は30日以内で入力してください".to_string());
     }
     Ok(Some(seconds))
+}
+
+fn validate_recurrence_rule(
+    value: Option<RecurrenceRuleDraft>,
+    planned_start_date: &Option<String>,
+    due_date: &Option<String>,
+) -> RepositoryResult<Option<RecurrenceRuleInput>> {
+    let Some(rule) = value else {
+        return Ok(None);
+    };
+    if planned_start_date.is_none() && due_date.is_none() {
+        return Err("繰り返し設定には開始日または終了日が必要です".to_string());
+    }
+    if rule.interval < 1 || rule.interval > RECURRENCE_INTERVAL_MAX {
+        return Err(format!(
+            "繰り返し間隔は1以上{RECURRENCE_INTERVAL_MAX}以下で入力してください"
+        ));
+    }
+    Ok(Some(RecurrenceRuleInput {
+        frequency: RecurrenceFrequency::from_db(&rule.frequency)?,
+        interval: rule.interval,
+    }))
 }
 
 fn validate_identifier(value: &str, field_label: &str) -> RepositoryResult<String> {

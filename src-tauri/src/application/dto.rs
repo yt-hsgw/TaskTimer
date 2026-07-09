@@ -7,10 +7,10 @@ use crate::domain::{
 
 use super::{
     repositories::{
-        ActiveTimer, NotificationDispatchSummary, SubtaskRecord, TaskListRecord, TaskRecord,
-        TaskRowRecord, TaskWithSubtasksRecord, WeekCalendarItem,
+        ActiveTimer, NotificationDispatchSummary, RecurrenceRuleRecord, SubtaskRecord,
+        TaskListRecord, TaskRecord, TaskRowRecord, TaskWithSubtasksRecord, WeekCalendarItem,
     },
-    usecases::{WorkItemDraft, WorkItemUpdateDraft},
+    usecases::{RecurrenceRuleDraft, WorkItemDraft, WorkItemUpdateDraft},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -47,6 +47,7 @@ pub struct UpdateTaskRequestDto {
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
+    pub recurrence_rule: Option<RecurrenceRuleRequestDto>,
     pub memo: Option<String>,
 }
 
@@ -58,7 +59,15 @@ pub struct UpdateSubtaskRequestDto {
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
+    pub recurrence_rule: Option<RecurrenceRuleRequestDto>,
     pub memo: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecurrenceRuleRequestDto {
+    pub frequency: String,
+    pub interval: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -124,8 +133,21 @@ pub struct ActiveTimerDto {
     pub started_at: String,
     pub stopped_at: Option<String>,
     pub elapsed_seconds: Option<i64>,
+    pub paused_at: Option<String>,
     pub deleted_at: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecurrenceRuleDto {
+    pub id: String,
+    pub target: WorkTargetRefDto,
+    pub frequency: String,
+    pub interval: i64,
+    pub deleted_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Serialize)]
@@ -139,6 +161,7 @@ pub struct TaskDto {
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
+    pub recurrence_rule: Option<RecurrenceRuleDto>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -157,6 +180,7 @@ pub struct SubtaskDto {
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
+    pub recurrence_rule: Option<RecurrenceRuleDto>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -176,6 +200,7 @@ pub struct TaskWithSubtasksDto {
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
+    pub recurrence_rule: Option<RecurrenceRuleDto>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -276,6 +301,7 @@ impl From<UpdateTaskRequestDto> for WorkItemUpdateDraft {
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
             timer_target_seconds: value.timer_target_seconds,
+            recurrence_rule: value.recurrence_rule.map(Into::into),
             memo: value.memo,
         }
     }
@@ -288,7 +314,17 @@ impl From<UpdateSubtaskRequestDto> for WorkItemUpdateDraft {
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
             timer_target_seconds: value.timer_target_seconds,
+            recurrence_rule: value.recurrence_rule.map(Into::into),
             memo: value.memo,
+        }
+    }
+}
+
+impl From<RecurrenceRuleRequestDto> for RecurrenceRuleDraft {
+    fn from(value: RecurrenceRuleRequestDto) -> Self {
+        Self {
+            frequency: value.frequency,
+            interval: value.interval,
         }
     }
 }
@@ -320,6 +356,7 @@ impl From<TaskRecord> for TaskDto {
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
             timer_target_seconds: value.timer_target_seconds,
+            recurrence_rule: value.recurrence_rule.map(Into::into),
             memo: value.memo,
             sort_order: value.sort_order,
             completed_at: value.completed_at,
@@ -340,6 +377,7 @@ impl From<SubtaskRecord> for SubtaskDto {
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
             timer_target_seconds: value.timer_target_seconds,
+            recurrence_rule: value.recurrence_rule.map(Into::into),
             memo: value.memo,
             sort_order: value.sort_order,
             completed_at: value.completed_at,
@@ -361,6 +399,7 @@ impl From<TaskWithSubtasksRecord> for TaskWithSubtasksDto {
             planned_start_date: value.task.planned_start_date,
             due_date: value.task.due_date,
             timer_target_seconds: value.task.timer_target_seconds,
+            recurrence_rule: value.task.recurrence_rule.map(Into::into),
             memo: value.task.memo,
             sort_order: value.task.sort_order,
             completed_at: value.task.completed_at,
@@ -368,6 +407,23 @@ impl From<TaskWithSubtasksRecord> for TaskWithSubtasksDto {
             created_at: value.task.created_at,
             updated_at: value.task.updated_at,
             subtasks: value.subtasks.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<RecurrenceRuleRecord> for RecurrenceRuleDto {
+    fn from(value: RecurrenceRuleRecord) -> Self {
+        Self {
+            id: value.id,
+            target: WorkTargetRefDto {
+                r#type: value.target.target_type.as_str().to_string(),
+                id: value.target.id,
+            },
+            frequency: value.frequency.as_str().to_string(),
+            interval: value.interval,
+            deleted_at: value.deleted_at,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
         }
     }
 }
@@ -427,6 +483,7 @@ impl From<ActiveTimer> for ActiveTimerDto {
             started_at: value.started_at,
             stopped_at: value.stopped_at,
             elapsed_seconds: value.elapsed_seconds,
+            paused_at: value.paused_at,
             deleted_at: value.deleted_at,
             created_at: value.created_at,
         }

@@ -36,6 +36,8 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<Subtask>("update_subtask", { request: input }),
   startTimer: (target: WorkTargetRef) =>
     invoke<ActiveTimer>("start_timer", { request: { target } }),
+  pauseActiveTimer: () => invoke<ActiveTimer>("pause_active_timer"),
+  resumeActiveTimer: () => invoke<ActiveTimer>("resume_active_timer"),
   stopActiveTimer: () => invoke<TimerSession>("stop_active_timer"),
   completeTask: (taskId: string, allowIncompleteSubtasks: boolean) =>
     invoke<Task>("complete_task", {

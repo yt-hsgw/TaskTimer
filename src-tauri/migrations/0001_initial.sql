@@ -78,6 +78,25 @@ CREATE INDEX IF NOT EXISTS timer_sessions_target_idx
 ON timer_sessions (target_type, target_id, started_at)
 WHERE deleted_at IS NULL;
 
+CREATE TABLE IF NOT EXISTS timer_pauses (
+  id TEXT PRIMARY KEY,
+  timer_session_id TEXT NOT NULL,
+  paused_at TEXT NOT NULL,
+  resumed_at TEXT NULL,
+  deleted_at TEXT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (timer_session_id) REFERENCES timer_sessions(id) ON DELETE RESTRICT,
+  CHECK (resumed_at IS NULL OR resumed_at >= paused_at)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS one_open_pause_per_timer
+ON timer_pauses (timer_session_id)
+WHERE resumed_at IS NULL AND deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS timer_pauses_session_idx
+ON timer_pauses (timer_session_id, paused_at)
+WHERE deleted_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS notification_rules (
   id TEXT PRIMARY KEY,
   target_type TEXT NOT NULL CHECK (target_type IN ('task', 'subtask')),
@@ -114,6 +133,25 @@ CREATE TABLE IF NOT EXISTS ui_preferences (
   value TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS recurrence_rules (
+  id TEXT PRIMARY KEY,
+  target_type TEXT NOT NULL CHECK (target_type IN ('task', 'subtask')),
+  target_id TEXT NOT NULL,
+  frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly', 'monthly')),
+  interval INTEGER NOT NULL CHECK (interval >= 1 AND interval <= 365),
+  deleted_at TEXT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS recurrence_rules_active_target_idx
+ON recurrence_rules (target_type, target_id)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS recurrence_rules_target_idx
+ON recurrence_rules (target_type, target_id, frequency)
+WHERE deleted_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS tasks_calendar_idx
 ON tasks (planned_start_date, due_date)

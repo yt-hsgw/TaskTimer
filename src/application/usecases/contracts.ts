@@ -1,5 +1,6 @@
 import type { ActiveTimer, TimerSession } from "../../domain/timer/types";
 import type { NotificationDisplayMode } from "../../domain/notification/types";
+import type { RecurrenceFrequency } from "../../domain/recurrence/types";
 import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
 
 export type WorkItemDraft = {
@@ -11,6 +12,12 @@ export type WorkItemDraft = {
 
 export type WorkItemUpdateDraft = WorkItemDraft & {
   timerTargetSeconds?: number | null;
+  recurrenceRule?: RecurrenceRuleDraft | null;
+};
+
+export type RecurrenceRuleDraft = {
+  frequency: RecurrenceFrequency;
+  interval: number;
 };
 
 export type CreateSubtaskDraft = WorkItemDraft & {
@@ -84,6 +91,8 @@ export type TaskTimerGateway = {
   updateTask(input: UpdateTaskDraft): Promise<Task>;
   updateSubtask(input: UpdateSubtaskDraft): Promise<Subtask>;
   startTimer(target: WorkTargetRef): Promise<ActiveTimer>;
+  pauseActiveTimer(): Promise<ActiveTimer>;
+  resumeActiveTimer(): Promise<ActiveTimer>;
   stopActiveTimer(): Promise<TimerSession>;
   completeTask(taskId: string, allowIncompleteSubtasks: boolean): Promise<Task>;
   completeSubtask(subtaskId: string): Promise<Subtask>;

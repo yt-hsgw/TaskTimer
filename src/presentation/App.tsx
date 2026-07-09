@@ -247,6 +247,28 @@ export function App() {
     [runMutation],
   );
 
+  const handlePauseTimer = useCallback(
+    () =>
+      runMutation(async () => {
+        const pausedTimer = await tauriTaskTimerGateway.pauseActiveTimer();
+        return pausedTimer.target.type === "task"
+          ? pausedTimer.target.id
+          : undefined;
+      }),
+    [runMutation],
+  );
+
+  const handleResumeTimer = useCallback(
+    () =>
+      runMutation(async () => {
+        const resumedTimer = await tauriTaskTimerGateway.resumeActiveTimer();
+        return resumedTimer.target.type === "task"
+          ? resumedTimer.target.id
+          : undefined;
+      }),
+    [runMutation],
+  );
+
   const handleStopTimer = useCallback(
     () =>
       runMutation(async () => {
@@ -456,6 +478,8 @@ export function App() {
                   onUpdateSubtask={handleUpdateSubtask}
                   onCreateSubtask={handleCreateSubtask}
                   onStartTimer={handleStartTimer}
+                  onPauseTimer={handlePauseTimer}
+                  onResumeTimer={handleResumeTimer}
                   onStopTimer={handleStopTimer}
                   onCompleteTask={handleCompleteTask}
                   onCompleteSubtask={handleCompleteSubtask}

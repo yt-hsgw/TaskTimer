@@ -1,3 +1,5 @@
+import type { RecurrenceRule } from "../recurrence/types";
+
 export type WorkStatus = "todo" | "in_progress" | "done" | "archived";
 export type WorkTargetType = "task" | "subtask";
 
@@ -10,6 +12,7 @@ export type Task = {
   plannedStartDate: string | null;
   dueDate: string | null;
   timerTargetSeconds: number | null;
+  recurrenceRule: RecurrenceRule | null;
   memo: string;
   sortOrder: number;
   completedAt: string | null;
@@ -26,6 +29,7 @@ export type Subtask = {
   plannedStartDate: string | null;
   dueDate: string | null;
   timerTargetSeconds: number | null;
+  recurrenceRule: RecurrenceRule | null;
   memo: string;
   sortOrder: number;
   completedAt: string | null;

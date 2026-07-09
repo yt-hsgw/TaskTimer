@@ -131,6 +131,22 @@ pub fn start_timer(
 }
 
 #[tauri::command]
+pub fn pause_active_timer(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+) -> Result<super::dto::ActiveTimerDto, String> {
+    super::usecases::pause_active_timer(database.inner(), clock.inner()).map(Into::into)
+}
+
+#[tauri::command]
+pub fn resume_active_timer(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+) -> Result<super::dto::ActiveTimerDto, String> {
+    super::usecases::resume_active_timer(database.inner(), clock.inner()).map(Into::into)
+}
+
+#[tauri::command]
 pub fn stop_active_timer(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,

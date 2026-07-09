@@ -419,7 +419,8 @@ button {
   resize: vertical;
 }
 
-.date-fields {
+.date-fields,
+.recurrence-fields {
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -505,6 +506,7 @@ button {
 }
 
 .detail-form input,
+.detail-form select,
 .detail-form textarea {
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -518,6 +520,10 @@ button {
 .detail-form textarea {
   line-height: 1.4;
   resize: vertical;
+}
+
+.detail-form select {
+  background: #ffffff;
 }
 
 .detail-actions {
@@ -537,6 +543,13 @@ button {
 .notification-plan-grid {
   display: grid;
   gap: 8px;
+}
+
+.detail-metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.notification-plan-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -595,6 +608,11 @@ button {
 }
 
 .subtask-editor-tools {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.timer-control-group {
   display: inline-flex;
   gap: 6px;
 }
@@ -1126,7 +1144,8 @@ button {
     grid-template-columns: 1fr;
   }
 
-  .date-fields {
+  .date-fields,
+  .recurrence-fields {
     grid-template-columns: 1fr;
   }
 
