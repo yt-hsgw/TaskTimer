@@ -15,6 +15,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "check:glib-advisory": "node scripts/check-glib-advisory.mjs",
     "preview": "vite preview",
     "screenshots:readme": "node scripts/capture-readme-screenshots.mjs",
     "tauri": "tauri",

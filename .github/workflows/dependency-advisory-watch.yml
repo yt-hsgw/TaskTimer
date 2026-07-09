@@ -1,0 +1,25 @@
+name: 依存関係アラート監視
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "23 1 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  glib-advisory:
+    name: glib advisory再評価
+    runs-on: ubuntu-latest
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v5
+
+      - name: Rustを準備
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: glib advisoryを再評価
+        run: npm run check:glib-advisory
