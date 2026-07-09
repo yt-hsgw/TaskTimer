@@ -6,6 +6,8 @@ import type {
   TaskListItem,
   TaskRow,
   TaskWithSubtasks,
+  UpdateSubtaskDraft,
+  UpdateTaskDraft,
   WeekCalendarItem,
   WorkItemDraft,
 } from "../../application/usecases/contracts";
@@ -28,6 +30,10 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<Task>("create_task", { request: input }),
   createSubtask: (input: CreateSubtaskDraft) =>
     invoke<Subtask>("create_subtask", { request: input }),
+  updateTask: (input: UpdateTaskDraft) =>
+    invoke<Task>("update_task", { request: input }),
+  updateSubtask: (input: UpdateSubtaskDraft) =>
+    invoke<Subtask>("update_subtask", { request: input }),
   startTimer: (target: WorkTargetRef) =>
     invoke<ActiveTimer>("start_timer", { request: { target } }),
   stopActiveTimer: () => invoke<TimerSession>("stop_active_timer"),

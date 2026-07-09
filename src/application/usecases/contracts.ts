@@ -9,8 +9,20 @@ export type WorkItemDraft = {
   memo?: string | null;
 };
 
+export type WorkItemUpdateDraft = WorkItemDraft & {
+  timerTargetSeconds?: number | null;
+};
+
 export type CreateSubtaskDraft = WorkItemDraft & {
   taskId: string;
+};
+
+export type UpdateTaskDraft = WorkItemUpdateDraft & {
+  taskId: string;
+};
+
+export type UpdateSubtaskDraft = WorkItemUpdateDraft & {
+  subtaskId: string;
 };
 
 export type WeekCalendarItem = {
@@ -69,6 +81,8 @@ export type TaskTimerGateway = {
   getNotificationDisplayMode(): Promise<NotificationDisplayMode>;
   createTask(input: WorkItemDraft): Promise<Task>;
   createSubtask(input: CreateSubtaskDraft): Promise<Subtask>;
+  updateTask(input: UpdateTaskDraft): Promise<Task>;
+  updateSubtask(input: UpdateSubtaskDraft): Promise<Subtask>;
   startTimer(target: WorkTargetRef): Promise<ActiveTimer>;
   stopActiveTimer(): Promise<TimerSession>;
   completeTask(taskId: string, allowIncompleteSubtasks: boolean): Promise<Task>;
