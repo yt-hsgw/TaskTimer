@@ -5,9 +5,9 @@ mod infrastructure;
 use application::commands::{
     complete_subtask, complete_task, create_subtask, create_task, delete_subtask, delete_task,
     dispatch_due_notifications, get_active_timer, get_notification_display_mode, health_check,
-    list_task_lists, list_task_rows, list_tasks, list_week_calendar_items, start_timer,
-    stop_active_timer, toggle_task_favorite, update_notification_display_mode, update_subtask,
-    update_task,
+    list_task_lists, list_task_rows, list_tasks, list_week_calendar_items, pause_active_timer,
+    resume_active_timer, start_timer, stop_active_timer, toggle_task_favorite,
+    update_notification_display_mode, update_subtask, update_task,
 };
 use infrastructure::{
     clock::SystemClock, notification::TauriLocalNotificationGateway, sqlite::SqliteDatabase,
@@ -38,6 +38,8 @@ pub fn run() {
             update_task,
             update_subtask,
             start_timer,
+            pause_active_timer,
+            resume_active_timer,
             stop_active_timer,
             complete_task,
             complete_subtask,

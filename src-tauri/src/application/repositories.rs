@@ -1,5 +1,6 @@
 use crate::domain::{
     notification::{NotificationDisplayMode, NotificationKind, NotificationRegistrationStatus},
+    recurrence::RecurrenceFrequency,
     task::WorkStatus,
     timer::{WorkTargetRef, WorkTargetType},
 };
@@ -38,6 +39,7 @@ pub struct ActiveTimer {
     pub started_at: String,
     pub stopped_at: Option<String>,
     pub elapsed_seconds: Option<i64>,
+    pub paused_at: Option<String>,
     pub deleted_at: Option<String>,
     pub created_at: String,
 }
@@ -57,8 +59,26 @@ pub struct WorkItemUpdate {
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
+    pub recurrence_rule: Option<RecurrenceRuleInput>,
     pub memo: String,
     pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecurrenceRuleInput {
+    pub frequency: RecurrenceFrequency,
+    pub interval: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecurrenceRuleRecord {
+    pub id: String,
+    pub target: WorkTargetRef,
+    pub frequency: RecurrenceFrequency,
+    pub interval: i64,
+    pub deleted_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,6 +103,7 @@ pub struct TaskRecord {
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
+    pub recurrence_rule: Option<RecurrenceRuleRecord>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -100,6 +121,7 @@ pub struct SubtaskRecord {
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
+    pub recurrence_rule: Option<RecurrenceRuleRecord>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -195,6 +217,10 @@ pub trait TaskTimerCommandRepository {
     ) -> RepositoryResult<SubtaskRecord>;
 
     fn start_timer(&self, target: WorkTargetRef, now: String) -> RepositoryResult<ActiveTimer>;
+
+    fn pause_active_timer(&self, now: String) -> RepositoryResult<ActiveTimer>;
+
+    fn resume_active_timer(&self, now: String) -> RepositoryResult<ActiveTimer>;
 
     fn stop_active_timer(&self, now: String) -> RepositoryResult<ActiveTimer>;
 

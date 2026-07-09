@@ -6,6 +6,7 @@ export type TimerSession = {
   startedAt: string;
   stoppedAt: string | null;
   elapsedSeconds: number | null;
+  pausedAt: string | null;
   deletedAt: string | null;
   createdAt: string;
 };
@@ -13,4 +14,3 @@ export type TimerSession = {
 export type ActiveTimer = TimerSession & {
   stoppedAt: null;
 };
-

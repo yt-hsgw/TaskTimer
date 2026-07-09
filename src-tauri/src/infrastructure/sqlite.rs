@@ -19,12 +19,14 @@ use uuid::Uuid;
 use crate::{
     application::repositories::{
         target_ref, ActiveTimer, CalendarMarker, CalendarRepository, NotificationCommandRepository,
-        NotificationJob, NotificationPreferenceRepository, RepositoryResult, SubtaskRecord,
-        TaskListRecord, TaskReadRepository, TaskRecord, TaskRowRecord, TaskTimerCommandRepository,
-        TaskWithSubtasksRecord, TimerRepository, WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
+        NotificationJob, NotificationPreferenceRepository, RecurrenceRuleInput,
+        RecurrenceRuleRecord, RepositoryResult, SubtaskRecord, TaskListRecord, TaskReadRepository,
+        TaskRecord, TaskRowRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord,
+        TimerRepository, WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
     },
     domain::{
         notification::{NotificationDisplayMode, NotificationKind, NotificationRegistrationStatus},
+        recurrence::RecurrenceFrequency,
         task::{assert_completable, assert_timer_startable, WorkStatus},
         timer::{WorkTargetRef, WorkTargetType},
     },
@@ -218,12 +220,66 @@ impl TaskTimerCommandRepository for SqliteDatabase {
         })
     }
 
+    fn pause_active_timer(&self, now: String) -> RepositoryResult<ActiveTimer> {
+        self.with_transaction(|transaction| {
+            let active_timer = select_active_timer(transaction)?
+                .ok_or_else(|| "開始中のタイマーがありません".to_string())?;
+            if active_timer.paused_at.is_some() {
+                return Ok(active_timer);
+            }
+
+            transaction
+                .execute(
+                    "
+                    INSERT INTO timer_pauses (
+                      id, timer_session_id, paused_at, created_at
+                    )
+                    VALUES (?1, ?2, ?3, ?3)
+                    ",
+                    params![Uuid::new_v4().to_string(), active_timer.id.as_str(), now],
+                )
+                .map_err(|error| format!("タイマーを一時停止できません: {error}"))?;
+
+            select_active_timer_by_id(transaction, &active_timer.id)
+        })
+    }
+
+    fn resume_active_timer(&self, now: String) -> RepositoryResult<ActiveTimer> {
+        self.with_transaction(|transaction| {
+            let active_timer = select_active_timer(transaction)?
+                .ok_or_else(|| "開始中のタイマーがありません".to_string())?;
+            if active_timer.paused_at.is_none() {
+                return Ok(active_timer);
+            }
+
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE timer_pauses
+                    SET resumed_at = ?1
+                    WHERE timer_session_id = ?2
+                      AND resumed_at IS NULL
+                      AND deleted_at IS NULL
+                    ",
+                    params![now, active_timer.id.as_str()],
+                )
+                .map_err(|error| format!("タイマーを再開できません: {error}"))?;
+            if updated != 1 {
+                return Err("一時停止中のタイマーを再開できませんでした".to_string());
+            }
+
+            select_active_timer_by_id(transaction, &active_timer.id)
+        })
+    }
+
     fn stop_active_timer(&self, now: String) -> RepositoryResult<ActiveTimer> {
         self.with_transaction(|transaction| {
             let active_timer = select_active_timer(transaction)?
                 .ok_or_else(|| "開始中のタイマーがありません".to_string())?;
+            close_open_pause_for_timer(transaction, &active_timer.id, &now)?;
+            let paused_seconds = total_pause_seconds(transaction, &active_timer.id, &now)?;
             let (stopped_at, elapsed_seconds) =
-                calculate_stop_values(&active_timer.started_at, &now)?;
+                calculate_stop_values(&active_timer.started_at, &now, paused_seconds)?;
 
             let updated = transaction
                 .execute(
@@ -554,6 +610,7 @@ fn update_task_detail(
     ensure_task_exists(transaction, task_id)?;
     let planned_start_date = input.planned_start_date.clone();
     let due_date = input.due_date.clone();
+    let recurrence_rule = input.recurrence_rule.clone();
     let now = input.now.clone();
 
     let updated = transaction
@@ -594,6 +651,15 @@ fn update_task_detail(
         due_date.as_deref(),
         &now,
     )?;
+    sync_recurrence_rule_for_target(
+        transaction,
+        &WorkTargetRef {
+            target_type: WorkTargetType::Task,
+            id: task_id.to_string(),
+        },
+        recurrence_rule,
+        &now,
+    )?;
 
     select_existing_task_by_id(transaction, task_id)
 }
@@ -606,6 +672,7 @@ fn update_subtask_detail(
     ensure_subtask_exists(transaction, subtask_id)?;
     let planned_start_date = input.planned_start_date.clone();
     let due_date = input.due_date.clone();
+    let recurrence_rule = input.recurrence_rule.clone();
     let now = input.now.clone();
 
     let updated = transaction
@@ -644,6 +711,15 @@ fn update_subtask_detail(
         },
         planned_start_date.as_deref(),
         due_date.as_deref(),
+        &now,
+    )?;
+    sync_recurrence_rule_for_target(
+        transaction,
+        &WorkTargetRef {
+            target_type: WorkTargetType::Subtask,
+            id: subtask_id.to_string(),
+        },
+        recurrence_rule,
         &now,
     )?;
 
@@ -847,6 +923,118 @@ fn disable_duplicate_notification_rules_for_kind(
         .map_err(|error| format!("重複通知ルールを無効化できません: {error}"))
 }
 
+fn sync_recurrence_rule_for_target(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    recurrence_rule: Option<RecurrenceRuleInput>,
+    now: &str,
+) -> RepositoryResult<()> {
+    let Some(recurrence_rule) = recurrence_rule else {
+        return disable_recurrence_rule_for_target(transaction, target, now);
+    };
+
+    if let Some(existing) = select_recurrence_rule_for_target(transaction, target)? {
+        transaction
+            .execute(
+                "
+                UPDATE recurrence_rules
+                SET frequency = ?1,
+                    interval = ?2,
+                    updated_at = ?3
+                WHERE id = ?4
+                  AND deleted_at IS NULL
+                ",
+                params![
+                    recurrence_rule.frequency.as_str(),
+                    recurrence_rule.interval,
+                    now,
+                    existing.id
+                ],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("繰り返し設定を更新できません: {error}"))
+    } else {
+        transaction
+            .execute(
+                "
+                INSERT INTO recurrence_rules (
+                  id, target_type, target_id, frequency, interval, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+                ",
+                params![
+                    Uuid::new_v4().to_string(),
+                    target.target_type.as_str(),
+                    target.id.as_str(),
+                    recurrence_rule.frequency.as_str(),
+                    recurrence_rule.interval,
+                    now
+                ],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("繰り返し設定を保存できません: {error}"))
+    }
+}
+
+fn disable_recurrence_rule_for_target(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE recurrence_rules
+            SET deleted_at = ?1,
+                updated_at = ?1
+            WHERE target_type = ?2
+              AND target_id = ?3
+              AND deleted_at IS NULL
+            ",
+            params![now, target.target_type.as_str(), target.id.as_str()],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("繰り返し設定を無効化できません: {error}"))
+}
+
+fn select_recurrence_rule_for_target(
+    connection: &Connection,
+    target: &WorkTargetRef,
+) -> RepositoryResult<Option<RecurrenceRuleRecord>> {
+    connection
+        .query_row(
+            "
+            SELECT id, target_type, target_id, frequency, interval,
+                   deleted_at, created_at, updated_at
+            FROM recurrence_rules
+            WHERE target_type = ?1
+              AND target_id = ?2
+              AND deleted_at IS NULL
+            LIMIT 1
+            ",
+            params![target.target_type.as_str(), target.id.as_str()],
+            |row| {
+                let target_type_text: String = row.get(1)?;
+                let frequency_text: String = row.get(3)?;
+                Ok(RecurrenceRuleRecord {
+                    id: row.get(0)?,
+                    target: target_ref(
+                        WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?,
+                        row.get(2)?,
+                    ),
+                    frequency: RecurrenceFrequency::from_db(&frequency_text)
+                        .map_err(db_value_error)?,
+                    interval: row.get(4)?,
+                    deleted_at: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| format!("繰り返し設定を取得できません: {error}"))
+}
+
 fn insert_notification_rule(
     transaction: &Transaction<'_>,
     target: &WorkTargetRef,
@@ -950,11 +1138,42 @@ fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec
             "
             SELECT id, list_id, title, status, is_favorite,
                    planned_start_date, due_date, timer_target_seconds, memo,
-                   sort_order, completed_at, deleted_at, created_at, updated_at
-            FROM tasks
-            WHERE deleted_at IS NULL
-            ORDER BY sort_order ASC, created_at ASC
-            LIMIT ?1
+                   sort_order, completed_at, deleted_at, created_at, updated_at,
+                   recurrence_rule_id, recurrence_target_type, recurrence_target_id,
+                   recurrence_frequency, recurrence_interval, recurrence_deleted_at,
+                   recurrence_created_at, recurrence_updated_at
+            FROM (
+              SELECT tasks.id,
+                     tasks.list_id,
+                     tasks.title,
+                     tasks.status,
+                     tasks.is_favorite,
+                     tasks.planned_start_date,
+                     tasks.due_date,
+                     tasks.timer_target_seconds,
+                     tasks.memo,
+                     tasks.sort_order,
+                     tasks.completed_at,
+                     tasks.deleted_at,
+                     tasks.created_at,
+                     tasks.updated_at,
+                     recurrence_rules.id AS recurrence_rule_id,
+                     recurrence_rules.target_type AS recurrence_target_type,
+                     recurrence_rules.target_id AS recurrence_target_id,
+                     recurrence_rules.frequency AS recurrence_frequency,
+                     recurrence_rules.interval AS recurrence_interval,
+                     recurrence_rules.deleted_at AS recurrence_deleted_at,
+                     recurrence_rules.created_at AS recurrence_created_at,
+                     recurrence_rules.updated_at AS recurrence_updated_at
+              FROM tasks
+              LEFT JOIN recurrence_rules
+                ON recurrence_rules.target_type = 'task'
+               AND recurrence_rules.target_id = tasks.id
+               AND recurrence_rules.deleted_at IS NULL
+              WHERE tasks.deleted_at IS NULL
+              ORDER BY tasks.sort_order ASC, tasks.created_at ASC
+              LIMIT ?1
+            )
             ",
         )
         .map_err(|error| format!("タスク一覧クエリを準備できません: {error}"))?;
@@ -1117,10 +1336,22 @@ fn select_subtasks_for_task_list(
                    subtasks.planned_start_date, subtasks.due_date,
                    subtasks.timer_target_seconds, subtasks.memo, subtasks.sort_order,
                    subtasks.completed_at, subtasks.deleted_at, subtasks.created_at,
-                   subtasks.updated_at
+                   subtasks.updated_at,
+                   recurrence_rules.id AS recurrence_rule_id,
+                   recurrence_rules.target_type AS recurrence_target_type,
+                   recurrence_rules.target_id AS recurrence_target_id,
+                   recurrence_rules.frequency AS recurrence_frequency,
+                   recurrence_rules.interval AS recurrence_interval,
+                   recurrence_rules.deleted_at AS recurrence_deleted_at,
+                   recurrence_rules.created_at AS recurrence_created_at,
+                   recurrence_rules.updated_at AS recurrence_updated_at
             FROM subtasks
             INNER JOIN selected_tasks
               ON selected_tasks.id = subtasks.task_id
+            LEFT JOIN recurrence_rules
+              ON recurrence_rules.target_type = 'subtask'
+             AND recurrence_rules.target_id = subtasks.id
+             AND recurrence_rules.deleted_at IS NULL
             WHERE subtasks.deleted_at IS NULL
             ORDER BY selected_tasks.sort_order ASC,
                      subtasks.sort_order ASC,
@@ -1257,7 +1488,9 @@ fn soft_delete_task_graph(
         .map_err(|error| format!("子サブタスクを削除できません: {error}"))?;
 
     soft_delete_timer_sessions_for_task_graph(transaction, task_id, now)?;
-    soft_delete_notification_rules_for_task_graph(transaction, task_id, now)
+    soft_delete_timer_pauses_for_task_graph(transaction, task_id, now)?;
+    soft_delete_notification_rules_for_task_graph(transaction, task_id, now)?;
+    soft_delete_recurrence_rules_for_task_graph(transaction, task_id, now)
 }
 
 fn soft_delete_subtask_graph(
@@ -1294,6 +1527,23 @@ fn soft_delete_subtask_graph(
     transaction
         .execute(
             "
+            UPDATE timer_pauses
+            SET deleted_at = ?1
+            WHERE timer_session_id IN (
+                SELECT id
+                FROM timer_sessions
+                WHERE target_type = 'subtask'
+                  AND target_id = ?2
+            )
+              AND deleted_at IS NULL
+            ",
+            params![now, subtask_id],
+        )
+        .map_err(|error| format!("サブタスクの一時停止履歴を削除できません: {error}"))?;
+
+    transaction
+        .execute(
+            "
             UPDATE notification_rules
             SET enabled = 0,
                 registration_status = 'disabled',
@@ -1306,7 +1556,22 @@ fn soft_delete_subtask_graph(
             params![now, subtask_id],
         )
         .map(|_| ())
-        .map_err(|error| format!("サブタスクの通知ルールを削除できません: {error}"))
+        .map_err(|error| format!("サブタスクの通知ルールを削除できません: {error}"))?;
+
+    transaction
+        .execute(
+            "
+            UPDATE recurrence_rules
+            SET deleted_at = ?1,
+                updated_at = ?1
+            WHERE target_type = 'subtask'
+              AND target_id = ?2
+              AND deleted_at IS NULL
+            ",
+            params![now, subtask_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("サブタスクの繰り返し設定を削除できません: {error}"))
 }
 
 fn soft_delete_timer_sessions_for_task_graph(
@@ -1368,6 +1633,67 @@ fn soft_delete_notification_rules_for_task_graph(
         )
         .map(|_| ())
         .map_err(|error| format!("関連通知ルールを削除できません: {error}"))
+}
+
+fn soft_delete_timer_pauses_for_task_graph(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE timer_pauses
+            SET deleted_at = ?1
+            WHERE deleted_at IS NULL
+              AND timer_session_id IN (
+                SELECT id
+                FROM timer_sessions
+                WHERE (target_type = 'task' AND target_id = ?2)
+                   OR (
+                     target_type = 'subtask'
+                     AND target_id IN (
+                       SELECT id
+                       FROM subtasks
+                       WHERE task_id = ?2
+                     )
+                   )
+              )
+            ",
+            params![now, task_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("関連一時停止履歴を削除できません: {error}"))
+}
+
+fn soft_delete_recurrence_rules_for_task_graph(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE recurrence_rules
+            SET deleted_at = ?1,
+                updated_at = ?1
+            WHERE deleted_at IS NULL
+              AND (
+                (target_type = 'task' AND target_id = ?2)
+                OR (
+                  target_type = 'subtask'
+                  AND target_id IN (
+                    SELECT id
+                    FROM subtasks
+                    WHERE task_id = ?2
+                  )
+                )
+              )
+            ",
+            params![now, task_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("関連繰り返し設定を削除できません: {error}"))
 }
 
 fn ensure_no_active_timer(connection: &Connection) -> RepositoryResult<()> {
@@ -1494,9 +1820,40 @@ fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<Task
             "
             SELECT id, list_id, title, status, is_favorite,
                    planned_start_date, due_date, timer_target_seconds, memo,
-                   sort_order, completed_at, deleted_at, created_at, updated_at
-            FROM tasks
-            WHERE id = ?1
+                   sort_order, completed_at, deleted_at, created_at, updated_at,
+                   recurrence_rule_id, recurrence_target_type, recurrence_target_id,
+                   recurrence_frequency, recurrence_interval, recurrence_deleted_at,
+                   recurrence_created_at, recurrence_updated_at
+            FROM (
+              SELECT tasks.id,
+                     tasks.list_id,
+                     tasks.title,
+                     tasks.status,
+                     tasks.is_favorite,
+                     tasks.planned_start_date,
+                     tasks.due_date,
+                     tasks.timer_target_seconds,
+                     tasks.memo,
+                     tasks.sort_order,
+                     tasks.completed_at,
+                     tasks.deleted_at,
+                     tasks.created_at,
+                     tasks.updated_at,
+                     recurrence_rules.id AS recurrence_rule_id,
+                     recurrence_rules.target_type AS recurrence_target_type,
+                     recurrence_rules.target_id AS recurrence_target_id,
+                     recurrence_rules.frequency AS recurrence_frequency,
+                     recurrence_rules.interval AS recurrence_interval,
+                     recurrence_rules.deleted_at AS recurrence_deleted_at,
+                     recurrence_rules.created_at AS recurrence_created_at,
+                     recurrence_rules.updated_at AS recurrence_updated_at
+              FROM tasks
+              LEFT JOIN recurrence_rules
+                ON recurrence_rules.target_type = 'task'
+               AND recurrence_rules.target_id = tasks.id
+               AND recurrence_rules.deleted_at IS NULL
+              WHERE tasks.id = ?1
+            )
             ",
             params![id],
             map_task_row,
@@ -1510,10 +1867,41 @@ fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryRe
             "
             SELECT id, list_id, title, status, is_favorite,
                    planned_start_date, due_date, timer_target_seconds, memo,
-                   sort_order, completed_at, deleted_at, created_at, updated_at
-            FROM tasks
-            WHERE id = ?1
-              AND deleted_at IS NULL
+                   sort_order, completed_at, deleted_at, created_at, updated_at,
+                   recurrence_rule_id, recurrence_target_type, recurrence_target_id,
+                   recurrence_frequency, recurrence_interval, recurrence_deleted_at,
+                   recurrence_created_at, recurrence_updated_at
+            FROM (
+              SELECT tasks.id,
+                     tasks.list_id,
+                     tasks.title,
+                     tasks.status,
+                     tasks.is_favorite,
+                     tasks.planned_start_date,
+                     tasks.due_date,
+                     tasks.timer_target_seconds,
+                     tasks.memo,
+                     tasks.sort_order,
+                     tasks.completed_at,
+                     tasks.deleted_at,
+                     tasks.created_at,
+                     tasks.updated_at,
+                     recurrence_rules.id AS recurrence_rule_id,
+                     recurrence_rules.target_type AS recurrence_target_type,
+                     recurrence_rules.target_id AS recurrence_target_id,
+                     recurrence_rules.frequency AS recurrence_frequency,
+                     recurrence_rules.interval AS recurrence_interval,
+                     recurrence_rules.deleted_at AS recurrence_deleted_at,
+                     recurrence_rules.created_at AS recurrence_created_at,
+                     recurrence_rules.updated_at AS recurrence_updated_at
+              FROM tasks
+              LEFT JOIN recurrence_rules
+                ON recurrence_rules.target_type = 'task'
+               AND recurrence_rules.target_id = tasks.id
+               AND recurrence_rules.deleted_at IS NULL
+              WHERE tasks.id = ?1
+                AND tasks.deleted_at IS NULL
+            )
             ",
             params![id],
             map_task_row,
@@ -1527,9 +1915,39 @@ fn select_subtask_by_id(connection: &Connection, id: &str) -> RepositoryResult<S
             "
             SELECT id, task_id, title, status, planned_start_date, due_date,
                    timer_target_seconds, memo, sort_order, completed_at, deleted_at,
-                   created_at, updated_at
-            FROM subtasks
-            WHERE id = ?1
+                   created_at, updated_at,
+                   recurrence_rule_id, recurrence_target_type, recurrence_target_id,
+                   recurrence_frequency, recurrence_interval, recurrence_deleted_at,
+                   recurrence_created_at, recurrence_updated_at
+            FROM (
+              SELECT subtasks.id,
+                     subtasks.task_id,
+                     subtasks.title,
+                     subtasks.status,
+                     subtasks.planned_start_date,
+                     subtasks.due_date,
+                     subtasks.timer_target_seconds,
+                     subtasks.memo,
+                     subtasks.sort_order,
+                     subtasks.completed_at,
+                     subtasks.deleted_at,
+                     subtasks.created_at,
+                     subtasks.updated_at,
+                     recurrence_rules.id AS recurrence_rule_id,
+                     recurrence_rules.target_type AS recurrence_target_type,
+                     recurrence_rules.target_id AS recurrence_target_id,
+                     recurrence_rules.frequency AS recurrence_frequency,
+                     recurrence_rules.interval AS recurrence_interval,
+                     recurrence_rules.deleted_at AS recurrence_deleted_at,
+                     recurrence_rules.created_at AS recurrence_created_at,
+                     recurrence_rules.updated_at AS recurrence_updated_at
+              FROM subtasks
+              LEFT JOIN recurrence_rules
+                ON recurrence_rules.target_type = 'subtask'
+               AND recurrence_rules.target_id = subtasks.id
+               AND recurrence_rules.deleted_at IS NULL
+              WHERE subtasks.id = ?1
+            )
             ",
             params![id],
             map_subtask_row,
@@ -1546,10 +1964,40 @@ fn select_existing_subtask_by_id(
             "
             SELECT id, task_id, title, status, planned_start_date, due_date,
                    timer_target_seconds, memo, sort_order, completed_at, deleted_at,
-                   created_at, updated_at
-            FROM subtasks
-            WHERE id = ?1
-              AND deleted_at IS NULL
+                   created_at, updated_at,
+                   recurrence_rule_id, recurrence_target_type, recurrence_target_id,
+                   recurrence_frequency, recurrence_interval, recurrence_deleted_at,
+                   recurrence_created_at, recurrence_updated_at
+            FROM (
+              SELECT subtasks.id,
+                     subtasks.task_id,
+                     subtasks.title,
+                     subtasks.status,
+                     subtasks.planned_start_date,
+                     subtasks.due_date,
+                     subtasks.timer_target_seconds,
+                     subtasks.memo,
+                     subtasks.sort_order,
+                     subtasks.completed_at,
+                     subtasks.deleted_at,
+                     subtasks.created_at,
+                     subtasks.updated_at,
+                     recurrence_rules.id AS recurrence_rule_id,
+                     recurrence_rules.target_type AS recurrence_target_type,
+                     recurrence_rules.target_id AS recurrence_target_id,
+                     recurrence_rules.frequency AS recurrence_frequency,
+                     recurrence_rules.interval AS recurrence_interval,
+                     recurrence_rules.deleted_at AS recurrence_deleted_at,
+                     recurrence_rules.created_at AS recurrence_created_at,
+                     recurrence_rules.updated_at AS recurrence_updated_at
+              FROM subtasks
+              LEFT JOIN recurrence_rules
+                ON recurrence_rules.target_type = 'subtask'
+               AND recurrence_rules.target_id = subtasks.id
+               AND recurrence_rules.deleted_at IS NULL
+              WHERE subtasks.id = ?1
+                AND subtasks.deleted_at IS NULL
+            )
             ",
             params![id],
             map_subtask_row,
@@ -1567,6 +2015,7 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
         planned_start_date: row.get(5)?,
         due_date: row.get(6)?,
         timer_target_seconds: row.get(7)?,
+        recurrence_rule: map_optional_recurrence_rule(row, 14)?,
         memo: row.get(8)?,
         sort_order: row.get(9)?,
         completed_at: row.get(10)?,
@@ -1585,6 +2034,7 @@ fn map_subtask_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubtaskRecord> {
         planned_start_date: row.get(4)?,
         due_date: row.get(5)?,
         timer_target_seconds: row.get(6)?,
+        recurrence_rule: map_optional_recurrence_rule(row, 13)?,
         memo: row.get(7)?,
         sort_order: row.get(8)?,
         completed_at: row.get(9)?,
@@ -1592,6 +2042,28 @@ fn map_subtask_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubtaskRecord> {
         created_at: row.get(11)?,
         updated_at: row.get(12)?,
     })
+}
+
+fn map_optional_recurrence_rule(
+    row: &rusqlite::Row<'_>,
+    start_index: usize,
+) -> rusqlite::Result<Option<RecurrenceRuleRecord>> {
+    let id: Option<String> = row.get(start_index)?;
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    let target_type_text: String = row.get(start_index + 1)?;
+    let target_type = WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?;
+    let frequency_text: String = row.get(start_index + 3)?;
+    Ok(Some(RecurrenceRuleRecord {
+        id,
+        target: target_ref(target_type, row.get(start_index + 2)?),
+        frequency: RecurrenceFrequency::from_db(&frequency_text).map_err(db_value_error)?,
+        interval: row.get(start_index + 4)?,
+        deleted_at: row.get(start_index + 5)?,
+        created_at: row.get(start_index + 6)?,
+        updated_at: row.get(start_index + 7)?,
+    }))
 }
 
 fn map_task_read_model_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRowRecord> {
@@ -1635,7 +2107,8 @@ fn select_active_timer(connection: &Connection) -> RepositoryResult<Option<Activ
                    timer_sessions.stopped_at,
                    timer_sessions.elapsed_seconds,
                    timer_sessions.deleted_at,
-                   timer_sessions.created_at
+                   timer_sessions.created_at,
+                   open_pause.paused_at
             FROM timer_sessions
             LEFT JOIN tasks
               ON timer_sessions.target_type = 'task'
@@ -1645,6 +2118,10 @@ fn select_active_timer(connection: &Connection) -> RepositoryResult<Option<Activ
               ON timer_sessions.target_type = 'subtask'
              AND timer_sessions.target_id = subtasks.id
              AND subtasks.deleted_at IS NULL
+            LEFT JOIN timer_pauses AS open_pause
+              ON open_pause.timer_session_id = timer_sessions.id
+             AND open_pause.resumed_at IS NULL
+             AND open_pause.deleted_at IS NULL
             WHERE stopped_at IS NULL
               AND timer_sessions.deleted_at IS NULL
               AND COALESCE(tasks.id, subtasks.id) IS NOT NULL
@@ -1661,12 +2138,23 @@ fn select_active_timer_by_id(connection: &Connection, id: &str) -> RepositoryRes
     connection
         .query_row(
             "
-            SELECT id, target_type, target_id, started_at, stopped_at,
-                   elapsed_seconds, deleted_at, created_at
+            SELECT timer_sessions.id,
+                   timer_sessions.target_type,
+                   timer_sessions.target_id,
+                   timer_sessions.started_at,
+                   timer_sessions.stopped_at,
+                   timer_sessions.elapsed_seconds,
+                   timer_sessions.deleted_at,
+                   timer_sessions.created_at,
+                   open_pause.paused_at
             FROM timer_sessions
-            WHERE id = ?1
-              AND stopped_at IS NULL
-              AND deleted_at IS NULL
+            LEFT JOIN timer_pauses AS open_pause
+              ON open_pause.timer_session_id = timer_sessions.id
+             AND open_pause.resumed_at IS NULL
+             AND open_pause.deleted_at IS NULL
+            WHERE timer_sessions.id = ?1
+              AND timer_sessions.stopped_at IS NULL
+              AND timer_sessions.deleted_at IS NULL
             ",
             params![id],
             map_active_timer_row,
@@ -1678,11 +2166,22 @@ fn select_timer_by_id(connection: &Connection, id: &str) -> RepositoryResult<Act
     connection
         .query_row(
             "
-            SELECT id, target_type, target_id, started_at, stopped_at,
-                   elapsed_seconds, deleted_at, created_at
+            SELECT timer_sessions.id,
+                   timer_sessions.target_type,
+                   timer_sessions.target_id,
+                   timer_sessions.started_at,
+                   timer_sessions.stopped_at,
+                   timer_sessions.elapsed_seconds,
+                   timer_sessions.deleted_at,
+                   timer_sessions.created_at,
+                   open_pause.paused_at
             FROM timer_sessions
-            WHERE id = ?1
-              AND deleted_at IS NULL
+            LEFT JOIN timer_pauses AS open_pause
+              ON open_pause.timer_session_id = timer_sessions.id
+             AND open_pause.resumed_at IS NULL
+             AND open_pause.deleted_at IS NULL
+            WHERE timer_sessions.id = ?1
+              AND timer_sessions.deleted_at IS NULL
             ",
             params![id],
             map_active_timer_row,
@@ -1699,12 +2198,68 @@ fn map_active_timer_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActiveTimer
         started_at: row.get(3)?,
         stopped_at: row.get(4)?,
         elapsed_seconds: row.get(5)?,
+        paused_at: row.get(8)?,
         deleted_at: row.get(6)?,
         created_at: row.get(7)?,
     })
 }
 
-fn calculate_stop_values(started_at: &str, now: &str) -> RepositoryResult<(String, i64)> {
+fn close_open_pause_for_timer(
+    transaction: &Transaction<'_>,
+    timer_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE timer_pauses
+            SET resumed_at = ?1
+            WHERE timer_session_id = ?2
+              AND resumed_at IS NULL
+              AND deleted_at IS NULL
+            ",
+            params![now, timer_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("一時停止区間を閉じられません: {error}"))
+}
+
+fn total_pause_seconds(
+    connection: &Connection,
+    timer_id: &str,
+    stop_time: &str,
+) -> RepositoryResult<i64> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT paused_at, COALESCE(resumed_at, ?2)
+            FROM timer_pauses
+            WHERE timer_session_id = ?1
+              AND deleted_at IS NULL
+            ",
+        )
+        .map_err(|error| format!("一時停止区間クエリを準備できません: {error}"))?;
+    let rows = statement
+        .query_map(params![timer_id, stop_time], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| format!("一時停止区間を取得できません: {error}"))?;
+
+    let mut total_seconds = 0;
+    for row in rows {
+        let (paused_at, resumed_at) =
+            row.map_err(|error| format!("一時停止区間を読めません: {error}"))?;
+        total_seconds += calculate_duration_seconds(&paused_at, &resumed_at)?;
+    }
+
+    Ok(total_seconds)
+}
+
+fn calculate_stop_values(
+    started_at: &str,
+    now: &str,
+    paused_seconds: i64,
+) -> RepositoryResult<(String, i64)> {
     let started = OffsetDateTime::parse(started_at, &Rfc3339)
         .map_err(|error| format!("タイマー開始時刻の形式が不正です: {error}"))?;
     let stopped = OffsetDateTime::parse(now, &Rfc3339)
@@ -1713,7 +2268,20 @@ fn calculate_stop_values(started_at: &str, now: &str) -> RepositoryResult<(Strin
         return Ok((started_at.to_string(), 0));
     }
 
-    Ok((now.to_string(), (stopped - started).whole_seconds()))
+    let elapsed_seconds = (stopped - started).whole_seconds() - paused_seconds.max(0);
+    Ok((now.to_string(), elapsed_seconds.max(0)))
+}
+
+fn calculate_duration_seconds(started_at: &str, stopped_at: &str) -> RepositoryResult<i64> {
+    let started = OffsetDateTime::parse(started_at, &Rfc3339)
+        .map_err(|error| format!("一時停止開始時刻の形式が不正です: {error}"))?;
+    let stopped = OffsetDateTime::parse(stopped_at, &Rfc3339)
+        .map_err(|error| format!("一時停止終了時刻の形式が不正です: {error}"))?;
+    if stopped < started {
+        return Ok(0);
+    }
+
+    Ok((stopped - started).whole_seconds())
 }
 
 fn configure_connection(connection: &Connection) -> RepositoryResult<()> {
@@ -1730,7 +2298,55 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
     connection
         .execute_batch(INITIAL_SCHEMA)
         .map_err(|error| format!("SQLite初期マイグレーションに失敗しました: {error}"))?;
+    run_timer_recurrence_migration(connection)?;
     run_ui_read_model_migration(connection)
+}
+
+fn run_timer_recurrence_migration(connection: &Connection) -> RepositoryResult<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS timer_pauses (
+              id TEXT PRIMARY KEY,
+              timer_session_id TEXT NOT NULL,
+              paused_at TEXT NOT NULL,
+              resumed_at TEXT NULL,
+              deleted_at TEXT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY (timer_session_id) REFERENCES timer_sessions(id) ON DELETE RESTRICT,
+              CHECK (resumed_at IS NULL OR resumed_at >= paused_at)
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS one_open_pause_per_timer
+            ON timer_pauses (timer_session_id)
+            WHERE resumed_at IS NULL AND deleted_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS timer_pauses_session_idx
+            ON timer_pauses (timer_session_id, paused_at)
+            WHERE deleted_at IS NULL;
+
+            CREATE TABLE IF NOT EXISTS recurrence_rules (
+              id TEXT PRIMARY KEY,
+              target_type TEXT NOT NULL CHECK (target_type IN ('task', 'subtask')),
+              target_id TEXT NOT NULL,
+              frequency TEXT NOT NULL CHECK (frequency IN ('daily', 'weekly', 'monthly')),
+              interval INTEGER NOT NULL CHECK (interval >= 1 AND interval <= 365),
+              deleted_at TEXT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS recurrence_rules_active_target_idx
+            ON recurrence_rules (target_type, target_id)
+            WHERE deleted_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS recurrence_rules_target_idx
+            ON recurrence_rules (target_type, target_id, frequency)
+            WHERE deleted_at IS NULL;
+            ",
+        )
+        .map(|_| ())
+        .map_err(|error| format!("タイマー一時停止/繰り返し用テーブルを作成できません: {error}"))
 }
 
 fn run_ui_read_model_migration(connection: &Connection) -> RepositoryResult<()> {
@@ -2229,6 +2845,31 @@ mod tests {
         id
     }
 
+    fn insert_recurrence_rule(
+        database: &SqliteDatabase,
+        target_type: WorkTargetType,
+        target_id: &str,
+    ) -> String {
+        let id = Uuid::new_v4().to_string();
+        database
+            .with_connection(|connection| {
+                connection
+                    .execute(
+                        "
+                        INSERT INTO recurrence_rules (
+                          id, target_type, target_id, frequency, interval, created_at, updated_at
+                        )
+                        VALUES (?1, ?2, ?3, 'weekly', 1, ?4, ?4)
+                        ",
+                        params![id, target_type.as_str(), target_id, "2026-07-06T00:00:00Z"],
+                    )
+                    .map_err(|error| format!("insert recurrence rule: {error}"))?;
+                Ok(())
+            })
+            .expect("insert recurrence rule");
+        id
+    }
+
     #[test]
     fn migration_initializes_notification_preference() {
         let connection = Connection::open_in_memory().expect("in-memory database");
@@ -2318,12 +2959,25 @@ mod tests {
         let ui_preference_count: i64 = connection
             .query_row("SELECT COUNT(*) FROM ui_preferences", [], |row| row.get(0))
             .expect("ui preferences");
+        let timer_recurrence_table_count: i64 = connection
+            .query_row(
+                "
+                SELECT COUNT(*)
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name IN ('timer_pauses', 'recurrence_rules')
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .expect("timer recurrence tables");
 
         assert_eq!(list_id, DEFAULT_TASK_LIST_ID);
         assert_eq!(is_favorite, 0);
         assert_eq!(timer_target_seconds, None);
         assert_eq!(task_list_name, DEFAULT_TASK_LIST_NAME);
         assert_eq!(ui_preference_count, 3);
+        assert_eq!(timer_recurrence_table_count, 2);
         assert!(
             column_exists(&connection, "subtasks", "timer_target_seconds")
                 .expect("subtask timer target column")
@@ -2439,6 +3093,124 @@ mod tests {
         assert_eq!(stopped.stopped_at.as_deref(), Some("2026-07-06T00:02:03Z"));
         assert_eq!(stopped.elapsed_seconds, Some(123));
         assert!(database.get_active_timer().expect("active timer").is_none());
+    }
+
+    #[test]
+    fn pause_resume_and_stop_active_timer_excludes_paused_seconds() {
+        let database = in_memory_database();
+        let start_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let pause_clock = FixedClock {
+            now: "2026-07-06T00:02:00Z",
+        };
+        let resume_clock = FixedClock {
+            now: "2026-07-06T00:05:00Z",
+        };
+        let stop_clock = FixedClock {
+            now: "2026-07-06T00:07:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &start_clock, draft("一時停止対象")).expect("task");
+        let second_task =
+            usecases::create_task(&database, &start_clock, draft("同時開始不可")).expect("task");
+
+        usecases::start_timer(
+            &database,
+            &start_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start timer");
+
+        let paused = usecases::pause_active_timer(&database, &pause_clock).expect("pause timer");
+        assert_eq!(paused.paused_at.as_deref(), Some("2026-07-06T00:02:00Z"));
+        let active = database.get_active_timer().expect("active timer");
+        assert_eq!(
+            active.expect("paused active timer").paused_at.as_deref(),
+            Some("2026-07-06T00:02:00Z")
+        );
+
+        let start_second = usecases::start_timer(
+            &database,
+            &pause_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: second_task.id,
+            },
+        );
+        assert!(start_second
+            .expect_err("paused timer is still active")
+            .contains("開始中"));
+
+        let resumed =
+            usecases::resume_active_timer(&database, &resume_clock).expect("resume timer");
+        assert_eq!(resumed.paused_at, None);
+
+        let stopped =
+            usecases::stop_active_timer(&database, &stop_clock).expect("stop active timer");
+        let resumed_at: String = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT resumed_at FROM timer_pauses WHERE timer_session_id = ?1",
+                        params![stopped.id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("pause row: {error}"))
+            })
+            .expect("pause row");
+
+        assert_eq!(stopped.elapsed_seconds, Some(240));
+        assert_eq!(resumed_at, "2026-07-06T00:05:00Z");
+        assert!(database.get_active_timer().expect("active timer").is_none());
+    }
+
+    #[test]
+    fn stop_active_timer_closes_open_pause_until_stop_time() {
+        let database = in_memory_database();
+        let start_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let pause_clock = FixedClock {
+            now: "2026-07-06T00:02:00Z",
+        };
+        let stop_clock = FixedClock {
+            now: "2026-07-06T00:05:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &start_clock, draft("停止時クローズ")).expect("task");
+
+        usecases::start_timer(
+            &database,
+            &start_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start timer");
+        usecases::pause_active_timer(&database, &pause_clock).expect("pause timer");
+
+        let stopped =
+            usecases::stop_active_timer(&database, &stop_clock).expect("stop active timer");
+        let resumed_at: String = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT resumed_at FROM timer_pauses WHERE timer_session_id = ?1",
+                        params![stopped.id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("pause row: {error}"))
+            })
+            .expect("pause row");
+
+        assert_eq!(stopped.elapsed_seconds, Some(120));
+        assert_eq!(stopped.paused_at, None);
+        assert_eq!(resumed_at, "2026-07-06T00:05:00Z");
     }
 
     #[test]
@@ -2631,6 +3403,7 @@ mod tests {
                 planned_start_date: Some("2026-07-08".to_string()),
                 due_date: None,
                 timer_target_seconds: Some(1_800),
+                recurrence_rule: None,
                 memo: Some("新しいメモ".to_string()),
             },
         )
@@ -2695,6 +3468,107 @@ mod tests {
     }
 
     #[test]
+    fn update_task_detail_saves_and_disables_recurrence_rule() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let update_clock = FixedClock {
+            now: "2026-07-06T00:10:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &create_clock, draft("繰り返し対象")).expect("task");
+
+        let updated = usecases::update_task(
+            &database,
+            &update_clock,
+            task.id.clone(),
+            usecases::WorkItemUpdateDraft {
+                title: "繰り返し対象".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-10".to_string()),
+                timer_target_seconds: Some(1_200),
+                recurrence_rule: Some(usecases::RecurrenceRuleDraft {
+                    frequency: "weekly".to_string(),
+                    interval: 2,
+                }),
+                memo: Some("隔週で確認".to_string()),
+            },
+        )
+        .expect("update recurrence");
+        let recurrence = updated.recurrence_rule.expect("recurrence rule");
+
+        assert_eq!(recurrence.frequency, RecurrenceFrequency::Weekly);
+        assert_eq!(recurrence.interval, 2);
+        assert_eq!(recurrence.target.id, task.id);
+
+        let disabled = usecases::update_task(
+            &database,
+            &update_clock,
+            recurrence.target.id.clone(),
+            usecases::WorkItemUpdateDraft {
+                title: "繰り返し対象".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-10".to_string()),
+                timer_target_seconds: Some(1_200),
+                recurrence_rule: None,
+                memo: Some("繰り返し解除".to_string()),
+            },
+        )
+        .expect("disable recurrence");
+        let deleted_recurrence_count: i64 = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "
+                        SELECT COUNT(*)
+                        FROM recurrence_rules
+                        WHERE target_type = 'task'
+                          AND target_id = ?1
+                          AND deleted_at IS NOT NULL
+                        ",
+                        params![disabled.id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("deleted recurrence count: {error}"))
+            })
+            .expect("deleted recurrence count");
+
+        assert!(disabled.recurrence_rule.is_none());
+        assert_eq!(deleted_recurrence_count, 1);
+    }
+
+    #[test]
+    fn update_work_item_rejects_recurrence_without_base_date() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task = usecases::create_task(&database, &clock, draft("基準日なし")).expect("task");
+
+        let result = usecases::update_task(
+            &database,
+            &clock,
+            task.id,
+            usecases::WorkItemUpdateDraft {
+                title: "基準日なし".to_string(),
+                planned_start_date: None,
+                due_date: None,
+                timer_target_seconds: None,
+                recurrence_rule: Some(usecases::RecurrenceRuleDraft {
+                    frequency: "daily".to_string(),
+                    interval: 1,
+                }),
+                memo: None,
+            },
+        );
+
+        assert!(result
+            .expect_err("missing recurrence base date")
+            .contains("繰り返し設定"));
+    }
+
+    #[test]
     fn update_subtask_detail_syncs_due_notification_and_timer_target() {
         let database = in_memory_database();
         let clock = FixedClock {
@@ -2715,6 +3589,7 @@ mod tests {
                 planned_start_date: None,
                 due_date: Some("2026-07-09".to_string()),
                 timer_target_seconds: Some(900),
+                recurrence_rule: None,
                 memo: Some("サブタスクメモ".to_string()),
             },
         )
@@ -2749,6 +3624,41 @@ mod tests {
     }
 
     #[test]
+    fn update_subtask_detail_saves_recurrence_rule() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &clock, draft("親タスク")).expect("create task");
+        let subtask = usecases::create_subtask(&database, &clock, task.id, draft("月次サブタスク"))
+            .expect("create subtask");
+
+        let updated = usecases::update_subtask(
+            &database,
+            &clock,
+            subtask.id.clone(),
+            usecases::WorkItemUpdateDraft {
+                title: "月次サブタスク".to_string(),
+                planned_start_date: Some("2026-07-09".to_string()),
+                due_date: None,
+                timer_target_seconds: Some(600),
+                recurrence_rule: Some(usecases::RecurrenceRuleDraft {
+                    frequency: "monthly".to_string(),
+                    interval: 1,
+                }),
+                memo: Some("毎月確認".to_string()),
+            },
+        )
+        .expect("update subtask recurrence");
+        let recurrence = updated.recurrence_rule.expect("recurrence rule");
+
+        assert_eq!(recurrence.target.id, subtask.id);
+        assert_eq!(recurrence.frequency, RecurrenceFrequency::Monthly);
+        assert_eq!(recurrence.interval, 1);
+    }
+
+    #[test]
     fn update_task_rejects_invalid_timer_target() {
         let database = in_memory_database();
         let clock = FixedClock {
@@ -2766,6 +3676,7 @@ mod tests {
                 planned_start_date: None,
                 due_date: None,
                 timer_target_seconds: Some(0),
+                recurrence_rule: None,
                 memo: None,
             },
         );
@@ -2788,6 +3699,8 @@ mod tests {
                 .expect("create subtask");
         insert_notification_rule(&database, WorkTargetType::Task, &task.id);
         insert_notification_rule(&database, WorkTargetType::Subtask, &subtask.id);
+        insert_recurrence_rule(&database, WorkTargetType::Task, &task.id);
+        insert_recurrence_rule(&database, WorkTargetType::Subtask, &subtask.id);
 
         usecases::start_timer(
             &database,
@@ -2798,6 +3711,7 @@ mod tests {
             },
         )
         .expect("start task timer");
+        usecases::pause_active_timer(&database, &clock).expect("pause active timer");
 
         usecases::delete_task(&database, &clock, task.id.clone()).expect("delete task");
 
@@ -2805,7 +3719,16 @@ mod tests {
             .list_tasks_with_subtasks(200)
             .expect("list task tree");
         let active_timer = database.get_active_timer().expect("active timer");
-        let (deleted_tasks, deleted_subtasks, deleted_timers, disabled_notifications): (
+        let (
+            deleted_tasks,
+            deleted_subtasks,
+            deleted_timers,
+            deleted_timer_pauses,
+            deleted_recurrences,
+            disabled_notifications,
+        ): (
+            i64,
+            i64,
             i64,
             i64,
             i64,
@@ -2833,6 +3756,20 @@ mod tests {
                         |row| row.get(0),
                     )
                     .expect("deleted timers");
+                let deleted_timer_pauses = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM timer_pauses WHERE deleted_at IS NOT NULL",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("deleted timer pauses");
+                let deleted_recurrences = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM recurrence_rules WHERE deleted_at IS NOT NULL",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("deleted recurrences");
                 let disabled_notifications = connection
                     .query_row(
                         "
@@ -2850,6 +3787,8 @@ mod tests {
                     deleted_tasks,
                     deleted_subtasks,
                     deleted_timers,
+                    deleted_timer_pauses,
+                    deleted_recurrences,
                     disabled_notifications,
                 ))
             })
@@ -2860,6 +3799,8 @@ mod tests {
         assert_eq!(deleted_tasks, 1);
         assert_eq!(deleted_subtasks, 1);
         assert_eq!(deleted_timers, 1);
+        assert_eq!(deleted_timer_pauses, 1);
+        assert_eq!(deleted_recurrences, 2);
         assert_eq!(disabled_notifications, 2);
     }
 
@@ -2875,6 +3816,7 @@ mod tests {
             usecases::create_subtask(&database, &clock, task.id.clone(), draft("削除対象"))
                 .expect("create subtask");
         insert_notification_rule(&database, WorkTargetType::Subtask, &subtask.id);
+        insert_recurrence_rule(&database, WorkTargetType::Subtask, &subtask.id);
 
         usecases::start_timer(
             &database,
@@ -2885,6 +3827,7 @@ mod tests {
             },
         )
         .expect("start subtask timer");
+        usecases::pause_active_timer(&database, &clock).expect("pause active timer");
 
         usecases::delete_subtask(&database, &clock, subtask.id.clone()).expect("delete subtask");
 
@@ -2892,7 +3835,13 @@ mod tests {
             .list_tasks_with_subtasks(200)
             .expect("list task tree");
         let active_timer = database.get_active_timer().expect("active timer");
-        let (deleted_subtasks, deleted_timers, disabled_notifications): (i64, i64, i64) = database
+        let (
+            deleted_subtasks,
+            deleted_timers,
+            deleted_timer_pauses,
+            deleted_recurrences,
+            disabled_notifications,
+        ): (i64, i64, i64, i64, i64) = database
             .with_connection(|connection| {
                 let deleted_subtasks = connection
                     .query_row(
@@ -2908,6 +3857,20 @@ mod tests {
                         |row| row.get(0),
                     )
                     .expect("deleted timers");
+                let deleted_timer_pauses = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM timer_pauses WHERE deleted_at IS NOT NULL",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("deleted timer pauses");
+                let deleted_recurrences = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM recurrence_rules WHERE deleted_at IS NOT NULL",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("deleted recurrences");
                 let disabled_notifications = connection
                     .query_row(
                         "
@@ -2921,7 +3884,13 @@ mod tests {
                         |row| row.get(0),
                     )
                     .expect("disabled notifications");
-                Ok((deleted_subtasks, deleted_timers, disabled_notifications))
+                Ok((
+                    deleted_subtasks,
+                    deleted_timers,
+                    deleted_timer_pauses,
+                    deleted_recurrences,
+                    disabled_notifications,
+                ))
             })
             .expect("deleted subtask graph counts");
 
@@ -2930,6 +3899,8 @@ mod tests {
         assert!(active_timer.is_none());
         assert_eq!(deleted_subtasks, 1);
         assert_eq!(deleted_timers, 1);
+        assert_eq!(deleted_timer_pauses, 1);
+        assert_eq!(deleted_recurrences, 1);
         assert_eq!(disabled_notifications, 1);
     }
 

@@ -5,6 +5,7 @@ import type {
   WorkItemUpdateDraft,
 } from "../../application/usecases/contracts";
 import type { NotificationDisplayMode } from "../../domain/notification/types";
+import type { RecurrenceFrequency } from "../../domain/recurrence/types";
 import type { ActiveTimer } from "../../domain/timer/types";
 import type {
   Subtask,
@@ -29,6 +30,8 @@ type TaskDetailPaneProps = {
   ): Promise<boolean>;
   onCreateSubtask(taskId: string, input: WorkItemDraft): Promise<boolean>;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
+  onPauseTimer(): Promise<boolean>;
+  onResumeTimer(): Promise<boolean>;
   onStopTimer(): Promise<boolean>;
   onCompleteTask(task: TaskWithSubtasks): Promise<boolean>;
   onCompleteSubtask(subtask: Subtask): Promise<boolean>;
@@ -41,8 +44,12 @@ type DetailFormDraft = {
   plannedStartDate: string;
   dueDate: string;
   timerTargetMinutes: string;
+  recurrenceFrequency: RecurrenceFormFrequency;
+  recurrenceInterval: string;
   memo: string;
 };
+
+type RecurrenceFormFrequency = "none" | RecurrenceFrequency;
 
 const statusLabels: Record<WorkStatus, string> = {
   todo: "未着手",
@@ -56,6 +63,12 @@ const displayModeLabels: Record<NotificationDisplayMode, string> = {
   generic: "汎用メッセージ",
 };
 
+const recurrenceLabels: Record<RecurrenceFrequency, string> = {
+  daily: "日ごと",
+  weekly: "週ごと",
+  monthly: "月ごと",
+};
+
 export function TaskDetailPane({
   task,
   activeTimer,
@@ -66,6 +79,8 @@ export function TaskDetailPane({
   onUpdateSubtask,
   onCreateSubtask,
   onStartTimer,
+  onPauseTimer,
+  onResumeTimer,
   onStopTimer,
   onCompleteTask,
   onCompleteSubtask,
@@ -215,6 +230,46 @@ export function TaskDetailPane({
           />
         </label>
 
+        <div className="recurrence-fields">
+          <label>
+            <span>繰り返し</span>
+            <select
+              value={taskDraft.recurrenceFrequency}
+              onChange={(event) =>
+                setTaskDraft((current) => ({
+                  ...current,
+                  recurrenceFrequency: event.target
+                    .value as RecurrenceFormFrequency,
+                }))
+              }
+              disabled={isMutating}
+            >
+              <option value="none">なし</option>
+              <option value="daily">毎日</option>
+              <option value="weekly">毎週</option>
+              <option value="monthly">毎月</option>
+            </select>
+          </label>
+          <label>
+            <span>間隔</span>
+            <input
+              type="number"
+              min="1"
+              max="365"
+              step="1"
+              value={taskDraft.recurrenceInterval}
+              onChange={(event) =>
+                setTaskDraft((current) => ({
+                  ...current,
+                  recurrenceInterval: event.target.value,
+                }))
+              }
+              disabled={isMutating || taskDraft.recurrenceFrequency === "none"}
+              inputMode="numeric"
+            />
+          </label>
+        </div>
+
         <label>
           <span>メモ</span>
           <textarea
@@ -256,19 +311,28 @@ export function TaskDetailPane({
       <section className="detail-section" aria-label="タイマー">
         <div className="detail-section-heading">
           <h3>タイマー</h3>
-          <TimerButton
+          <TimerControls
             target={taskTarget}
             label={task.title}
             status={task.status}
             activeTimer={activeTimer}
             isMutating={isMutating}
             onStartTimer={onStartTimer}
+            onPauseTimer={onPauseTimer}
+            onResumeTimer={onResumeTimer}
             onStopTimer={onStopTimer}
           />
         </div>
         <div className="detail-metrics">
-          <span>{isTaskActive ? "実行中" : statusLabels[task.status]}</span>
+          <span>
+            {isTaskActive
+              ? activeTimer?.pausedAt
+                ? "一時停止中"
+                : "実行中"
+              : statusLabels[task.status]}
+          </span>
           <span>{formatTimerTarget(task.timerTargetSeconds)}</span>
+          <span>{formatRecurrence(taskDraft)}</span>
         </div>
       </section>
 
@@ -356,6 +420,8 @@ export function TaskDetailPane({
               isMutating={isMutating}
               onUpdateSubtask={onUpdateSubtask}
               onStartTimer={onStartTimer}
+              onPauseTimer={onPauseTimer}
+              onResumeTimer={onResumeTimer}
               onStopTimer={onStopTimer}
               onCompleteSubtask={onCompleteSubtask}
               onDeleteSubtask={onDeleteSubtask}
@@ -376,6 +442,8 @@ type SubtaskEditorProps = {
     input: WorkItemUpdateDraft,
   ): Promise<boolean>;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
+  onPauseTimer(): Promise<boolean>;
+  onResumeTimer(): Promise<boolean>;
   onStopTimer(): Promise<boolean>;
   onCompleteSubtask(subtask: Subtask): Promise<boolean>;
   onDeleteSubtask(subtask: Subtask): Promise<boolean>;
@@ -387,6 +455,8 @@ function SubtaskEditor({
   isMutating,
   onUpdateSubtask,
   onStartTimer,
+  onPauseTimer,
+  onResumeTimer,
   onStopTimer,
   onCompleteSubtask,
   onDeleteSubtask,
@@ -416,13 +486,15 @@ function SubtaskEditor({
           <span>{statusLabels[subtask.status]}</span>
         </label>
         <div className="subtask-editor-tools">
-          <TimerButton
+          <TimerControls
             target={target}
             label={subtask.title}
             status={subtask.status}
             activeTimer={activeTimer}
             isMutating={isMutating}
             onStartTimer={onStartTimer}
+            onPauseTimer={onPauseTimer}
+            onResumeTimer={onResumeTimer}
             onStopTimer={onStopTimer}
           />
           <button
@@ -505,6 +577,45 @@ function SubtaskEditor({
             inputMode="numeric"
           />
         </label>
+        <div className="recurrence-fields">
+          <label>
+            <span>繰り返し</span>
+            <select
+              value={draft.recurrenceFrequency}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  recurrenceFrequency: event.target
+                    .value as RecurrenceFormFrequency,
+                }))
+              }
+              disabled={isMutating}
+            >
+              <option value="none">なし</option>
+              <option value="daily">毎日</option>
+              <option value="weekly">毎週</option>
+              <option value="monthly">毎月</option>
+            </select>
+          </label>
+          <label>
+            <span>間隔</span>
+            <input
+              type="number"
+              min="1"
+              max="365"
+              step="1"
+              value={draft.recurrenceInterval}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  recurrenceInterval: event.target.value,
+                }))
+              }
+              disabled={isMutating || draft.recurrenceFrequency === "none"}
+              inputMode="numeric"
+            />
+          </label>
+        </div>
         <label>
           <span>メモ</span>
           <textarea
@@ -541,44 +652,73 @@ function NotificationPlan({ label, date }: NotificationPlanProps) {
   );
 }
 
-type TimerButtonProps = {
+type TimerControlsProps = {
   target: WorkTargetRef;
   label: string;
   status: Task["status"];
   activeTimer: ActiveTimer | null;
   isMutating: boolean;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
+  onPauseTimer(): Promise<boolean>;
+  onResumeTimer(): Promise<boolean>;
   onStopTimer(): Promise<boolean>;
 };
 
-function TimerButton({
+function TimerControls({
   target,
   label,
   status,
   activeTimer,
   isMutating,
   onStartTimer,
+  onPauseTimer,
+  onResumeTimer,
   onStopTimer,
-}: TimerButtonProps) {
+}: TimerControlsProps) {
   const isActive = isActiveTarget(activeTimer, target);
+  const isPaused = isActive && Boolean(activeTimer?.pausedAt);
   const canStart =
     !activeTimer && status !== "done" && status !== "archived" && !isMutating;
-  const disabled = isMutating || (!isActive && !canStart);
+
+  if (isActive) {
+    return (
+      <div className="timer-control-group">
+        <button
+          className="icon-button"
+          type="button"
+          aria-label={isPaused ? `${label}のタイマーを再開` : `${label}のタイマーを一時停止`}
+          title={isPaused ? "再開" : "一時停止"}
+          disabled={isMutating}
+          onClick={() =>
+            isPaused ? void onResumeTimer() : void onPauseTimer()
+          }
+        >
+          {isPaused ? "▶" : "Ⅱ"}
+        </button>
+        <button
+          className="stop-button"
+          type="button"
+          aria-label={`${label}のタイマーを終了`}
+          title="タイマーを終了"
+          disabled={isMutating}
+          onClick={() => void onStopTimer()}
+        >
+          ■
+        </button>
+      </div>
+    );
+  }
 
   return (
     <button
-      className={isActive ? "stop-button" : "icon-button"}
+      className="icon-button"
       type="button"
-      aria-label={
-        isActive ? `${label}のタイマーを終了` : `${label}のタイマーを開始`
-      }
-      title={isActive ? "タイマーを終了" : "タイマーを開始"}
-      disabled={disabled}
-      onClick={() =>
-        isActive ? void onStopTimer() : void onStartTimer(target)
-      }
+      aria-label={`${label}のタイマーを開始`}
+      title={activeTimer ? "他のタイマーが実行中です" : "タイマーを開始"}
+      disabled={!canStart}
+      onClick={() => void onStartTimer(target)}
     >
-      {isActive ? "■" : "▶"}
+      ▶
     </button>
   );
 }
@@ -586,7 +726,12 @@ function TimerButton({
 function toDetailFormDraft(
   item: Pick<
     Task | Subtask,
-    "title" | "plannedStartDate" | "dueDate" | "timerTargetSeconds" | "memo"
+    | "title"
+    | "plannedStartDate"
+    | "dueDate"
+    | "timerTargetSeconds"
+    | "recurrenceRule"
+    | "memo"
   >,
 ): DetailFormDraft {
   return {
@@ -594,6 +739,10 @@ function toDetailFormDraft(
     plannedStartDate: item.plannedStartDate ?? "",
     dueDate: item.dueDate ?? "",
     timerTargetMinutes: secondsToMinutesText(item.timerTargetSeconds),
+    recurrenceFrequency: item.recurrenceRule?.frequency ?? "none",
+    recurrenceInterval: item.recurrenceRule
+      ? String(item.recurrenceRule.interval)
+      : "1",
     memo: item.memo,
   };
 }
@@ -604,7 +753,19 @@ function toWorkItemUpdateDraft(input: DetailFormDraft): WorkItemUpdateDraft {
     plannedStartDate: normalizeOptionalText(input.plannedStartDate),
     dueDate: normalizeOptionalText(input.dueDate),
     timerTargetSeconds: minutesToSeconds(input.timerTargetMinutes),
+    recurrenceRule: toRecurrenceRuleDraft(input),
     memo: input.memo,
+  };
+}
+
+function toRecurrenceRuleDraft(input: DetailFormDraft) {
+  if (input.recurrenceFrequency === "none") {
+    return null;
+  }
+  const interval = Number(input.recurrenceInterval);
+  return {
+    frequency: input.recurrenceFrequency,
+    interval: Number.isFinite(interval) ? Math.round(interval) : 0,
   };
 }
 
@@ -662,6 +823,13 @@ function formatTimerTarget(value: number | null) {
     return `${hours}時間`;
   }
   return `${minutes}分`;
+}
+
+function formatRecurrence(input: DetailFormDraft) {
+  if (input.recurrenceFrequency === "none") {
+    return "繰り返しなし";
+  }
+  return `${input.recurrenceInterval || "1"}${recurrenceLabels[input.recurrenceFrequency]}`;
 }
 
 function formatDateLabel(value: string) {
