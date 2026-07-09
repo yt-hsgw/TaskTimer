@@ -20,6 +20,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [012 カレンダーと設定を左ナビ配下のビューへ移管する](012-ui-calendar-settings-migration.md) / GitHub #28
 - [013 タイマー一時停止/再開と繰り返し設定を設計・実装する](013-timer-recurrence-detail-extensions.md) / GitHub #30
 - [014 macOS署名と公証を設定する](014-release-macos-signing-notarization.md) / GitHub #24
+- [015 v0.1.0公開判定資料を整える](015-release-v010-readiness.md) / GitHub #20
 
 ## 運用
 

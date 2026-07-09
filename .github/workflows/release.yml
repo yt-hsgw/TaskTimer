@@ -106,11 +106,23 @@ jobs:
             - Windows: NSISインストーラーを利用してください。
             - macOS: 利用中のCPUに合うDeveloper ID署名・公証済みDMGを利用してください。
 
+            ## 主な機能
+
+            - タスクとサブタスクの作成、完了、削除。
+            - タスクとサブタスクそれぞれの開始日、終了日、メモ、タイマー。
+            - アプリ全体で同時に1件だけ開始できるタイマー。
+            - 週表示カレンダーとローカル通知設定。
+
             ## 注意
 
             - アプリ実行時の外部通信はありません。
             - 自動更新はありません。新しいバージョンはGitHub Releasesで確認してください。
             - Windows版はコード署名未設定のため、OSの警告が表示される場合があります。
+            - Linux版、ストア配布、自動更新はこのReleaseの対象外です。
+
+            ## 公開前確認
+
+            公開前に該当バージョンの `docs/releases/<version>.md` とRelease Issueの手動確認結果へ、既知制限、手動確認結果、未解決の依存関係アラートの扱いを反映してください。
           releaseDraft: true
           prerelease: false
           uploadUpdaterJson: false
