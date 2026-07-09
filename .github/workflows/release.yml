@@ -58,10 +58,45 @@ jobs:
       - name: フロントエンドをビルド
         run: npm run build
 
+      - name: macOS署名・公証Secretsを検証
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=0
+          for name in \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            APPLE_SIGNING_IDENTITY \
+            APPLE_ID \
+            APPLE_PASSWORD \
+            APPLE_TEAM_ID
+          do
+            if [ -z "${!name}" ]; then
+              echo "::error title=macOS signing secret missing::$name をGitHub Secretsに設定してください"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
       - name: TauriアプリをビルドしてDraft Releaseへ添付
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'app-v__VERSION__' }}
           releaseName: TaskTimer ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
@@ -69,13 +104,13 @@ jobs:
             ## ダウンロード
 
             - Windows: NSISインストーラーを利用してください。
-            - macOS: 利用中のCPUに合うDMGを利用してください。
+            - macOS: 利用中のCPUに合うDeveloper ID署名・公証済みDMGを利用してください。
 
             ## 注意
 
             - アプリ実行時の外部通信はありません。
             - 自動更新はありません。新しいバージョンはGitHub Releasesで確認してください。
-            - 署名なしビルドでは、OSの警告が表示される場合があります。
+            - Windows版はコード署名未設定のため、OSの警告が表示される場合があります。
           releaseDraft: true
           prerelease: false
           uploadUpdaterJson: false

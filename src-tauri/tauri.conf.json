@@ -29,7 +29,10 @@
   "bundle": {
     "active": true,
     "targets": ["dmg", "nsis"],
-    "createUpdaterArtifacts": false
+    "createUpdaterArtifacts": false,
+    "macOS": {
+      "hardenedRuntime": true,
+      "entitlements": "./Entitlements.plist"
+    }
   }
 }
-

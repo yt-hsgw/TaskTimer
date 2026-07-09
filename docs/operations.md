@@ -70,11 +70,14 @@ GitHubをアプリ実行時データの保存先には使わない。
 Release workflowの権限:
 
 - `contents: write`。Releaseとartifact作成に必要な最小権限として扱う。
+- macOS署名・公証用SecretsはRepository Secretsとして扱い、workflowログ、Issue、PR、Release notesには出さない。
 
 Release workflowの制約:
 
 - Draft Releaseとして作成する。
 - 自動更新artifactは作成しない。
+- macOS artifactはDeveloper ID署名とApple公証を行う。
+- macOS署名・公証Secretsが未設定の場合、macOSジョブは失敗させる。
 - 公開前に `docs/release-checklist.md` の手動確認を完了する。
 
 ## ブランチ運用
@@ -113,6 +116,7 @@ Release workflowの制約:
 - ユーザー内容をログへ出していないことを確認する。
 - ローカル通知挙動を確認する。
 - Draft Releaseのartifact名、Release notes、既知制限を確認する。
+- macOS DMGの署名・公証・Gatekeeper確認を完了する。
 
 ## 配布形式
 
@@ -130,7 +134,8 @@ MVPの配布形式:
 
 トレードオフ:
 
-- 署名なしartifactではOSの警告が出る可能性がある。
+- macOS署名・公証にはApple Developer ProgramとSecrets運用が必要になる。
+- Windowsコード署名は未設定のため、SmartScreenなどのOS警告が出る可能性がある。
 - `msi` やストア配布よりも企業端末での一括配布には弱い。
 - 公開配布前には署名とインストール手順を別ADRで再検討する。
 

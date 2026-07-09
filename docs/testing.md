@@ -93,7 +93,8 @@ CIで保証しないもの:
 
 - macOS/Windows固有の通知権限。
 - インストーラーartifactの実インストール。
-- 署名なしartifactに対するOS警告。
+- macOS署名・公証済みDMGのGatekeeper実機挙動。
+- Windows未署名artifactに対するOS警告。
 - オフライン起動の実機確認。
 
 ## パフォーマンス確認

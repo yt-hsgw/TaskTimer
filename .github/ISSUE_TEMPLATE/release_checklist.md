@@ -26,6 +26,11 @@ assignees: ""
 
 ## macOS手動確認
 
+- [ ] Developer ID署名済みDMGを確認
+- [ ] Apple公証済みDMGを確認
+- [ ] Gatekeeperで「Appleが検証できません」警告が出ない
+- [ ] `spctl --assess --type execute --verbose /Applications/TaskTimer.app`
+- [ ] `xcrun stapler validate /Applications/TaskTimer.app`
 - [ ] オフライン起動
 - [ ] タスク作成/完了/削除
 - [ ] サブタスク作成/完了/削除
@@ -59,15 +64,17 @@ assignees: ""
 - [ ] ユーザー内容をHTMLとして描画していない
 - [ ] 新しいTauri権限の理由を記録した
 - [ ] 秘密情報、DBファイル、個人データを添付していない
+- [ ] Apple証明書、Apple ID、App用パスワード、Team IDを本文やログへ出していない
 
 ## 配布判断
 
 - [ ] GitHub Release tagが `app-vX.Y.Z` 形式
 - [ ] Draft Releaseとして作成されている
+- [ ] macOS署名・公証SecretsがGitHub Secretsに登録されている
 - [ ] Release notesに変更点を記載した
 - [ ] Release notesに既知制限を記載した
 - [ ] Release notesに外部通信なしと自動更新なしを記載した
-- [ ] 署名なしartifactのOS警告を既知制限に記載した
+- [ ] Windowsコード署名未設定によるOS警告の可能性を既知制限に記載した
 - [ ] Release artifactを手動インストール確認した
 - [ ] ロールバック判断基準を確認した
 

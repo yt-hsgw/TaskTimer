@@ -8,7 +8,7 @@
 4. 右詳細ペインへサブタスク、期限、通知、タイマー操作を移管する。
 5. カレンダーと設定を左ペインから開くビューへ移管する。
 6. タイマー一時停止/再開、繰り返し設定、タイマー目標時間をデータモデルから実装する。
-7. macOS署名と公証の方針を実装し、Gatekeeper警告を軽減する。
+7. macOS署名・公証用Secretsを登録し、実機でGatekeeper警告の解消を確認する。
 
 ## 完了済み
 
@@ -36,6 +36,7 @@
 - GitHub Releases向け `リリースビルド` workflow。
 - 公開運用方針とADR 0004。
 - UI/UX再設計仕様。
+- macOS署名・公証用のTauri設定とRelease workflow下準備。
 
 ## 次に必要
 
@@ -60,8 +61,9 @@
 3. ログにタスク名・メモ本文・通知本文が出ないことを確認する。
 4. GitHub Actionsのチェック結果をリリースIssueに記録する。
 5. Draft ReleaseのartifactとRelease notesを確認する。
-6. macOS署名と公証を設定する。
-7. リリース前に署名方針とインストール手順をADR化する。
+6. macOS署名・公証用GitHub Secretsを登録する。
+7. macOS DMGを実機で開き、Gatekeeper警告が解消されることを確認する。
+8. Windowsコード署名方針を別Issueで検討する。
 
 ## 危険ケース
 
