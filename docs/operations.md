@@ -44,6 +44,8 @@ GitHubをアプリ実行時データの保存先には使わない。
 - Dependabotでnpm、Cargo、GitHub Actionsの更新を追跡する。
 - DependabotやActionsの通信は開発・運用時の通信であり、アプリ実行時の外部通信ではない。
 - 依存更新PRでは、Tauri権限、外部通信、ログ出力、通知プライバシーへの影響を確認する。
+- Tauri経由の `glib` advisoryは、`依存関係アラート監視` ワークフローで週次再評価する。
+- 監視ワークフローが失敗した場合は、上流依存が更新可能になった合図としてIssue #22から依存更新PRへ進む。
 
 ## GitHub Actions
 
@@ -64,6 +66,18 @@ GitHubをアプリ実行時データの保存先には使わない。
 
 - Actions内の依存取得やGitHub通信は開発・運用時の通信であり、アプリ実行時の外部通信ではない。
 - OS固有の通知権限、インストーラー、署名警告はCIだけでは保証しない。リリース前チェックリストで手動確認する。
+
+`依存関係アラート監視` ワークフローは、週1回と手動実行で `glib` advisoryの上流制約を再評価する。
+
+Dependency advisory workflowの権限:
+
+- `contents: read`。Cargo resolver確認だけに必要な最小権限として扱う。
+
+Dependency advisory workflowの制約:
+
+- アプリ実行時の通信やTauri権限は追加しない。
+- Issueコメントの自動投稿は行わない。
+- 修正可能になった場合はworkflowを失敗させ、依存更新PR作成を促す。
 
 `リリースビルド` ワークフローは、`app-v*` タグまたは手動実行でWindows/macOS向けartifactをビルドし、Draft Releaseへ添付する。
 
