@@ -83,7 +83,8 @@ Dependency advisory workflowの制約:
 
 Release workflowの権限:
 
-- `contents: write`。Releaseとartifact作成に必要な最小権限として扱う。
+- workflow全体は `contents: read` を基本権限として扱う。
+- `build-release` jobだけ `contents: write` を持つ。Releaseとartifact作成に必要な最小権限として扱う。
 - macOS署名・公証用SecretsはRepository Secretsとして扱い、workflowログ、Issue、PR、Release notesには出さない。
 
 Release workflowの制約:
@@ -91,7 +92,8 @@ Release workflowの制約:
 - Draft Releaseとして作成する。
 - 自動更新artifactは作成しない。
 - macOS artifactはDeveloper ID署名とApple公証を行う。
-- macOS署名・公証Secretsが未設定の場合、macOSジョブは失敗させる。
+- macOS署名・公証Secretsが未設定の場合、`preflight-release` jobで失敗させ、Windows/macOSのmatrix buildとDraft Release作成へ進めない。
+- macOS job内でもSecrets検証を行い、matrix実行時の防御層として扱う。
 - 公開前に `docs/release-checklist.md` の手動確認を完了する。
 
 ## ブランチ運用
