@@ -60,7 +60,7 @@ flowchart TD
 
 ## 手動デスクトップ確認
 
-リリース前にWindows/macOSで確認する。
+リリース前にWindowsで確認する。macOS artifactを配布対象に含める場合はmacOSでも確認する。
 
 - インターネットなしでアプリが起動する。
 - タスクの作成、編集、削除。
@@ -93,7 +93,7 @@ CIで保証しないもの:
 
 - macOS/Windows固有の通知権限。
 - インストーラーartifactの実インストール。
-- macOS署名・公証済みDMGのGatekeeper実機挙動。
+- macOS artifactを配布する場合の署名・公証済みDMGのGatekeeper実機挙動。
 - Windows未署名artifactに対するOS警告。
 - オフライン起動の実機確認。
 

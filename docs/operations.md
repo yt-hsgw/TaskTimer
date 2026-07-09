@@ -79,7 +79,7 @@ Dependency advisory workflowの制約:
 - Issueコメントの自動投稿は行わない。
 - 修正可能になった場合はworkflowを失敗させ、依存更新PR作成を促す。
 
-`リリースビルド` ワークフローは、`app-v*` タグまたは手動実行でWindows/macOS向けartifactをビルドし、Draft Releaseへ添付する。
+`リリースビルド` ワークフローは、`app-v*` タグまたは手動実行でWindows向けartifactをビルドし、Draft Releaseへ添付する。macOS artifactは手動実行で `include_macos` を有効にした場合だけ作成する。
 
 Release workflowの権限:
 
@@ -91,8 +91,10 @@ Release workflowの制約:
 
 - Draft Releaseとして作成する。
 - 自動更新artifactは作成しない。
-- macOS artifactはDeveloper ID署名とApple公証を行う。
-- macOS署名・公証Secretsが未設定の場合、`preflight-release` jobで失敗させ、Windows/macOSのmatrix buildとDraft Release作成へ進めない。
+- v0.1.0の主配布対象はWindowsとする。
+- macOS artifactはApple Developer Programと署名・公証Secretsの準備が完了するまで後回しにする。
+- macOS artifactを作成する場合はDeveloper ID署名とApple公証を行う。
+- macOS署名・公証Secretsが未設定の場合、`preflight-macos` jobで失敗させ、macOS込みmatrix buildへ進めない。
 - macOS job内でもSecrets検証を行い、matrix実行時の防御層として扱う。
 - 公開前に `docs/release-checklist.md` の手動確認を完了する。
 
@@ -127,29 +129,31 @@ Release workflowの制約:
 - `docs/release-checklist.md` を確認する。
 - `docs/review/checklist.md` を確認する。
 - 自動テストを実行する。
-- Windows/macOSで手動デスクトップ確認を行う。
+- Windowsで手動デスクトップ確認を行う。
+- macOS artifactを配布する場合はmacOSでも手動デスクトップ確認を行う。
 - アプリ実行時の外部通信がないことを確認する。
 - ユーザー内容をログへ出していないことを確認する。
 - ローカル通知挙動を確認する。
 - Draft Releaseのartifact名、Release notes、既知制限を確認する。
-- macOS DMGの署名・公証・Gatekeeper確認を完了する。
+- macOS artifactを配布する場合は、macOS DMGの署名・公証・Gatekeeper確認を完了する。
 
 ## 配布形式
 
 MVPの配布形式:
 
-- macOS: `dmg`。
 - Windows: `nsis`。
+- macOS: `dmg`。Apple署名・公証準備が完了したReleaseでのみ提供する。
 
 理由:
 
 - 現在のTauri設定 `src-tauri/tauri.conf.json` と一致する。
-- macOSでは一般的なドラッグ&ドロップ配布にできる。
 - WindowsではNSISによりインストール/アンインストール導線を用意できる。
+- macOSでは一般的なドラッグ&ドロップ配布にできる。
 - 自動更新artifactはMVPでは作成しないため、リモート更新エンドポイントを必要としない。
 
 トレードオフ:
 
+- v0.1.0ではWindows配布を先行し、macOS利用者向けの正式artifact提供は遅れる。
 - macOS署名・公証にはApple Developer ProgramとSecrets運用が必要になる。
 - Windowsコード署名は未設定のため、SmartScreenなどのOS警告が出る可能性がある。
 - `msi` やストア配布よりも企業端末での一括配布には弱い。
@@ -162,7 +166,7 @@ MVPの配布形式:
 
 ## ローカル通知手動確認
 
-macOS/Windowsの両方で確認する。
+Windowsでは必ず確認する。macOS artifactを配布する場合はmacOSでも確認する。
 
 1. 通知表示タイプを `タイトルのみ` にする。
 2. 今日の日付を開始日または終了日にしたタスクを作成する。

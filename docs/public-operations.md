@@ -10,7 +10,8 @@
 
 MVPで対象にするもの:
 
-- GitHub ReleasesからのWindows/macOS配布。
+- GitHub ReleasesからのWindows配布。
+- Apple署名・公証準備が完了したReleaseでのmacOS配布。
 - READMEでの入手方法、既知制限、プライバシー方針の説明。
 - Issue、Discussions、Security Advisoryを使った問い合わせ導線。
 - MIT Licenseによる利用許諾。
@@ -29,7 +30,7 @@ MVPで対象外にするもの:
 
 1. 利用者はREADMEからGitHub Releasesへ移動する。
 2. Windows利用者はNSISインストーラーをダウンロードする。
-3. macOS利用者はDMGをダウンロードする。
+3. macOS利用者はApple署名・公証済みDMGが提供されているReleaseだけを利用する。
 4. 利用者はRelease notesで既知制限と手動確認結果を確認する。
 5. 不具合はIssue、質問はDiscussions、脆弱性はSecurity Policyの手順で報告する。
 
@@ -41,11 +42,15 @@ Releaseはドラフトで作成し、公開前に手動で確認する。
 flowchart TD
     A["mainのCI成功"] --> B["リリース前チェックリスト確認"]
     B --> C["app-vX.Y.Zタグを作成"]
-    C --> D["GitHub ActionsでWindows/macOSをビルド"]
-    D --> E["macOS署名・公証"]
-    E --> F["Draft Releaseへartifact添付"]
-    F --> G["Release notesと既知制限を確認"]
-    G --> H["公開"]
+    C --> D{"macOSも配布する?"}
+    D -->|いいえ| E["GitHub ActionsでWindowsをビルド"]
+    D -->|はい| F["include_macosで手動実行"]
+    F --> G["macOS署名・公証"]
+    G --> H["GitHub ActionsでWindows/macOSをビルド"]
+    E --> I["Draft Releaseへartifact添付"]
+    H --> I
+    I --> J["Release notesと既知制限を確認"]
+    J --> K["公開"]
 ```
 
 ## トランザクション境界
@@ -60,7 +65,7 @@ Draft Release公開前に問題が見つかった場合は、Releaseを公開せ
 
 ## 権限境界
 
-- Release workflowは `contents: write` のみを要求する。
+- Release workflowは全体で `contents: read` を基本とし、artifactを添付するjobだけ `contents: write` を要求する。
 - macOS署名・公証用SecretsはGitHub Repository Secretsで管理する。
 - 通常のCIは `contents: read` のみを維持する。
 - アプリ本体にはリモート通信、分析、クラッシュアップロード、自動更新の権限を追加しない。
@@ -73,7 +78,8 @@ Draft Release公開前に問題が見つかった場合は、Releaseを公開せ
 - `docs/adr/0004-public-distribution-license.md` にライセンスと配布方針が記録されている。
 - `app-v*` タグまたは手動実行でDraft Releaseを作るGitHub Actionsがある。
 - Release workflowが自動更新artifactを作らない設定である。
-- Release workflowがmacOS artifactをDeveloper ID署名・Apple公証する設定である。
+- Release workflowが既定でWindows artifactを作成する設定である。
+- macOS artifactは手動実行で `include_macos` を有効にした場合だけDeveloper ID署名・Apple公証する設定である。
 - `docs/release-checklist.md` に外部利用者向けRelease作成手順がある。
 
 ## セキュリティ観点
@@ -86,21 +92,24 @@ Draft Release公開前に問題が見つかった場合は、Releaseを公開せ
 
 ## スケール観点
 
-- Release artifactはWindows/macOSに限定し、MVPの運用負荷を抑える。
+- Release artifactは既定でWindowsに限定し、MVPの運用負荷を抑える。
+- macOS artifactはApple署名・公証準備が完了したReleaseだけに限定する。
 - Discussionsを質問窓口にして、Issueを不具合と機能要望に集中させる。
-- Draft Releaseを使い、複数OSのartifact確認を公開前にまとめて行う。
+- Draft Releaseを使い、公開前にartifact確認を行う。
 
 ## トレードオフ
 
 - GitHub Releasesは手軽だが、ストア配布ほどの信頼表示や自動配布導線はない。
 - MIT Licenseは外部利用しやすいが、再配布制限を細かくかけられない。
 - 自動更新を見送るため、利用者は新バージョンを手動で確認する必要がある。
+- Windows配布を先行するため、macOS利用者向けの正式配布は遅れる。
 - macOS署名・公証により配布信頼性は上がるが、Apple Developer ProgramとSecrets更新の運用負荷が増える。
 
 ## 危険ケース
 
 - 未確認のDraft Releaseを公開して、壊れたインストーラーを配布する。
 - Release notesに既知制限を書かず、Windows署名警告や通知権限の挙動を利用者が誤解する。
+- Windows先行Releaseなのに、Release notesがmacOS artifact提供済みであるように見える。
 - Issueに実データやDBが添付され、公開リポジトリ上に残る。
 - `contents: write` 以外の不要な権限をRelease workflowに追加する。
-- macOS公証失敗を見落としてDraft Releaseを公開する。
+- macOS artifactを含める場合に、公証失敗を見落としてDraft Releaseを公開する。
