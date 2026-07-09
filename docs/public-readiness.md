@@ -45,7 +45,7 @@ npm audit --audit-level=moderate
 - GitHubのPrivate Vulnerability Reporting、またはSecurity Advisoryの利用可否を確認する。
 - GitHub Secret scanningとDependabot alertsを有効にする。
 - GitHub Discussionsを質問窓口として使える状態にする。
-- GitHub Releasesに署名なしartifactの既知制限を記載する。
+- GitHub ReleasesにmacOS署名・公証状態とWindowsコード署名未設定の既知制限を記載する。
 - 公開後にGitHub Actionsが成功することを確認する。
 
 ## Git履歴の注意

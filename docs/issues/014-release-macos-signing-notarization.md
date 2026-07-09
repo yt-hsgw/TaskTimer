@@ -1,0 +1,113 @@
+# 014: macOS署名と公証を設定する
+
+GitHub Issue: #24
+
+## 目的
+
+GitHub Releasesから配布するmacOS DMGをDeveloper ID署名とApple公証済みにし、外部利用者がGatekeeper警告で起動を阻まれにくい状態にする。
+
+## スコープ
+
+- TauriのmacOSバンドル設定を明示する。
+- GitHub ActionsのRelease workflowでmacOS署名・公証用Secretsを必須化する。
+- Release notesとリリース前チェックリストから、macOS未署名artifactの既知制限を更新する。
+- 秘密情報の保存場所と権限境界を文書化する。
+
+## スコープ外
+
+- Apple Developer Programの契約、証明書発行、App Store Connect API Key発行。
+- GitHub Secretsへの実値登録。
+- 実機でのGatekeeper警告解消確認。
+- Windowsコード署名。
+- Mac App Store配布。
+
+## 実装方針
+
+- `src-tauri/tauri.conf.json` の `bundle.macOS.hardenedRuntime` を有効にする。
+- `src-tauri/Entitlements.plist` は空のdictとし、外部通信やユーザーデータアクセスの権限を追加しない。
+- 署名IDはリポジトリに固定値を書かず、`APPLE_SIGNING_IDENTITY` Secretから渡す。
+- Release workflowのmacOSジョブでは、署名・公証Secretsが未設定の場合にFail-fastする。
+- 公証認証はMVPではApple ID方式を正とし、`APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID` を使う。
+
+## 必要なGitHub Secrets
+
+- `APPLE_CERTIFICATE`: Developer ID Application証明書を `.p12` でexportし、base64化した値。
+- `APPLE_CERTIFICATE_PASSWORD`: `.p12` export時のパスワード。
+- `APPLE_SIGNING_IDENTITY`: `security find-identity -v -p codesigning` で確認した署名ID。
+- `APPLE_ID`: 公証に使うApple ID。
+- `APPLE_PASSWORD`: Apple IDのApp用パスワード。
+- `APPLE_TEAM_ID`: Apple Developer Team ID。
+
+## 設計レビュー
+
+### データモデル
+
+アプリのドメインデータ、SQLiteスキーマ、ユーザー設定は変更しない。変更対象は配布artifact生成の運用モデルのみ。
+
+### トランザクション境界
+
+- Git tag作成: リリース対象コミットを固定する境界。
+- Release workflow: 署名・公証済みartifactを生成する境界。
+- Draft Release公開: 外部利用者へ配布を開始する境界。
+
+macOS署名・公証に失敗した場合はDraft Releaseを公開しない。
+
+### セキュリティ
+
+- 証明書、証明書パスワード、Apple認証情報はGitHub Secretsにのみ保存する。
+- Secrets値をリポジトリ、Issue、PR、ログに出さない。
+- Entitlementsに不要なネットワーク、ファイル、Keychain権限を追加しない。
+- 署名・公証は配布元の信頼性を高める仕組みであり、入力検証やローカルデータ保護の代替にしない。
+
+### 破綻シナリオ
+
+- Secrets未設定のままmacOS Releaseを実行し、未署名DMGを公開してしまう。
+- 個人の署名IDや証明書をリポジトリに書き込み、秘密情報または個人情報として漏えいする。
+- Entitlementsへネットワーク権限を追加し、外部通信なしの利用者期待を壊す。
+- 公証失敗を見落としてDraft Releaseを公開する。
+- Windows未署名警告をmacOSの署名対応で解消済みと誤認する。
+
+### スケール
+
+macOS IntelとApple Siliconの2ジョブで同じSecretsを使う。Secretsはリポジトリ単位で管理し、証明書更新時はworkflow変更ではなくSecrets更新で対応する。
+
+## トレードオフ
+
+- Apple ID方式は導入が単純だが、App用パスワードとTeam IDの管理が必要。
+- App Store Connect API Key方式はCI向けに分離しやすいが、`.p8` キーファイルの安全な配置設計が追加で必要。
+- Secrets未設定でmacOSジョブを失敗させると一時的にRelease作成が止まるが、未署名artifactを配布する事故を防げる。
+
+## 代替案
+
+App Store Connect API Key方式を採用する。
+
+不採用理由:
+
+- MVPではApple ID方式の方が必要Secretsが少なく、GitHub Actions内で秘密鍵ファイルを生成する処理も不要。
+- API Key方式へ切り替える場合は、`APPLE_API_KEY`、`APPLE_API_ISSUER`、`APPLE_API_KEY_PATH` の扱いを別Issueで設計する。
+
+Ad-hoc署名を使う。
+
+不採用理由:
+
+- Gatekeeperの「Appleが検証できない」警告を根本的に解消できず、外部利用者向け配布の目的に合わない。
+
+## 受け入れ条件
+
+- TauriのmacOS署名前提設定が明示されている。
+- Release workflowでmacOS署名・公証Secretsが必須化されている。
+- Release workflowがTauri buildへ署名・公証環境変数を渡している。
+- `docs/release-checklist.md` に署名・公証確認項目がある。
+- 秘密情報をコード、Issue、PR、ログへ出さない運用が文書化されている。
+
+## 残る手動作業
+
+- Apple Developer ProgramでDeveloper ID Application証明書を発行する。
+- 証明書を `.p12` でexportしてbase64化し、GitHub Secretsへ登録する。
+- App用パスワードとTeam IDをGitHub Secretsへ登録する。
+- `app-v*` タグまたは手動実行でRelease workflowを走らせ、生成DMGを実機で開いてGatekeeper警告が解消されることを確認する。
+
+## 参考
+
+- Tauri v2 macOS Code Signing: https://v2.tauri.app/distribute/sign/macos/
+- Tauri v2 Environment Variables: https://v2.tauri.app/reference/environment-variables/

@@ -20,7 +20,8 @@ MVPで対象外にするもの:
 
 - 自動更新。
 - ストア配布。
-- コード署名と公証。
+- Windowsコード署名。
+- Mac App Store配布。
 - Linux配布。
 - 遠隔同期、クラウドバックアップ、分析、クラッシュレポート。
 
@@ -41,9 +42,10 @@ flowchart TD
     A["mainのCI成功"] --> B["リリース前チェックリスト確認"]
     B --> C["app-vX.Y.Zタグを作成"]
     C --> D["GitHub ActionsでWindows/macOSをビルド"]
-    D --> E["Draft Releaseへartifact添付"]
-    E --> F["Release notesと既知制限を確認"]
-    F --> G["公開"]
+    D --> E["macOS署名・公証"]
+    E --> F["Draft Releaseへartifact添付"]
+    F --> G["Release notesと既知制限を確認"]
+    G --> H["公開"]
 ```
 
 ## トランザクション境界
@@ -59,9 +61,10 @@ Draft Release公開前に問題が見つかった場合は、Releaseを公開せ
 ## 権限境界
 
 - Release workflowは `contents: write` のみを要求する。
+- macOS署名・公証用SecretsはGitHub Repository Secretsで管理する。
 - 通常のCIは `contents: read` のみを維持する。
 - アプリ本体にはリモート通信、分析、クラッシュアップロード、自動更新の権限を追加しない。
-- IssueやDiscussionsには秘密情報、個人データ、SQLite DB、ログを投稿しない。
+- IssueやDiscussionsには秘密情報、Apple証明書、Apple認証情報、個人データ、SQLite DB、ログを投稿しない。
 
 ## 受け入れ条件
 
@@ -70,12 +73,14 @@ Draft Release公開前に問題が見つかった場合は、Releaseを公開せ
 - `docs/adr/0004-public-distribution-license.md` にライセンスと配布方針が記録されている。
 - `app-v*` タグまたは手動実行でDraft Releaseを作るGitHub Actionsがある。
 - Release workflowが自動更新artifactを作らない設定である。
+- Release workflowがmacOS artifactをDeveloper ID署名・Apple公証する設定である。
 - `docs/release-checklist.md` に外部利用者向けRelease作成手順がある。
 
 ## セキュリティ観点
 
 - ユーザーのタスク名、メモ本文、通知本文、DBをIssueやReleaseへ添付しない。
-- 署名なしartifactによるOS警告を既知制限として扱う。
+- macOS署名・公証Secretsをリポジトリ、Issue、PR、Release notesに書かない。
+- Windows未署名artifactによるOS警告を既知制限として扱う。
 - Release artifact作成時に `.env`、秘密鍵、証明書、ログ、DBを含めない。
 - GitHub ActionsとDependabotの通信は開発・運用時通信であり、アプリ実行時通信ではない。
 
@@ -87,13 +92,15 @@ Draft Release公開前に問題が見つかった場合は、Releaseを公開せ
 
 ## トレードオフ
 
-- GitHub Releasesは手軽だが、署名やストア配布ほどの信頼表示はない。
+- GitHub Releasesは手軽だが、ストア配布ほどの信頼表示や自動配布導線はない。
 - MIT Licenseは外部利用しやすいが、再配布制限を細かくかけられない。
 - 自動更新を見送るため、利用者は新バージョンを手動で確認する必要がある。
+- macOS署名・公証により配布信頼性は上がるが、Apple Developer ProgramとSecrets更新の運用負荷が増える。
 
 ## 危険ケース
 
 - 未確認のDraft Releaseを公開して、壊れたインストーラーを配布する。
-- Release notesに既知制限を書かず、署名警告や通知権限の挙動を利用者が誤解する。
+- Release notesに既知制限を書かず、Windows署名警告や通知権限の挙動を利用者が誤解する。
 - Issueに実データやDBが添付され、公開リポジトリ上に残る。
 - `contents: write` 以外の不要な権限をRelease workflowに追加する。
+- macOS公証失敗を見落としてDraft Releaseを公開する。

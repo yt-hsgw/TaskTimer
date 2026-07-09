@@ -19,6 +19,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [011 右詳細ペインを実装する](011-ui-task-detail-pane.md) / GitHub #29
 - [012 カレンダーと設定を左ナビ配下のビューへ移管する](012-ui-calendar-settings-migration.md) / GitHub #28
 - [013 タイマー一時停止/再開と繰り返し設定を設計・実装する](013-timer-recurrence-detail-extensions.md) / GitHub #30
+- [014 macOS署名と公証を設定する](014-release-macos-signing-notarization.md) / GitHub #24
 
 ## 運用
 
