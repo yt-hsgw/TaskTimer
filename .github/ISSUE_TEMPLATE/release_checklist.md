@@ -73,6 +73,7 @@ assignees: ""
 - [ ] Draft Releaseとして作成されている
 - [ ] Draft Release artifactがRelease tagと同じcommitから生成されている
 - [ ] macOS署名・公証SecretsがGitHub Secretsに登録されている
+- [ ] `npm run check:macos-signing` が成功している
 - [ ] `docs/releases/<version>.md` のRelease notes草案を確認した
 - [ ] Release notesに変更点を記載した
 - [ ] Release notesに既知制限を記載した

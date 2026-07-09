@@ -28,6 +28,7 @@ GitHub Releasesから配布するmacOS DMGをDeveloper ID署名とApple公証済
 - 署名IDはリポジトリに固定値を書かず、`APPLE_SIGNING_IDENTITY` Secretから渡す。
 - Release workflowのmacOSジョブでは、署名・公証Secretsが未設定の場合にFail-fastする。
 - 公証認証はMVPではApple ID方式を正とし、`APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID` を使う。
+- Release workflow実行前に `npm run check:macos-signing` でTauri設定、Entitlements、GitHub Actions Secrets名、macOS検証ツールをpreflightする。
 
 ## 必要なGitHub Secrets
 
@@ -105,6 +106,7 @@ Ad-hoc署名を使う。
 - Apple Developer ProgramでDeveloper ID Application証明書を発行する。
 - 証明書を `.p12` でexportしてbase64化し、GitHub Secretsへ登録する。
 - App用パスワードとTeam IDをGitHub Secretsへ登録する。
+- `npm run check:macos-signing` でpreflightが成功することを確認する。
 - `app-v*` タグまたは手動実行でRelease workflowを走らせ、生成DMGを実機で開いてGatekeeper警告が解消されることを確認する。
 
 ## 参考

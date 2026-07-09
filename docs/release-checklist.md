@@ -54,6 +54,14 @@ GitHub Repository Secretsに以下を登録する。
 
 Secrets値はローカルファイル、Issue、PR、Release notesに保存しない。
 
+Release workflow実行前にpreflightを実行する。
+
+```bash
+npm run check:macos-signing
+```
+
+このコマンドはSecrets値を読み取らず、登録済みSecret名とTauri設定、Entitlements、macOS検証ツールの存在だけを確認する。失敗した場合はDraft Releaseを公開しない。
+
 ## 自動チェック
 
 GitHub Actionsで以下が成功していることを確認する。
@@ -121,12 +129,13 @@ macOSとWindowsの両方で確認する。
 3. `app-vX.Y.Z` タグを `main` の対象コミットへ作成してpushする。またはGitHub Actionsから `リリースビルド` を手動実行する。
 4. `リリースビルド` がDraft ReleaseへWindows/macOS artifactを添付することを確認する。
 5. `npm run check:release-target -- <version> origin/main` でtagと公開対象commitが一致することを確認する。
-6. macOSジョブで署名・公証が成功していることを確認する。
-7. macOSでは生成された `dmg`、Windowsでは生成された `nsis` artifactを手動でインストール確認する。
-8. `docs/releases/<version>.md` の草案をもとに、Release notesへ変更点、既知制限、手動確認結果、外部通信なしの方針を記載する。
-9. Windowsコード署名未設定によるOS警告の可能性を既知制限に記載する。
-10. 未解決のDependabot alertがある場合は、影響範囲、配布対象、追跡Issueを既知制限に記載する。
-11. Draft Releaseを公開する。
+6. `npm run check:macos-signing` でmacOS署名・公証preflightが成功することを確認する。
+7. macOSジョブで署名・公証が成功していることを確認する。
+8. macOSでは生成された `dmg`、Windowsでは生成された `nsis` artifactを手動でインストール確認する。
+9. `docs/releases/<version>.md` の草案をもとに、Release notesへ変更点、既知制限、手動確認結果、外部通信なしの方針を記載する。
+10. Windowsコード署名未設定によるOS警告の可能性を既知制限に記載する。
+11. 未解決のDependabot alertがある場合は、影響範囲、配布対象、追跡Issueを既知制限に記載する。
+12. Draft Releaseを公開する。
 
 ローカルでartifactを作る場合:
 
@@ -145,6 +154,7 @@ npm run tauri:build
 - CIは通るが、WindowsまたはmacOS固有の通知権限で通知が届かない。
 - インストール済みアプリでは通知表示名やアイコンが開発時と異なる。
 - macOS署名・公証Secretsが未設定でRelease workflowが失敗する。
+- macOS署名・公証preflightの失敗を無視してDraft Releaseを公開する。
 - 公証が失敗したDMGを公開してしまい、Gatekeeper警告により業務利用者へ配布できない。
 - Windows未署名artifactがOSセキュリティ警告により業務利用者へ配布しにくい。
 - リリースノートに既知制限がなく、利用者が通知やタイマー復元の仕様を誤解する。
