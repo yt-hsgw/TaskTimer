@@ -71,9 +71,11 @@ assignees: ""
 - [ ] GitHub Release tagが `app-vX.Y.Z` 形式
 - [ ] Draft Releaseとして作成されている
 - [ ] macOS署名・公証SecretsがGitHub Secretsに登録されている
+- [ ] `docs/releases/<version>.md` のRelease notes草案を確認した
 - [ ] Release notesに変更点を記載した
 - [ ] Release notesに既知制限を記載した
 - [ ] Release notesに外部通信なしと自動更新なしを記載した
+- [ ] 未解決のDependabot alertがある場合、影響範囲、配布対象、追跡Issueを既知制限に記載した
 - [ ] Windowsコード署名未設定によるOS警告の可能性を既知制限に記載した
 - [ ] Release artifactを手動インストール確認した
 - [ ] ロールバック判断基準を確認した
