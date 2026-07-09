@@ -1,34 +1,87 @@
 name: リリースビルド
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      include_macos:
+        description: "macOS artifactも作成する"
+        required: false
+        type: boolean
+        default: false
   push:
     tags:
       - "app-v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  prepare-release:
+    name: Release対象決定
+    runs-on: ubuntu-latest
+    outputs:
+      build_matrix: ${{ steps.matrix.outputs.build_matrix }}
+      include_macos: ${{ steps.matrix.outputs.include_macos }}
+    steps:
+      - name: ビルド対象matrixを決定
+        id: matrix
+        shell: bash
+        env:
+          INCLUDE_MACOS: ${{ github.event_name == 'workflow_dispatch' && inputs.include_macos || false }}
+        run: |
+          echo "include_macos=$INCLUDE_MACOS" >> "$GITHUB_OUTPUT"
+          if [ "$INCLUDE_MACOS" = "true" ]; then
+            echo 'build_matrix={"include":[{"label":"Windows","platform":"windows-latest","rustTarget":"","args":""},{"label":"macOS Apple Silicon","platform":"macos-latest","rustTarget":"aarch64-apple-darwin","args":"--target aarch64-apple-darwin"},{"label":"macOS Intel","platform":"macos-latest","rustTarget":"x86_64-apple-darwin","args":"--target x86_64-apple-darwin"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'build_matrix={"include":[{"label":"Windows","platform":"windows-latest","rustTarget":"","args":""}]}' >> "$GITHUB_OUTPUT"
+          fi
+
+  preflight-macos:
+    name: macOS配布前提確認
+    needs: prepare-release
+    if: ${{ needs.prepare-release.outputs.include_macos == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: macOS署名・公証Secretsを検証
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=0
+          for name in \
+            APPLE_CERTIFICATE \
+            APPLE_CERTIFICATE_PASSWORD \
+            APPLE_SIGNING_IDENTITY \
+            APPLE_ID \
+            APPLE_PASSWORD \
+            APPLE_TEAM_ID
+          do
+            if [ -z "${!name}" ]; then
+              echo "::error title=macOS signing secret missing::$name をGitHub Secretsに設定してください"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
   build-release:
     name: ${{ matrix.label }}
+    needs:
+      - prepare-release
+      - preflight-macos
+    if: ${{ always() && needs.prepare-release.result == 'success' && (needs.preflight-macos.result == 'success' || needs.preflight-macos.result == 'skipped') }}
     runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - label: macOS Apple Silicon
-            platform: macos-latest
-            rustTarget: aarch64-apple-darwin
-            args: "--target aarch64-apple-darwin"
-          - label: macOS Intel
-            platform: macos-latest
-            rustTarget: x86_64-apple-darwin
-            args: "--target x86_64-apple-darwin"
-          - label: Windows
-            platform: windows-latest
-            rustTarget: ""
-            args: ""
+      matrix: ${{ fromJson(needs.prepare-release.outputs.build_matrix) }}
 
     steps:
       - name: チェックアウト
@@ -104,7 +157,7 @@ jobs:
             ## ダウンロード
 
             - Windows: NSISインストーラーを利用してください。
-            - macOS: 利用中のCPUに合うDeveloper ID署名・公証済みDMGを利用してください。
+            - macOS: Apple署名・公証の準備が完了したReleaseでのみDMGを提供します。
 
             ## 主な機能
 
@@ -117,7 +170,9 @@ jobs:
 
             - アプリ実行時の外部通信はありません。
             - 自動更新はありません。新しいバージョンはGitHub Releasesで確認してください。
+            - v0.1.0はWindows版を主配布対象にします。
             - Windows版はコード署名未設定のため、OSの警告が表示される場合があります。
+            - macOS版はApple署名・公証準備が完了するまで後回しにします。
             - Linux版、ストア配布、自動更新はこのReleaseの対象外です。
 
             ## 公開前確認

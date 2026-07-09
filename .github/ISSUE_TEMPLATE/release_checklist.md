@@ -24,13 +24,8 @@ assignees: ""
 - [ ] TypeScript/Vite build
 - [ ] 秘密情報ファイル誤コミット確認
 
-## macOS手動確認
+## Windows手動確認
 
-- [ ] Developer ID署名済みDMGを確認
-- [ ] Apple公証済みDMGを確認
-- [ ] Gatekeeperで「Appleが検証できません」警告が出ない
-- [ ] `spctl --assess --type execute --verbose /Applications/TaskTimer.app`
-- [ ] `xcrun stapler validate /Applications/TaskTimer.app`
 - [ ] オフライン起動
 - [ ] タスク作成/完了/削除
 - [ ] サブタスク作成/完了/削除
@@ -43,8 +38,13 @@ assignees: ""
 - [ ] 通知権限拒否時の失敗表示と再試行
 - [ ] インストーラーartifact確認
 
-## Windows手動確認
+## macOS手動確認（macOS artifactを配布する場合のみ）
 
+- [ ] Developer ID署名済みDMGを確認
+- [ ] Apple公証済みDMGを確認
+- [ ] Gatekeeperで「Appleが検証できません」警告が出ない
+- [ ] `spctl --assess --type execute --verbose /Applications/TaskTimer.app`
+- [ ] `xcrun stapler validate /Applications/TaskTimer.app`
 - [ ] オフライン起動
 - [ ] タスク作成/完了/削除
 - [ ] サブタスク作成/完了/削除
@@ -72,15 +72,16 @@ assignees: ""
 - [ ] Release tagが意図したリリース対象commitを指している
 - [ ] Draft Releaseとして作成されている
 - [ ] Draft Release artifactがRelease tagと同じcommitから生成されている
-- [ ] macOS署名・公証SecretsがGitHub Secretsに登録されている
-- [ ] `npm run check:macos-signing` が成功している
+- [ ] Windows artifactを実機インストール確認した
+- [ ] macOS artifactを配布する場合、macOS署名・公証SecretsがGitHub Secretsに登録されている
+- [ ] macOS artifactを配布する場合、`npm run check:macos-signing` が成功している
 - [ ] `docs/releases/<version>.md` のRelease notes草案を確認した
 - [ ] Release notesに変更点を記載した
 - [ ] Release notesに既知制限を記載した
 - [ ] Release notesに外部通信なしと自動更新なしを記載した
 - [ ] 未解決のDependabot alertがある場合、影響範囲、配布対象、追跡Issueを既知制限に記載した
 - [ ] Windowsコード署名未設定によるOS警告の可能性を既知制限に記載した
-- [ ] Release artifactを手動インストール確認した
+- [ ] macOS artifactを配布しない場合、Release notesにmacOS後回しを記載した
 - [ ] ロールバック判断基準を確認した
 
 ## メモ
