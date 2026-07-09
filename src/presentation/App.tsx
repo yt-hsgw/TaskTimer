@@ -30,6 +30,8 @@ export function App() {
     kind: "list",
     listId: "default",
   });
+  const [selectedCalendarTarget, setSelectedCalendarTarget] =
+    useState<WorkTargetRef | null>(null);
   const [isNavigationOpen, setIsNavigationOpen] = useState(true);
   const [displayMode, setDisplayMode] =
     useState<NotificationDisplayMode>("title_only");
@@ -161,18 +163,28 @@ export function App() {
   }, [activeView, taskLists]);
 
   useEffect(() => {
-    if (activeView.kind !== "list" && activeView.kind !== "favorites") {
+    if (activeView.kind === "settings") {
       setSelectedTaskId(null);
+      setSelectedCalendarTarget(null);
       return;
     }
 
-    setSelectedTaskId((currentTaskId) => {
-      if (visibleTaskRows.some((task) => task.id === currentTaskId)) {
-        return currentTaskId;
+    if (activeView.kind === "calendar") {
+      if (selectedTaskId && !tasks.some((task) => task.id === selectedTaskId)) {
+        setSelectedTaskId(null);
+        setSelectedCalendarTarget(null);
       }
-      return null;
-    });
-  }, [activeView.kind, visibleTaskRows]);
+      return;
+    }
+
+    if (
+      selectedTaskId &&
+      !visibleTaskRows.some((task) => task.id === selectedTaskId)
+    ) {
+      setSelectedTaskId(null);
+      setSelectedCalendarTarget(null);
+    }
+  }, [activeView.kind, selectedTaskId, tasks, visibleTaskRows]);
 
   const runMutation = useCallback(
     async (operation: () => Promise<string | void>) => {
@@ -376,9 +388,33 @@ export function App() {
 
   const handleSelectView = useCallback((view: AppView) => {
     setActiveView(view);
+    if (view.kind !== "calendar") {
+      setSelectedCalendarTarget(null);
+    }
     if (window.matchMedia("(max-width: 767px)").matches) {
       setIsNavigationOpen(false);
     }
+  }, []);
+
+  const handleSelectCalendarItem = useCallback(
+    (item: WeekCalendarItem) => {
+      const nextTaskId = resolveTaskIdForTarget(tasks, item.target);
+      if (!nextTaskId) {
+        setErrorMessage("カレンダー項目の対象タスクが見つかりません。");
+        setSelectedTaskId(null);
+        setSelectedCalendarTarget(null);
+        return;
+      }
+      setErrorMessage(null);
+      setSelectedTaskId(nextTaskId);
+      setSelectedCalendarTarget(item.target);
+    },
+    [tasks],
+  );
+
+  const closeDetailPane = useCallback(() => {
+    setSelectedTaskId(null);
+    setSelectedCalendarTarget(null);
   }, []);
 
   return (
@@ -473,7 +509,7 @@ export function App() {
                   activeTimer={activeTimer}
                   displayMode={displayMode}
                   isMutating={isMutating}
-                  onClose={() => setSelectedTaskId(null)}
+                  onClose={closeDetailPane}
                   onUpdateTask={handleUpdateTask}
                   onUpdateSubtask={handleUpdateSubtask}
                   onCreateSubtask={handleCreateSubtask}
@@ -491,17 +527,45 @@ export function App() {
           ) : null}
 
           {activeView.kind === "calendar" ? (
-            <WeekCalendar
-              weekStartDate={weekStartDate}
-              items={items}
-              isLoading={isLoading}
-              onPreviousWeek={() =>
-                setWeekStartDate((current) => shiftDate(current, -7))
-              }
-              onNextWeek={() =>
-                setWeekStartDate((current) => shiftDate(current, 7))
-              }
-            />
+            <div
+              className={`task-workspace calendar-workspace ${
+                selectedTask ? "is-detail-open" : ""
+              }`}
+            >
+              <WeekCalendar
+                weekStartDate={weekStartDate}
+                items={items}
+                isLoading={isLoading}
+                selectedTarget={selectedCalendarTarget}
+                onPreviousWeek={() =>
+                  setWeekStartDate((current) => shiftDate(current, -7))
+                }
+                onNextWeek={() =>
+                  setWeekStartDate((current) => shiftDate(current, 7))
+                }
+                onSelectItem={handleSelectCalendarItem}
+              />
+              {selectedTask ? (
+                <TaskDetailPane
+                  task={selectedTask}
+                  activeTimer={activeTimer}
+                  displayMode={displayMode}
+                  isMutating={isMutating}
+                  onClose={closeDetailPane}
+                  onUpdateTask={handleUpdateTask}
+                  onUpdateSubtask={handleUpdateSubtask}
+                  onCreateSubtask={handleCreateSubtask}
+                  onStartTimer={handleStartTimer}
+                  onPauseTimer={handlePauseTimer}
+                  onResumeTimer={handleResumeTimer}
+                  onStopTimer={handleStopTimer}
+                  onCompleteTask={handleCompleteTask}
+                  onCompleteSubtask={handleCompleteSubtask}
+                  onDeleteTask={handleDeleteTask}
+                  onDeleteSubtask={handleDeleteSubtask}
+                />
+              ) : null}
+            </div>
           ) : null}
 
           {activeView.kind === "settings" ? (
@@ -542,6 +606,21 @@ function toDateInputValue(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function resolveTaskIdForTarget(
+  tasks: TaskWithSubtasks[],
+  target: WorkTargetRef,
+) {
+  if (target.type === "task") {
+    return tasks.some((task) => task.id === target.id) ? target.id : null;
+  }
+
+  return (
+    tasks.find((task) =>
+      task.subtasks.some((subtask) => subtask.id === target.id),
+    )?.id ?? null
+  );
 }
 
 function toErrorMessage(error: unknown) {
