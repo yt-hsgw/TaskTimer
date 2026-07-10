@@ -1,0 +1,218 @@
+name: Windowsインストーラー検証
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "検証するRelease tag"
+        required: true
+        type: string
+        default: "app-v0.1.0"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: NSISインストール検証
+    runs-on: windows-latest
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v5
+
+      - name: Draft ReleaseからWindowsインストーラーを取得
+        id: download
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+
+          gh release view $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --json tagName,targetCommitish,isDraft,assets
+
+          gh release download $env:RELEASE_TAG `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern "*windows_x64-setup.exe" `
+            --dir artifacts `
+            --clobber
+
+          $installer = Get-ChildItem -Path artifacts -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "Windows installer asset was not downloaded."
+          }
+
+          "INSTALLER_PATH=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "installer_path=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Downloaded installer: $($installer.FullName)"
+
+      - name: サイレントインストール
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (-not (Test-Path $env:INSTALLER_PATH)) {
+            throw "Installer does not exist: $env:INSTALLER_PATH"
+          }
+
+          $process = Start-Process `
+            -FilePath $env:INSTALLER_PATH `
+            -ArgumentList "/S" `
+            -Wait `
+            -PassThru
+
+          if ($process.ExitCode -ne 0) {
+            throw "Silent install failed with exit code $($process.ExitCode)."
+          }
+
+      - name: インストール結果を検証
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          function Get-ExistingPath {
+            param([string]$Path)
+            if ($Path -and (Test-Path -LiteralPath $Path)) {
+              return (Resolve-Path -LiteralPath $Path).Path
+            }
+            return $null
+          }
+
+          $registryRoots = @(
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+          )
+
+          $entries = foreach ($root in $registryRoots) {
+            Get-ItemProperty $root -ErrorAction SilentlyContinue |
+              Where-Object { $_.DisplayName -like "TaskTimer*" }
+          }
+
+          $installLocations = @($entries |
+            ForEach-Object { Get-ExistingPath $_.InstallLocation }) |
+            Where-Object { $_ } |
+            Select-Object -Unique
+
+          $fallbackLocations = @(
+            $env:LOCALAPPDATA
+            $env:ProgramFiles
+            ${env:ProgramFiles(x86)}
+          ) |
+            Where-Object { $_ } |
+            ForEach-Object { Get-ExistingPath (Join-Path $_ "TaskTimer") } |
+            Where-Object { $_ } |
+            Select-Object -Unique
+
+          $candidateRoots = @(@($installLocations) + @($fallbackLocations)) | Select-Object -Unique
+          if ($candidateRoots.Count -eq 0) {
+            throw "TaskTimer install location was not found."
+          }
+
+          $taskTimerExe = foreach ($root in $candidateRoots) {
+            Get-ChildItem -LiteralPath $root -Filter "TaskTimer.exe" -Recurse -ErrorAction SilentlyContinue
+          } | Select-Object -First 1
+
+          if (-not $taskTimerExe) {
+            throw "TaskTimer.exe was not found after install."
+          }
+
+          $uninstaller = foreach ($root in $candidateRoots) {
+            Get-ChildItem -LiteralPath $root -Filter "*uninstall*.exe" -Recurse -ErrorAction SilentlyContinue
+          } | Select-Object -First 1
+
+          if (-not $uninstaller) {
+            $uninstaller = $entries |
+              ForEach-Object {
+                if ($_.QuietUninstallString) { $_.QuietUninstallString } else { $_.UninstallString }
+              } |
+              Where-Object { $_ } |
+              Select-Object -First 1
+          }
+
+          if (-not $uninstaller) {
+            throw "TaskTimer uninstaller was not found after install."
+          }
+
+          $uninstallerCommand = if ($uninstaller -is [System.IO.FileInfo]) {
+            $uninstaller.FullName
+          } else {
+            [string]$uninstaller
+          }
+
+          "TASKTIMER_EXE=$($taskTimerExe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TASKTIMER_INSTALL_ROOTS=$($candidateRoots -join '|')" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TASKTIMER_UNINSTALLER=$uninstallerCommand" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          Write-Host "Installed executable: $($taskTimerExe.FullName)"
+          Write-Host "Uninstaller: $uninstallerCommand"
+
+      - name: サイレントアンインストール
+        if: always()
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (-not $env:TASKTIMER_UNINSTALLER) {
+            Write-Host "Uninstaller was not discovered; skipping uninstall."
+            exit 0
+          }
+
+          $uninstaller = $env:TASKTIMER_UNINSTALLER.Trim()
+          if ($uninstaller -match '^\s*"(?<path>[^"]+\.exe)"(?<args>.*)$') {
+            $path = $Matches.path
+          } elseif ($uninstaller -match '^\s*(?<path>.+?\.exe)(?<args>\s+.*)?$') {
+            $path = $Matches.path.Trim().Trim('"')
+          } else {
+            $path = $uninstaller.Trim('"')
+          }
+
+          if (-not (Test-Path -LiteralPath $path)) {
+            Write-Host "Uninstaller path does not exist; skipping uninstall: $path"
+            exit 0
+          }
+
+          $process = Start-Process `
+            -FilePath $path `
+            -ArgumentList "/S" `
+            -Wait `
+            -PassThru
+
+          if ($process.ExitCode -ne 0) {
+            throw "Silent uninstall failed with exit code $($process.ExitCode)."
+          }
+
+      - name: アンインストール結果を検証
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ($env:TASKTIMER_INSTALL_ROOTS) {
+            foreach ($root in $env:TASKTIMER_INSTALL_ROOTS -split "\|") {
+              if ($root -and (Test-Path -LiteralPath $root)) {
+                $remaining = Get-ChildItem -LiteralPath $root -Filter "TaskTimer.exe" -Recurse -ErrorAction SilentlyContinue |
+                  Select-Object -First 1
+                if ($remaining) {
+                  throw "TaskTimer.exe still exists after uninstall: $($remaining.FullName)"
+                }
+              }
+            }
+          }
+
+          $registryRoots = @(
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"
+          )
+
+          $entries = foreach ($root in $registryRoots) {
+            Get-ItemProperty $root -ErrorAction SilentlyContinue |
+              Where-Object { $_.DisplayName -like "TaskTimer*" }
+          }
+
+          if ($entries) {
+            throw "TaskTimer uninstall registry entry still exists after uninstall."
+          }
+
+          Write-Host "Windows installer smoke test completed."
