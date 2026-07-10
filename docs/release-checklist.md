@@ -79,7 +79,7 @@ GitHub Actionsで以下が成功していることを確認する。
 - Rust clippy。
 - npm audit。
 - TypeScript/Vite build。
-- Windows runnerでのインストーラー最低限検証。
+- 公開済みReleaseまたはpre-releaseに対するWindows runnerでのインストーラー最低限検証。
 - macOS artifactを含める場合のmacOS署名・公証Secrets検証。
 - `.env` と `.env.*` の誤コミット検出。
 - DB、鍵、証明書、ログ、個人環境パス、メールアドレスの誤コミット検出。
@@ -139,14 +139,15 @@ macOS artifactを配布する場合だけ確認する。
 3. `app-vX.Y.Z` タグを `main` の対象コミットへ作成してpushする。またはGitHub Actionsから `リリースビルド` を手動実行する。
 4. Draft ReleaseへWindows artifactが添付されることを確認する。
 5. `npm run check:release-target -- <version> origin/main` でtagと公開対象commitが一致することを確認する。
-6. `Windowsインストーラー検証` workflowを対象tagで手動実行し、Windows runner上のサイレントインストール/アンインストールが成功することを確認する。
-7. macOS artifactを配布する場合は、手動実行で `include_macos` を有効にし、`npm run check:macos-signing` と `preflight-macos` が成功することを確認する。
-8. macOS artifactを配布する場合は、macOSジョブで署名・公証が成功していることを確認する。
-9. Windowsでは生成された `nsis` artifactを手動でインストール確認する。macOS artifactを配布する場合は生成された `dmg` も手動確認する。
-10. `docs/releases/<version>.md` の草案をもとに、Release notesへ変更点、既知制限、手動確認結果、外部通信なしの方針を記載する。
-11. Windowsコード署名未設定によるOS警告の可能性を既知制限に記載する。
-12. 未解決のDependabot alertがある場合は、影響範囲、配布対象、追跡Issueを既知制限に記載する。
-13. Draft Releaseを公開する。
+6. Windows実機確認が未完了のまま一時公開する場合は、Release notesに未確認範囲を明記し、pre-releaseとして公開する。
+7. `Windowsインストーラー検証` workflowを対象tagで手動実行し、Windows runner上のサイレントインストール/アンインストールが成功することを確認する。
+8. macOS artifactを配布する場合は、手動実行で `include_macos` を有効にし、`npm run check:macos-signing` と `preflight-macos` が成功することを確認する。
+9. macOS artifactを配布する場合は、macOSジョブで署名・公証が成功していることを確認する。
+10. Windowsでは生成された `nsis` artifactを手動でインストール確認する。macOS artifactを配布する場合は生成された `dmg` も手動確認する。
+11. `docs/releases/<version>.md` の草案をもとに、Release notesへ変更点、既知制限、手動確認結果、外部通信なしの方針を記載する。
+12. Windowsコード署名未設定によるOS警告の可能性を既知制限に記載する。
+13. 未解決のDependabot alertがある場合は、影響範囲、配布対象、追跡Issueを既知制限に記載する。
+14. 通常Releaseとして扱える確認が完了したら、pre-releaseを解除して公開する。
 
 ローカルでartifactを作る場合:
 

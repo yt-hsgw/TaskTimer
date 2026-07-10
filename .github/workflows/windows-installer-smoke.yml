@@ -20,7 +20,7 @@ jobs:
       - name: チェックアウト
         uses: actions/checkout@v5
 
-      - name: Draft ReleaseからWindowsインストーラーを取得
+      - name: ReleaseからWindowsインストーラーを取得
         id: download
         shell: pwsh
         env:
@@ -111,17 +111,21 @@ jobs:
             throw "TaskTimer install location was not found."
           }
 
-          $taskTimerExe = foreach ($root in $candidateRoots) {
-            Get-ChildItem -LiteralPath $root -Filter "TaskTimer.exe" -Recurse -ErrorAction SilentlyContinue
-          } | Select-Object -First 1
+          $taskTimerExe = @(
+            foreach ($root in $candidateRoots) {
+              Get-ChildItem -LiteralPath $root -Filter "TaskTimer.exe" -Recurse -ErrorAction SilentlyContinue
+            }
+          ) | Select-Object -First 1
 
           if (-not $taskTimerExe) {
             throw "TaskTimer.exe was not found after install."
           }
 
-          $uninstaller = foreach ($root in $candidateRoots) {
-            Get-ChildItem -LiteralPath $root -Filter "*uninstall*.exe" -Recurse -ErrorAction SilentlyContinue
-          } | Select-Object -First 1
+          $uninstaller = @(
+            foreach ($root in $candidateRoots) {
+              Get-ChildItem -LiteralPath $root -Filter "*uninstall*.exe" -Recurse -ErrorAction SilentlyContinue
+            }
+          ) | Select-Object -First 1
 
           if (-not $uninstaller) {
             $uninstaller = $entries |

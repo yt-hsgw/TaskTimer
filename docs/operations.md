@@ -81,7 +81,7 @@ Dependency advisory workflowの制約:
 
 `リリースビルド` ワークフローは、`app-v*` タグまたは手動実行でWindows向けartifactをビルドし、Draft Releaseへ添付する。macOS artifactは手動実行で `include_macos` を有効にした場合だけ作成する。
 
-`Windowsインストーラー検証` ワークフローは、手動実行でDraft ReleaseのWindows artifactをGitHub-hosted Windows runnerへ取得し、NSISのサイレントインストールとサイレントアンインストールを検証する。
+`Windowsインストーラー検証` ワークフローは、手動実行で公開済みReleaseまたはpre-releaseのWindows artifactをGitHub-hosted Windows runnerへ取得し、NSISのサイレントインストールとサイレントアンインストールを検証する。
 
 Release workflowの権限:
 
@@ -102,13 +102,14 @@ Release workflowの制約:
 
 Windows installer smoke workflowの権限:
 
-- `contents: read`。Draft Release assetの読み取りに必要な最小権限として扱う。
+- `contents: read`。公開済みRelease assetの読み取りに必要な最小権限として扱う。
 
 Windows installer smoke workflowの制約:
 
 - 実機での通知、GUI操作、SmartScreen表示確認の代替にしない。
 - 成功した場合も、Release notesにはWindows実機確認または未確認状態を明示する。
-- Draft Release asset取得には `GITHUB_TOKEN` を使い、追加Secretは使わない。
+- Release asset取得には `GITHUB_TOKEN` を使い、追加Secretは使わない。
+- Draft Releaseを `GITHUB_TOKEN` で取得できない場合は、pre-releaseとして公開してから検証し、確認結果をRelease notesへ追記する。
 
 ## ブランチ運用
 
