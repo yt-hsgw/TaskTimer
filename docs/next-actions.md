@@ -15,14 +15,15 @@ GitHub上で継続追跡しているOpen Issue:
 1. 最終的な `main` に対して `app-v0.1.0` tagとDraft Releaseを作り直す。
 2. `npm run check:release-target -- 0.1.0 origin/main` でRelease tagと公開対象commitの一致を確認する。
 3. Release workflowの既定実行でWindows artifact生成が成功することを確認する。
-4. Windows NSISインストーラーを実機でインストール、起動、アンインストール確認する。
-5. Release Issue #20へWindows手動確認結果、既知制限、glib advisory #22の扱いを記録する。
-6. Release notesをWindows先行配布として最終化し、Draft Releaseを公開する。
-7. macOS配布が必要になったタイミングで、Apple Developer ProgramでDeveloper ID Application証明書を発行する。
-8. macOS署名・公証用GitHub Actions Secretsを登録する。
-9. `npm run check:macos-signing` を実行し、preflightが成功することを確認する。
-10. `リリースビルド` を手動実行し、`include_macos` を有効にしてmacOS Apple Silicon、macOS Intel artifactを生成する。
-11. macOS DMGを実機で開き、Gatekeeper警告が解消されることを確認する。
+4. `Windowsインストーラー検証` workflowでWindows runner上のサイレントインストール/アンインストール確認を行う。
+5. Windows NSISインストーラーを実機またはVMでインストール、起動、アンインストール確認する。
+6. Release Issue #20へWindows確認結果、既知制限、glib advisory #22の扱いを記録する。
+7. Release notesをWindows先行配布として最終化し、Draft Releaseを公開する。
+8. macOS配布が必要になったタイミングで、Apple Developer ProgramでDeveloper ID Application証明書を発行する。
+9. macOS署名・公証用GitHub Actions Secretsを登録する。
+10. `npm run check:macos-signing` を実行し、preflightが成功することを確認する。
+11. `リリースビルド` を手動実行し、`include_macos` を有効にしてmacOS Apple Silicon、macOS Intel artifactを生成する。
+12. macOS DMGを実機で開き、Gatekeeper警告が解消されることを確認する。
 
 ## 完了済み
 
@@ -61,6 +62,7 @@ GitHub上で継続追跡しているOpen Issue:
 - Release target検証スクリプト。
 - macOS署名・公証用のTauri設定、Release workflow下準備、preflight。
 - Windows優先Release workflowへの切り替え。
+- Windows runnerでのインストーラー最低限検証workflow。
 
 ## post-v0.1.0改善候補
 
@@ -87,6 +89,7 @@ GitHub上で継続追跡しているOpen Issue:
 ## 危険ケース
 
 - Windows先行Releaseなのに、Release notesがmacOS artifact提供済みであるように見える。
+- Windows runnerのインストール検証成功を、実機の通知、GUI、SmartScreen確認完了と誤認する。
 - macOS artifactを含める時に、macOS署名・公証Secrets未登録のままRelease workflowを実行する。
 - `npm run check:macos-signing` の失敗を無視してmacOS artifactを公開する。
 - 古いcommitで生成したDraft Release artifactを公開し、Release notesや手動確認結果と実artifactが食い違う。
