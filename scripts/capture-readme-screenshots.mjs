@@ -58,7 +58,20 @@ try {
   await waitForExpression(
     client,
     sessionId,
-    `Boolean(document.querySelector(".task-list-item") && document.querySelector(".calendar-item") && !document.querySelector(".app-alert"))`,
+    `Boolean(document.querySelector(".left-navigation") && document.querySelector(".task-row-content") && !document.querySelector(".app-alert"))`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".task-row-content")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(".task-detail-pane") && !document.querySelector(".app-alert"))`,
   );
   await waitForExpression(
     client,
@@ -92,11 +105,13 @@ try {
 } finally {
   if (chromeProcess) {
     chromeProcess.kill("SIGTERM");
+    await waitForProcessExit(chromeProcess, 3000);
   }
   if (viteProcess) {
     viteProcess.kill("SIGTERM");
+    await waitForProcessExit(viteProcess, 3000);
   }
-  await rm(userDataDir, { recursive: true, force: true });
+  await rmWithRetry(userDataDir);
 }
 
 function startVite(port) {
@@ -339,6 +354,34 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function waitForProcessExit(child, timeoutMs) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(resolve, timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+}
+
+async function rmWithRetry(targetPath, attempts = 5) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await rm(targetPath, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      await sleep(200 * attempt);
+    }
+  }
+  throw lastError;
+}
+
 function buildTauriInvokeMockSource() {
   return `
 (() => {
@@ -346,10 +389,14 @@ function buildTauriInvokeMockSource() {
   const tasks = [
     {
       id: "task-weekly-review",
+      listId: "default",
       title: "週次レビュー資料を作成",
       status: "in_progress",
+      isFavorite: true,
       plannedStartDate: "2026-07-06",
       dueDate: "2026-07-10",
+      timerTargetSeconds: 5400,
+      recurrenceRule: { frequency: "weekly", interval: 1 },
       memo: "レビュー観点を整理し、会議前に共有する。",
       sortOrder: 10,
       completedAt: null,
@@ -364,6 +411,8 @@ function buildTauriInvokeMockSource() {
           status: "done",
           plannedStartDate: "2026-07-06",
           dueDate: "2026-07-07",
+          timerTargetSeconds: 1800,
+          recurrenceRule: null,
           memo: "",
           sortOrder: 10,
           completedAt: "2026-07-07T03:00:00Z",
@@ -378,6 +427,8 @@ function buildTauriInvokeMockSource() {
           status: "in_progress",
           plannedStartDate: "2026-07-08",
           dueDate: "2026-07-09",
+          timerTargetSeconds: 2400,
+          recurrenceRule: null,
           memo: "",
           sortOrder: 20,
           completedAt: null,
@@ -389,10 +440,14 @@ function buildTauriInvokeMockSource() {
     },
     {
       id: "task-release-check",
+      listId: "default",
       title: "リリース前チェック",
       status: "todo",
+      isFavorite: false,
       plannedStartDate: "2026-07-09",
       dueDate: "2026-07-10",
+      timerTargetSeconds: 3600,
+      recurrenceRule: null,
       memo: "macOSとWindowsでインストール確認を行う。",
       sortOrder: 20,
       completedAt: null,
@@ -408,9 +463,60 @@ function buildTauriInvokeMockSource() {
     startedAt: "2026-07-08T08:30:00Z",
     stoppedAt: null,
     elapsedSeconds: null,
+    pausedAt: null,
     deletedAt: null,
     createdAt: "2026-07-08T08:30:00Z"
   };
+  const taskLists = [
+    {
+      id: "default",
+      name: "タスク",
+      sortOrder: 0,
+      taskCount: 2,
+      activeTaskCount: 2,
+      completedTaskCount: 0,
+      createdAt: now,
+      updatedAt: now
+    }
+  ];
+  const taskRows = [
+    {
+      id: "task-weekly-review",
+      listId: "default",
+      title: "週次レビュー資料を作成",
+      status: "in_progress",
+      isFavorite: true,
+      plannedStartDate: "2026-07-06",
+      dueDate: "2026-07-10",
+      timerTargetSeconds: 5400,
+      sortOrder: 10,
+      completedAt: null,
+      createdAt: now,
+      updatedAt: now,
+      subtaskTotalCount: 2,
+      completedSubtaskCount: 1,
+      activeTimerTarget: { type: "subtask", id: "subtask-summary" },
+      isTimerActive: true
+    },
+    {
+      id: "task-release-check",
+      listId: "default",
+      title: "リリース前チェック",
+      status: "todo",
+      isFavorite: false,
+      plannedStartDate: "2026-07-09",
+      dueDate: "2026-07-10",
+      timerTargetSeconds: 3600,
+      sortOrder: 20,
+      completedAt: null,
+      createdAt: now,
+      updatedAt: now,
+      subtaskTotalCount: 0,
+      completedSubtaskCount: 0,
+      activeTimerTarget: null,
+      isTimerActive: false
+    }
+  ];
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -433,6 +539,8 @@ function buildTauriInvokeMockSource() {
       const commands = {
         health_check: () => "tauri-ready",
         list_tasks: () => clone(tasks),
+        list_task_lists: () => clone(taskLists),
+        list_task_rows: () => clone(taskRows),
         list_week_calendar_items: () => [
           {
             id: "cal-review-start",
