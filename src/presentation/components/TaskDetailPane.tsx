@@ -174,7 +174,9 @@ export function TaskDetailPane({
       <div className="detail-pane-header">
         <div className="detail-title-row">
           <button
-            className="task-check-button detail-check-button"
+            className={`task-check-button detail-check-button ${
+              task.status === "done" ? "is-done" : ""
+            }`}
             type="button"
             aria-label={
               task.status === "done"

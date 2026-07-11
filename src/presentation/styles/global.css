@@ -719,7 +719,8 @@ button {
   padding: 0;
 }
 
-.task-row.is-done .task-check-button {
+.task-row.is-done .task-check-button,
+.task-check-button.is-done {
   background: var(--green);
   border-color: var(--green);
   color: #ffffff;
