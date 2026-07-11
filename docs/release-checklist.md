@@ -95,6 +95,7 @@ cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 npm run build
+npm run audit:runtime-privacy
 git diff --check
 ```
 
@@ -125,6 +126,7 @@ macOS artifactを配布する場合だけ確認する。
 
 - アプリ実行時の外部通信を追加していない。
 - リモートフォント、リモート画像、分析、クラッシュアップロード、自動更新通信を追加していない。
+- `npm run audit:runtime-privacy` が成功している。
 - 新しいTauri権限を追加した場合は、PR本文と設計資料に理由がある。
 - タスク名、サブタスク名、メモ本文、通知本文をログに出していない。
 - メモ本文をHTMLとして描画していない。

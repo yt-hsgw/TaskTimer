@@ -91,3 +91,27 @@ Application境界で検証する。
 - ユーザー内容をHTMLとして描画していないか。
 - アプリデータディレクトリ外のファイルを読み書きしていないか。
 - タイマーまたは通知のトランザクション境界に影響していないか。
+
+## 実行時プライバシー監査
+
+PRとRelease前ゲートでは、静的監査として次を実行する。
+
+```bash
+npm run audit:runtime-privacy
+```
+
+この監査で確認すること:
+
+- 実行時コードに `fetch`、`XMLHttpRequest`、`WebSocket`、`EventSource`、`sendBeacon` がない。
+- 実行時コードに `console.*`、`println!`、`eprintln!`、`dbg!`、`tracing::`、`log::` がない。
+- 実行時コードにリモートURL、CSS import、リモートフォント/画像の入口がない。
+- Tauri CSPがリモートオリジンやワイルドカードを許可していない。
+- Tauri CapabilityにHTTP、Updater、Shell、Opener、WebSocket系の権限がない。
+- macOS entitlementにnetwork client/serverがない。
+- 直接依存に実行時通信やクラッシュ送信を導入しやすい依存がない。
+
+対象外:
+
+- GitHub Actions、Dependabot、npm/cargo installなどの開発・運用時通信。
+- READMEスクリーンショット生成用のローカルVite/Chrome DevTools接続。
+- Windows実機またはVMでのパケット監視。これはRelease前の手動確認として別途実施する。

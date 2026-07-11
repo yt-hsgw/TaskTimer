@@ -98,6 +98,9 @@ jobs:
       - name: フロントエンドをビルド
         run: npm run build
 
+      - name: 実行時プライバシー監査を実行
+        run: npm run audit:runtime-privacy
+
       - name: 秘密情報ファイルの誤コミットを確認
         run: |
           if git ls-files | grep -E '(^|/)(\.env(\..*)?|.*\.(db|sqlite|sqlite3|pem|key|p12|mobileprovision|log))$'; then

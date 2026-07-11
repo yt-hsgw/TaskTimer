@@ -15,6 +15,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "audit:runtime-privacy": "node scripts/audit-runtime-privacy.mjs",
     "check:glib-advisory": "node scripts/check-glib-advisory.mjs",
     "check:macos-signing": "node scripts/check-macos-signing-preflight.mjs",
     "check:release-target": "node scripts/check-release-target.mjs",
