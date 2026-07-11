@@ -26,6 +26,12 @@ export function LeftNavigation({
   return (
     <aside className="left-navigation" aria-label="主要ナビゲーション">
       <div className="nav-header">
+        {isOpen ? (
+          <div className="nav-brand">
+            <strong>TaskTimer</strong>
+            <span>ローカルタスク</span>
+          </div>
+        ) : null}
         <button
           className="nav-icon-button"
           type="button"
@@ -36,12 +42,6 @@ export function LeftNavigation({
         >
           ☰
         </button>
-        {isOpen ? (
-          <div className="nav-brand">
-            <strong>TaskTimer</strong>
-            <span>ローカルタスク</span>
-          </div>
-        ) : null}
       </div>
 
       <nav className="nav-sections" aria-label="ビュー">

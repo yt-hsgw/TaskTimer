@@ -340,6 +340,34 @@ impl TaskTimerCommandRepository for SqliteDatabase {
         })
     }
 
+    fn reopen_task(&self, task_id: String, now: String) -> RepositoryResult<TaskRecord> {
+        self.with_transaction(|transaction| {
+            let task = select_existing_task_by_id(transaction, &task_id)?;
+            if task.status == WorkStatus::Archived {
+                return Err("アーカイブ済みタスクは未完了に戻せません".to_string());
+            }
+            if task.status != WorkStatus::Done {
+                return Ok(task);
+            }
+
+            transaction
+                .execute(
+                    "
+                    UPDATE tasks
+                    SET status = 'todo',
+                        completed_at = NULL,
+                        updated_at = ?1
+                    WHERE id = ?2
+                      AND deleted_at IS NULL
+                    ",
+                    params![now, task_id],
+                )
+                .map_err(|error| format!("タスクを未完了に戻せません: {error}"))?;
+
+            select_existing_task_by_id(transaction, &task_id)
+        })
+    }
+
     fn complete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<SubtaskRecord> {
         self.with_transaction(|transaction| {
             let subtask = select_existing_subtask_by_id(transaction, &subtask_id)?;
@@ -3346,6 +3374,33 @@ mod tests {
             Some("2026-07-06T00:00:00Z")
         );
         assert_eq!(unchanged_subtask.status, WorkStatus::Todo);
+    }
+
+    #[test]
+    fn reopen_task_moves_done_task_back_to_active_rows() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let reopen_clock = FixedClock {
+            now: "2026-07-06T00:10:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &create_clock, draft("戻せるタスク")).expect("task");
+
+        usecases::complete_task(&database, &create_clock, task.id.clone(), true).expect("complete");
+        let reopened =
+            usecases::reopen_task(&database, &reopen_clock, task.id.clone()).expect("reopen");
+        let rows = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("task rows");
+
+        assert_eq!(reopened.status, WorkStatus::Todo);
+        assert_eq!(reopened.completed_at, None);
+        assert_eq!(reopened.updated_at, "2026-07-06T00:10:00Z");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, WorkStatus::Todo);
+        assert_eq!(rows[0].completed_at, None);
     }
 
     #[test]

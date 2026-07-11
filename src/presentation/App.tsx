@@ -18,8 +18,11 @@ import { TaskDetailPane } from "./components/TaskDetailPane";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { LeftNavigation, type AppView } from "./components/LeftNavigation";
 
+type LoadSnapshotOptions = {
+  showLoading?: boolean;
+};
+
 export function App() {
-  const [health, setHealth] = useState("frontend-only");
   const [tasks, setTasks] = useState<TaskWithSubtasks[]>([]);
   const [taskRows, setTaskRows] = useState<TaskRow[]>([]);
   const [taskLists, setTaskLists] = useState<TaskListItem[]>([]);
@@ -40,20 +43,11 @@ export function App() {
   const [weekStartDate, setWeekStartDate] = useState(getCurrentWeekStartDate);
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
+  const [isCreatingTaskPending, setIsCreatingTaskPending] = useState(false);
+  const [pendingTaskActionIds, setPendingTaskActionIds] = useState<
+    ReadonlySet<string>
+  >(new Set());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const runtimeLabel = useMemo(() => {
-    if (health === "tauri-ready") {
-      return "Tauri接続済み";
-    }
-    if (health === "tauri-unavailable") {
-      return "Tauri未接続";
-    }
-    if (health === "frontend-only") {
-      return "フロントエンドのみ";
-    }
-    return health;
-  }, [health]);
 
   const favoriteCount = useMemo(
     () => tasks.filter((task) => task.isFavorite).length,
@@ -94,12 +88,15 @@ export function App() {
     return visibleTasks.find((task) => task.id === selectedTaskId) ?? null;
   }, [selectedTaskId, visibleTasks]);
 
-  const loadSnapshot = useCallback(async () => {
-    setIsLoading(true);
+  const loadSnapshot = useCallback(async (options?: LoadSnapshotOptions) => {
+    const showLoading = options?.showLoading ?? true;
+    if (showLoading) {
+      setIsLoading(true);
+    }
     setErrorMessage(null);
 
     try {
-      const nextHealth = await tauriTaskTimerGateway.healthCheck();
+      await tauriTaskTimerGateway.healthCheck();
       const listId =
         activeView.kind === "list" ? activeView.listId : undefined;
       const [
@@ -119,7 +116,6 @@ export function App() {
           tauriTaskTimerGateway.getNotificationDisplayMode(),
         ]);
 
-      setHealth(nextHealth);
       setTasks(nextTasks);
       setTaskRows(nextTaskRows);
       setTaskLists(nextTaskLists);
@@ -130,15 +126,16 @@ export function App() {
         await tauriTaskTimerGateway.dispatchDueNotifications(),
       );
     } catch (error) {
-      setHealth("tauri-unavailable");
       setErrorMessage(toErrorMessage(error));
     } finally {
-      setIsLoading(false);
+      if (showLoading) {
+        setIsLoading(false);
+      }
     }
   }, [activeView, weekStartDate]);
 
   useEffect(() => {
-    void loadSnapshot();
+    void loadSnapshot({ showLoading: true });
   }, [loadSnapshot]);
 
   useEffect(() => {
@@ -193,7 +190,7 @@ export function App() {
 
       try {
         const nextSelectedTaskId = await operation();
-        await loadSnapshot();
+        await loadSnapshot({ showLoading: false });
         if (nextSelectedTaskId) {
           setSelectedTaskId(nextSelectedTaskId);
         }
@@ -208,13 +205,57 @@ export function App() {
     [loadSnapshot],
   );
 
+  const runTaskActionMutation = useCallback(
+    async (taskId: string, operation: () => Promise<string | void>) => {
+      setPendingTaskActionIds((current) => new Set(current).add(taskId));
+      setErrorMessage(null);
+
+      try {
+        const nextSelectedTaskId = await operation();
+        await loadSnapshot({ showLoading: false });
+        if (nextSelectedTaskId) {
+          setSelectedTaskId(nextSelectedTaskId);
+        }
+        return true;
+      } catch (error) {
+        setErrorMessage(toErrorMessage(error));
+        return false;
+      } finally {
+        setPendingTaskActionIds((current) => {
+          const next = new Set(current);
+          next.delete(taskId);
+          return next;
+        });
+      }
+    },
+    [loadSnapshot],
+  );
+
+  const runCreateTaskMutation = useCallback(
+    async (operation: () => Promise<void>) => {
+      setIsCreatingTaskPending(true);
+      setErrorMessage(null);
+
+      try {
+        await operation();
+        await loadSnapshot({ showLoading: false });
+        return true;
+      } catch (error) {
+        setErrorMessage(toErrorMessage(error));
+        return false;
+      } finally {
+        setIsCreatingTaskPending(false);
+      }
+    },
+    [loadSnapshot],
+  );
+
   const handleCreateTask = useCallback(
     (input: WorkItemDraft) =>
-      runMutation(async () => {
-        const task = await tauriTaskTimerGateway.createTask(input);
-        return task.id;
+      runCreateTaskMutation(async () => {
+        await tauriTaskTimerGateway.createTask(input);
       }),
-    [runMutation],
+    [runCreateTaskMutation],
   );
 
   const handleCreateSubtask = useCallback(
@@ -293,8 +334,14 @@ export function App() {
     [runMutation],
   );
 
-  const handleCompleteTask = useCallback(
+  const handleToggleTaskCompletion = useCallback(
     (task: TaskWithSubtasks) => {
+      if (task.status === "done") {
+        return runTaskActionMutation(task.id, async () => {
+          await tauriTaskTimerGateway.reopenTask(task.id);
+        });
+      }
+
       const hasIncompleteSubtasks = task.subtasks.some(
         (subtask) => subtask.status !== "done",
       );
@@ -307,12 +354,11 @@ export function App() {
         return Promise.resolve(false);
       }
 
-      return runMutation(async () => {
+      return runTaskActionMutation(task.id, async () => {
         await tauriTaskTimerGateway.completeTask(task.id, hasIncompleteSubtasks);
-        return task.id;
       });
     },
-    [runMutation],
+    [runTaskActionMutation],
   );
 
   const handleCompleteSubtask = useCallback(
@@ -326,11 +372,10 @@ export function App() {
 
   const handleToggleTaskFavorite = useCallback(
     (taskId: string, isFavorite: boolean) =>
-      runMutation(async () => {
+      runTaskActionMutation(taskId, async () => {
         await tauriTaskTimerGateway.toggleTaskFavorite(taskId, isFavorite);
-        return taskId;
       }),
-    [runMutation],
+    [runTaskActionMutation],
   );
 
   const handleDeleteTask = useCallback(
@@ -425,23 +470,7 @@ export function App() {
     >
       <header className="top-bar">
         <div className="top-bar-title">
-          <button
-            className="top-nav-toggle"
-            type="button"
-            aria-label={isNavigationOpen ? "左ペインを閉じる" : "左ペインを開く"}
-            title="左ペインを開閉"
-            onClick={() => setIsNavigationOpen((current) => !current)}
-          >
-            ☰
-          </button>
-          <div>
-            <p className="eyebrow">オフライン対応デスクトップタスクタイマー</p>
-            <h1>TaskTimer</h1>
-          </div>
-        </div>
-        <div className="runtime-status">
-          <span>実行環境</span>
-          <strong>{runtimeLabel}</strong>
+          <h1>TaskTimer</h1>
         </div>
       </header>
 
@@ -449,7 +478,10 @@ export function App() {
         <div className="app-alert" role="alert">
           <strong>処理に失敗しました</strong>
           <span>{errorMessage}</span>
-          <button type="button" onClick={() => void loadSnapshot()}>
+          <button
+            type="button"
+            onClick={() => void loadSnapshot({ showLoading: true })}
+          >
             再読み込み
           </button>
         </div>
@@ -498,9 +530,11 @@ export function App() {
                 showTaskForm={activeView.kind === "list"}
                 isLoading={isLoading}
                 isMutating={isMutating}
+                isCreatingTaskPending={isCreatingTaskPending}
+                pendingTaskActionIds={pendingTaskActionIds}
                 onSelectTask={setSelectedTaskId}
                 onCreateTask={handleCreateTask}
-                onCompleteTask={handleCompleteTask}
+                onToggleTaskCompletion={handleToggleTaskCompletion}
                 onToggleTaskFavorite={handleToggleTaskFavorite}
               />
               {selectedTask ? (
@@ -517,7 +551,7 @@ export function App() {
                   onPauseTimer={handlePauseTimer}
                   onResumeTimer={handleResumeTimer}
                   onStopTimer={handleStopTimer}
-                  onCompleteTask={handleCompleteTask}
+                  onToggleTaskCompletion={handleToggleTaskCompletion}
                   onCompleteSubtask={handleCompleteSubtask}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
@@ -559,7 +593,7 @@ export function App() {
                   onPauseTimer={handlePauseTimer}
                   onResumeTimer={handleResumeTimer}
                   onStopTimer={handleStopTimer}
-                  onCompleteTask={handleCompleteTask}
+                  onToggleTaskCompletion={handleToggleTaskCompletion}
                   onCompleteSubtask={handleCompleteSubtask}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}

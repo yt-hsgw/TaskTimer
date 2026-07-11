@@ -16,9 +16,11 @@ type TaskPanelProps = {
   showTaskForm?: boolean;
   isLoading: boolean;
   isMutating: boolean;
+  isCreatingTaskPending: boolean;
+  pendingTaskActionIds: ReadonlySet<string>;
   onSelectTask(taskId: string): void;
   onCreateTask(input: WorkItemDraft): Promise<boolean>;
-  onCompleteTask(task: TaskWithSubtasks): Promise<boolean>;
+  onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
 };
 
@@ -39,9 +41,11 @@ export function TaskPanel({
   showTaskForm = true,
   isLoading,
   isMutating,
+  isCreatingTaskPending,
+  pendingTaskActionIds,
   onSelectTask,
   onCreateTask,
-  onCompleteTask,
+  onToggleTaskCompletion,
   onToggleTaskFavorite,
 }: TaskPanelProps) {
   const [isCreatingTask, setIsCreatingTask] = useState(false);
@@ -60,6 +64,7 @@ export function TaskPanel({
   );
   const incompleteRows = taskRows.filter((task) => task.status !== "done");
   const completedRows = taskRows.filter((task) => task.status === "done");
+  const isCreateDisabled = isMutating || isCreatingTaskPending;
 
   useEffect(() => {
     if (!showTaskForm) {
@@ -101,7 +106,7 @@ export function TaskPanel({
     if (!task) {
       return;
     }
-    void onCompleteTask(task);
+    void onToggleTaskCompletion(task);
   }
 
   return (
@@ -111,7 +116,21 @@ export function TaskPanel({
           <p className="eyebrow">{eyebrow}</p>
           <h2 id="task-panel-title">{title}</h2>
         </div>
-        <span className="task-count-badge">{taskRows.length}</span>
+        <div className="panel-heading-actions">
+          <span className="task-count-badge">{taskRows.length}</span>
+          {showTaskForm ? (
+            <button
+              className="task-add-button"
+              type="button"
+              aria-label="タスクを追加"
+              title="タスクを追加"
+              disabled={isCreateDisabled || isCreatingTask}
+              onClick={() => setIsCreatingTask(true)}
+            >
+              ＋
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="task-board" aria-label="タスク一覧">
@@ -125,110 +144,98 @@ export function TaskPanel({
             key={row.id}
             row={row}
             isSelected={row.id === selectedTaskId}
-            isMutating={isMutating}
+            isMutating={isMutating || pendingTaskActionIds.has(row.id)}
             onSelectTask={onSelectTask}
-            onCompleteTask={handleCompleteRow}
+            onToggleTaskCompletion={handleCompleteRow}
             onToggleTaskFavorite={onToggleTaskFavorite}
           />
         ))}
 
-        {showTaskForm ? (
+        {showTaskForm && isCreatingTask ? (
           <div className="task-composer">
-            {isCreatingTask ? (
-              <form
-                className="work-form inline-create-form"
-                onSubmit={(event) => void handleCreateTask(event)}
-              >
+            <form
+              className="work-form inline-create-form"
+              onSubmit={(event) => void handleCreateTask(event)}
+            >
+              <label>
+                <span>タスク名</span>
+                <input
+                  ref={taskTitleInputRef}
+                  value={taskDraft.title}
+                  onChange={(event) =>
+                    setTaskDraft((current) => ({
+                      ...current,
+                      title: event.target.value,
+                    }))
+                  }
+                  placeholder="例: 週次レビュー"
+                  disabled={isCreateDisabled}
+                  maxLength={120}
+                  required
+                />
+              </label>
+              <div className="date-fields">
                 <label>
-                  <span>タスク名</span>
+                  <span>開始日</span>
                   <input
-                    ref={taskTitleInputRef}
-                    value={taskDraft.title}
+                    type="date"
+                    value={taskDraft.plannedStartDate ?? ""}
                     onChange={(event) =>
                       setTaskDraft((current) => ({
                         ...current,
-                        title: event.target.value,
+                        plannedStartDate: event.target.value,
                       }))
                     }
-                    placeholder="例: 週次レビュー"
-                    disabled={isMutating}
-                    maxLength={120}
-                    required
+                    disabled={isCreateDisabled}
                   />
                 </label>
-                <div className="date-fields">
-                  <label>
-                    <span>開始日</span>
-                    <input
-                      type="date"
-                      value={taskDraft.plannedStartDate ?? ""}
-                      onChange={(event) =>
-                        setTaskDraft((current) => ({
-                          ...current,
-                          plannedStartDate: event.target.value,
-                        }))
-                      }
-                      disabled={isMutating}
-                    />
-                  </label>
-                  <label>
-                    <span>終了日</span>
-                    <input
-                      type="date"
-                      value={taskDraft.dueDate ?? ""}
-                      onChange={(event) =>
-                        setTaskDraft((current) => ({
-                          ...current,
-                          dueDate: event.target.value,
-                        }))
-                      }
-                      disabled={isMutating}
-                    />
-                  </label>
-                </div>
                 <label>
-                  <span>メモ</span>
-                  <textarea
-                    value={taskDraft.memo ?? ""}
+                  <span>終了日</span>
+                  <input
+                    type="date"
+                    value={taskDraft.dueDate ?? ""}
                     onChange={(event) =>
                       setTaskDraft((current) => ({
                         ...current,
-                        memo: event.target.value,
+                        dueDate: event.target.value,
                       }))
                     }
-                    disabled={isMutating}
-                    rows={3}
+                    disabled={isCreateDisabled}
                   />
                 </label>
-                <div className="composer-actions">
-                  <button
-                    className="primary-button"
-                    type="submit"
-                    disabled={isMutating}
-                  >
-                    追加
-                  </button>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={isMutating}
-                    onClick={() => setIsCreatingTask(false)}
-                  >
-                    キャンセル
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <button
-                className="task-add-button"
-                type="button"
-                disabled={isMutating}
-                onClick={() => setIsCreatingTask(true)}
-              >
-                <span aria-hidden="true">＋</span>
-                タスクの追加
-              </button>
-            )}
+              </div>
+              <label>
+                <span>メモ</span>
+                <textarea
+                  value={taskDraft.memo ?? ""}
+                  onChange={(event) =>
+                    setTaskDraft((current) => ({
+                      ...current,
+                      memo: event.target.value,
+                    }))
+                  }
+                  disabled={isCreateDisabled}
+                  rows={3}
+                />
+              </label>
+              <div className="composer-actions">
+                <button
+                  className="primary-button"
+                  type="submit"
+                  disabled={isCreateDisabled}
+                >
+                  追加
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={isCreateDisabled}
+                  onClick={() => setIsCreatingTask(false)}
+                >
+                  キャンセル
+                </button>
+              </div>
+            </form>
           </div>
         ) : null}
 
@@ -251,9 +258,9 @@ export function TaskPanel({
                     key={row.id}
                     row={row}
                     isSelected={row.id === selectedTaskId}
-                    isMutating={isMutating}
+                    isMutating={isMutating || pendingTaskActionIds.has(row.id)}
                     onSelectTask={onSelectTask}
-                    onCompleteTask={handleCompleteRow}
+                    onToggleTaskCompletion={handleCompleteRow}
                     onToggleTaskFavorite={onToggleTaskFavorite}
                   />
                 ))}
@@ -271,7 +278,7 @@ type TaskRowItemProps = {
   isSelected: boolean;
   isMutating: boolean;
   onSelectTask(taskId: string): void;
-  onCompleteTask(row: TaskRow): void;
+  onToggleTaskCompletion(row: TaskRow): void;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
 };
 
@@ -280,7 +287,7 @@ function TaskRowItem({
   isSelected,
   isMutating,
   onSelectTask,
-  onCompleteTask,
+  onToggleTaskCompletion,
   onToggleTaskFavorite,
 }: TaskRowItemProps) {
   const hasProgress = row.subtaskTotalCount > 0;
@@ -298,10 +305,10 @@ function TaskRowItem({
       <button
         className="task-check-button"
         type="button"
-        aria-label={`${row.title}を完了`}
-        title="完了"
-        disabled={isMutating || isDone}
-        onClick={() => onCompleteTask(row)}
+        aria-label={isDone ? `${row.title}を未完了に戻す` : `${row.title}を完了`}
+        title={isDone ? "未完了に戻す" : "完了"}
+        disabled={isMutating}
+        onClick={() => onToggleTaskCompletion(row)}
       >
         {isDone ? "✓" : ""}
       </button>

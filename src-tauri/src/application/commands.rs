@@ -170,6 +170,15 @@ pub fn complete_task(
 }
 
 #[tauri::command]
+pub fn reopen_task(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::ReopenTaskRequestDto,
+) -> Result<super::dto::TaskDto, String> {
+    super::usecases::reopen_task(database.inner(), clock.inner(), request.task_id).map(Into::into)
+}
+
+#[tauri::command]
 pub fn complete_subtask(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,
