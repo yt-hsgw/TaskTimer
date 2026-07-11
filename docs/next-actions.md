@@ -2,28 +2,62 @@
 
 ## 現在の判断
 
-UI/UX再設計の主要Issueは完了済みです。次の主作業は、v0.1.0を外部利用者へ配布できる状態にするためのRelease前ゲートです。
+v0.1.0はWindows先行の通常Releaseとして公開済みです。
+Windows実機確認、Windows runnerでのインストール検証、実行時外部通信の静的監査は完了済みです。
+
+当面はWindows利用を主軸にし、macOS配布はApple Developer ID署名とApple公証の準備ができるまで後回しにします。
 
 GitHub上で継続追跡しているOpen Issue:
 
-- #20: v0.1.0 Release。
-- #22: Tauri経由のglib advisory追跡。
-- #24: macOS署名と公証。
+- #60: 週/日/月ビューと時間軸カレンダーを実装する。
+- #58: OSスリープ・復帰時のタイマーと通知の確認を強化する。
+- #57: UI設定の永続化範囲を拡張する。
+- #56: v0.1.0公開後のドキュメントと次作業リストを更新する。
+- #55: 通知ルールの個別有効・無効UIを追加する。
+- #53: 通知登録失敗時の再試行履歴表示を改善する。
+- #54: カスタムリスト管理を追加する。
+- #52: タスクのアーカイブ操作をUse Caseへ追加する。
+- #51: OSへの将来時刻スケジューリング方式を設計する。
+- #50: Windowsコード署名方針を決める。
+- #24: macOS署名と公証を設定する。
+- #22: Tauri経由のglib advisoryを追跡する。
 
-## 最優先
+## 判断理由
 
-1. 最終的な `main` に対して `app-v0.1.0` tagとDraft Releaseを作り直す。
-2. `npm run check:release-target -- 0.1.0 origin/main` でRelease tagと公開対象commitの一致を確認する。
-3. Release workflowの既定実行でWindows artifact生成が成功することを確認する。
-4. `Windowsインストーラー検証` workflowでWindows runner上のサイレントインストール/アンインストール確認を行う。
-5. Windows NSISインストーラーを実機またはVMでインストール、起動、アンインストール確認する。
-6. Release Issue #20へWindows確認結果、既知制限、glib advisory #22の扱いを記録する。
-7. Release notesをWindows先行配布として最終化し、Draft Releaseを公開する。
-8. macOS配布が必要になったタイミングで、Apple Developer ProgramでDeveloper ID Application証明書を発行する。
-9. macOS署名・公証用GitHub Actions Secretsを登録する。
-10. `npm run check:macos-signing` を実行し、preflightが成功することを確認する。
-11. `リリースビルド` を手動実行し、`include_macos` を有効にしてmacOS Apple Silicon、macOS Intel artifactを生成する。
-12. macOS DMGを実機で開き、Gatekeeper警告が解消されることを確認する。
+- Windows実機確認が完了したため、v0.1.0は検証版ではなく通常Releaseとして扱える。
+- Windowsコード署名は未設定だが、既知制限として明記したうえでWindows先行配布を進める判断にする。
+- macOSはユーザー要望どおり後回しにし、未署名・未公証artifactを外部利用者向けに出さない。
+- アプリ実行時の外部通信なし、自動更新なし、ローカルSQLite保存という公開運用方針は維持する。
+
+## トレードオフ
+
+- Windows先行Releaseにすることで外部利用者が試しやすくなる一方、Windows SmartScreenなどの未署名警告は残る。
+- macOS配布を遅らせることでGatekeeper警告を避けられる一方、macOSユーザーはv0.1.0を公式artifactとして利用できない。
+- 静的監査はCIで再現しやすい一方、実行時のネットワーク挙動を完全保証するものではないため、必要に応じて実機監視を併用する。
+
+## 代替案
+
+macOS署名・公証とWindowsコード署名が整うまでv0.1.0を非公開にする。
+
+不採用理由:
+
+- Windows実機確認とWindows runner検証は完了しており、Windows利用者へ先に価値を届けられる。
+- コード署名未設定はRelease notesで既知制限として説明できる。
+- macOS未署名artifactを出さなければ、Apple Gatekeeper警告を外部利用者に踏ませずに済む。
+
+## 次に着手しやすい優先順
+
+1. #50 Windowsコード署名方針を決める。
+2. #58 OSスリープ・復帰時のタイマーと通知の確認を強化する。
+3. #60 週/日/月ビューと時間軸カレンダーを実装する。
+4. #55 通知ルールの個別有効・無効UIを追加する。
+5. #53 通知登録失敗時の再試行履歴表示を改善する。
+6. #54 カスタムリスト管理を追加する。
+7. #52 タスクのアーカイブ操作をUse Caseへ追加する。
+8. #57 UI設定の永続化範囲を拡張する。
+9. #51 OSへの将来時刻スケジューリング方式を設計する。
+10. #22 Tauri経由のglib advisoryを追跡する。
+11. #24 macOS署名と公証を設定する。
 
 ## 完了済み
 
@@ -57,42 +91,32 @@ GitHub上で継続追跡しているOpen Issue:
 - 外部利用者向けREADME、SUPPORT、CONTRIBUTING、CHANGELOG。
 - GitHub Releases向け `リリースビルド` workflow。
 - 公開運用方針とADR 0004。
-- v0.1.0 Release notes草案。
+- v0.1.0 Release notes。
 - glib advisoryの週次監視workflow。
 - Release target検証スクリプト。
 - macOS署名・公証用のTauri設定、Release workflow下準備、preflight。
 - Windows優先Release workflowへの切り替え。
 - Windows runnerでのインストーラー最低限検証workflow。
+- 実行時外部通信・ログ出力の静的監査。
+- v0.1.0 Windows通常Release公開。
+- v0.1.0 Windows実機確認。
+- Release Issue #20、Windows実機確認Issue #48、runtime privacy audit Issue #49の完了。
 
-## post-v0.1.0改善候補
+## 実務運用時に継続確認すること
 
-1. OSへの将来時刻スケジューリング方式を検討する。
-2. 通知ルールの個別有効/無効UIを追加する。
-3. 通知登録失敗時の再試行履歴表示を改善する。
-4. タスクのアーカイブ操作をUse Caseへ追加する。
-5. カスタムリスト管理をUIとUse Caseへ追加する。
-6. UI設定の永続化範囲を拡張する。
-7. Windowsコード署名方針を別Issueで検討する。
-8. glib advisory #22が解消可能になったらCargo依存更新PRを作成する。
-
-## 実務運用前に必要
-
-1. Windowsの手動確認手順を実行する。
-2. 実行時に外部通信していないことを確認する。
-3. ログにタスク名、メモ本文、通知本文が出ないことを確認する。
-4. GitHub Actionsのチェック結果をRelease Issue #20に記録する。
-5. Draft Releaseのartifact、target commit、Release notes、既知制限を確認する。
-6. Windows未署名artifactのOS警告をRelease notesへ既知制限として記載する。
-7. macOS artifactを配布する場合は、macOS署名・公証用GitHub Secretsを登録する。
-8. macOS artifactを配布する場合は、macOS DMGを実機で開き、Gatekeeper警告が解消されることを確認する。
+1. Windows未署名artifactのOS警告をRelease notesへ既知制限として維持する。
+2. 不具合報告には、個人のタスク名、メモ本文、通知本文、SQLiteファイル、秘密情報を貼らない。
+3. 新しい外部通信、自動更新、リモートアセットを追加する場合は、ADRとRelease notesを更新して明示承認を取る。
+4. macOS artifactを配布する場合は、macOS署名・公証用GitHub Secretsを登録する。
+5. macOS artifactを配布する場合は、macOS DMGを実機で開き、Gatekeeper警告が解消されることを確認する。
 
 ## 危険ケース
 
-- Windows先行Releaseなのに、Release notesがmacOS artifact提供済みであるように見える。
+- Windows通常Releaseなのに、READMEやRelease notesが公開待ちまたはpre-releaseのまま残る。
 - Windows runnerのインストール検証成功を、実機の通知、GUI、SmartScreen確認完了と誤認する。
 - macOS artifactを含める時に、macOS署名・公証Secrets未登録のままRelease workflowを実行する。
 - `npm run check:macos-signing` の失敗を無視してmacOS artifactを公開する。
-- 古いcommitで生成したDraft Release artifactを公開し、Release notesや手動確認結果と実artifactが食い違う。
+- 古いcommitで生成したRelease artifactを公開し、Release notesや手動確認結果と実artifactが食い違う。
 - Gatekeeper警告が残るDMGを外部利用者向けに公開する。
 - Windows未署名警告をRelease notesへ書かず、利用者がインストール可否を判断できない。
 - glib advisory #22の影響範囲をRelease notesへ書かず、Linux配布対象外の判断が伝わらない。
