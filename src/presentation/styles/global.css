@@ -474,7 +474,7 @@ button {
 }
 
 .detail-title-row {
-  align-items: flex-start;
+  align-items: center;
   display: grid;
   gap: 10px;
   grid-template-columns: 30px minmax(0, 1fr);
@@ -482,7 +482,7 @@ button {
 }
 
 .detail-check-button {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .detail-pane-header h2,
