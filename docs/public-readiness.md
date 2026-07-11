@@ -48,7 +48,7 @@ npm run audit:runtime-privacy
 - GitHubのPrivate Vulnerability Reporting、またはSecurity Advisoryの利用可否を確認する。
 - GitHub Secret scanningとDependabot alertsを有効にする。
 - GitHub Discussionsを質問窓口として使える状態にする。
-- GitHub ReleasesにWindows先行配布、Windowsコード署名未設定、macOS配布後回しの既知制限を記載する。
+- GitHub ReleasesにWindows先行配布、Windowsコード署名未設定、SmartScreenまたは組織ポリシーの警告可能性、macOS配布後回しの既知制限を記載する。
 - macOS artifactを提供するReleaseでは、macOS署名・公証状態を記載する。
 - 公開後にGitHub Actionsが成功することを確認する。
 

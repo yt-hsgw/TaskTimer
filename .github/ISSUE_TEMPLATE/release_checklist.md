@@ -65,6 +65,7 @@ assignees: ""
 - [ ] 新しいTauri権限の理由を記録した
 - [ ] 秘密情報、DBファイル、個人データを添付していない
 - [ ] Apple証明書、Apple ID、App用パスワード、Team IDを本文やログへ出していない
+- [ ] Windows署名用の証明書、秘密鍵、証明書パスワード、Azure認証情報を本文やログへ出していない
 
 ## 配布判断
 
@@ -80,7 +81,7 @@ assignees: ""
 - [ ] Release notesに既知制限を記載した
 - [ ] Release notesに外部通信なしと自動更新なしを記載した
 - [ ] 未解決のDependabot alertがある場合、影響範囲、配布対象、追跡Issueを既知制限に記載した
-- [ ] Windowsコード署名未設定によるOS警告の可能性を既知制限に記載した
+- [ ] Windowsコード署名未設定によるSmartScreenまたは組織ポリシーの警告可能性を既知制限に記載した
 - [ ] macOS artifactを配布しない場合、Release notesにmacOS後回しを記載した
 - [ ] ロールバック判断基準を確認した
 
