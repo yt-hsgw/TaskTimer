@@ -149,6 +149,7 @@ Windows installer smoke workflowの制約:
 - アプリ実行時の外部通信がないことを確認する。
 - ユーザー内容をログへ出していないことを確認する。
 - ローカル通知挙動を確認する。
+- OSスリープ/復帰後のタイマー復元、経過時間、通知重複なしを確認する。
 - Draft Releaseのartifact名、Release notes、既知制限を確認する。
 - macOS artifactを配布する場合は、macOS DMGの署名・公証・Gatekeeper確認を完了する。
 
@@ -196,6 +197,7 @@ Windowsでは必ず確認する。macOS artifactを配布する場合はmacOSで
 
 - Tauri notification pluginの仕様上、Windowsでは開発実行時とインストール済みアプリで通知の表示名やアイコンが異なる場合がある。
 - MVPではアプリ起動中または再読み込み時に期限到来済み通知を送信する。OSへの将来時刻スケジューリングは後続改善で扱う。
+- OS復帰またはウィンドウ再フォーカス時は、TaskTimerが状態を再同期し、登録済み通知を重複送信しないことを確認する。
 
 ## 設定方針
 

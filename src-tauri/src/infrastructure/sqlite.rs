@@ -3124,6 +3124,54 @@ mod tests {
     }
 
     #[test]
+    fn active_timer_survives_database_reopen_and_counts_wall_clock_gap() {
+        let data_dir = std::env::temp_dir().join(format!("tasktimer-test-{}", Uuid::new_v4()));
+        let start_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let stop_clock = FixedClock {
+            now: "2026-07-06T10:30:00Z",
+        };
+        let task_id;
+        let timer_id;
+
+        {
+            let database = SqliteDatabase::open_in_dir(data_dir.clone()).expect("open database");
+            let task = usecases::create_task(&database, &start_clock, draft("復帰確認"))
+                .expect("create task");
+            let active = usecases::start_timer(
+                &database,
+                &start_clock,
+                WorkTargetRef {
+                    target_type: WorkTargetType::Task,
+                    id: task.id.clone(),
+                },
+            )
+            .expect("start timer");
+            task_id = task.id;
+            timer_id = active.id;
+        }
+
+        let reopened = SqliteDatabase::open_in_dir(data_dir.clone()).expect("reopen database");
+        let active = reopened
+            .get_active_timer()
+            .expect("active timer")
+            .expect("persisted active timer");
+        assert_eq!(active.id, timer_id);
+        assert_eq!(active.target.target_type, WorkTargetType::Task);
+        assert_eq!(active.target.id, task_id);
+        assert_eq!(active.started_at, "2026-07-06T00:00:00Z");
+
+        let stopped =
+            usecases::stop_active_timer(&reopened, &stop_clock).expect("stop active timer");
+        assert_eq!(stopped.stopped_at.as_deref(), Some("2026-07-06T10:30:00Z"));
+        assert_eq!(stopped.elapsed_seconds, Some(37_800));
+        assert!(reopened.get_active_timer().expect("active timer").is_none());
+
+        fs::remove_dir_all(data_dir).expect("cleanup");
+    }
+
+    #[test]
     fn pause_resume_and_stop_active_timer_excludes_paused_seconds() {
         let database = in_memory_database();
         let start_clock = FixedClock {
@@ -4079,5 +4127,58 @@ mod tests {
         assert_eq!(summary.last_error.as_deref(), Some("permission denied"));
         assert_eq!(failed_count, 1);
         assert_eq!(last_error, "permission denied");
+    }
+
+    #[test]
+    fn dispatch_due_notifications_skips_registered_rules_after_resume_sync() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let resume_clock = FixedClock {
+            now: "2026-07-06T03:00:00Z",
+        };
+        let notification_gateway = RecordingNotificationGateway::ok();
+
+        usecases::create_task(
+            &database,
+            &create_clock,
+            usecases::WorkItemDraft {
+                title: "復帰時通知".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-06".to_string()),
+                memo: None,
+            },
+        )
+        .expect("create task");
+
+        let first_summary =
+            usecases::dispatch_due_notifications(&database, &notification_gateway, &create_clock)
+                .expect("first dispatch");
+        let second_summary =
+            usecases::dispatch_due_notifications(&database, &notification_gateway, &resume_clock)
+                .expect("resume dispatch");
+        let registered_count: i64 = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "
+                        SELECT COUNT(*)
+                        FROM notification_rules
+                        WHERE registration_status = 'registered'
+                        ",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("registered count: {error}"))
+            })
+            .expect("registered count");
+
+        assert_eq!(first_summary.attempted, 1);
+        assert_eq!(first_summary.succeeded, 1);
+        assert_eq!(second_summary.attempted, 0);
+        assert_eq!(second_summary.succeeded, 0);
+        assert_eq!(notification_gateway.messages().len(), 1);
+        assert_eq!(registered_count, 1);
     }
 }
