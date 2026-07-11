@@ -85,6 +85,12 @@ pub struct CompleteTaskRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReopenTaskRequestDto {
+    pub task_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompleteSubtaskRequestDto {
     pub subtask_id: String,
 }

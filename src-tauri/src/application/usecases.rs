@@ -133,6 +133,15 @@ pub fn complete_task(
     repository.complete_task(task_id, allow_incomplete_subtasks, clock.now_utc_iso8601())
 }
 
+pub fn reopen_task(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    task_id: String,
+) -> RepositoryResult<TaskRecord> {
+    let task_id = validate_identifier(&task_id, "タスクID")?;
+    repository.reopen_task(task_id, clock.now_utc_iso8601())
+}
+
 pub fn complete_subtask(
     repository: &impl TaskTimerCommandRepository,
     clock: &impl Clock,

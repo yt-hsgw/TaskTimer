@@ -19,7 +19,6 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { LeftNavigation, type AppView } from "./components/LeftNavigation";
 
 export function App() {
-  const [health, setHealth] = useState("frontend-only");
   const [tasks, setTasks] = useState<TaskWithSubtasks[]>([]);
   const [taskRows, setTaskRows] = useState<TaskRow[]>([]);
   const [taskLists, setTaskLists] = useState<TaskListItem[]>([]);
@@ -41,19 +40,6 @@ export function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-  const runtimeLabel = useMemo(() => {
-    if (health === "tauri-ready") {
-      return "Tauri接続済み";
-    }
-    if (health === "tauri-unavailable") {
-      return "Tauri未接続";
-    }
-    if (health === "frontend-only") {
-      return "フロントエンドのみ";
-    }
-    return health;
-  }, [health]);
 
   const favoriteCount = useMemo(
     () => tasks.filter((task) => task.isFavorite).length,
@@ -99,7 +85,7 @@ export function App() {
     setErrorMessage(null);
 
     try {
-      const nextHealth = await tauriTaskTimerGateway.healthCheck();
+      await tauriTaskTimerGateway.healthCheck();
       const listId =
         activeView.kind === "list" ? activeView.listId : undefined;
       const [
@@ -119,7 +105,6 @@ export function App() {
           tauriTaskTimerGateway.getNotificationDisplayMode(),
         ]);
 
-      setHealth(nextHealth);
       setTasks(nextTasks);
       setTaskRows(nextTaskRows);
       setTaskLists(nextTaskLists);
@@ -130,7 +115,6 @@ export function App() {
         await tauriTaskTimerGateway.dispatchDueNotifications(),
       );
     } catch (error) {
-      setHealth("tauri-unavailable");
       setErrorMessage(toErrorMessage(error));
     } finally {
       setIsLoading(false);
@@ -211,8 +195,7 @@ export function App() {
   const handleCreateTask = useCallback(
     (input: WorkItemDraft) =>
       runMutation(async () => {
-        const task = await tauriTaskTimerGateway.createTask(input);
-        return task.id;
+        await tauriTaskTimerGateway.createTask(input);
       }),
     [runMutation],
   );
@@ -293,8 +276,14 @@ export function App() {
     [runMutation],
   );
 
-  const handleCompleteTask = useCallback(
+  const handleToggleTaskCompletion = useCallback(
     (task: TaskWithSubtasks) => {
+      if (task.status === "done") {
+        return runMutation(async () => {
+          await tauriTaskTimerGateway.reopenTask(task.id);
+        });
+      }
+
       const hasIncompleteSubtasks = task.subtasks.some(
         (subtask) => subtask.status !== "done",
       );
@@ -309,7 +298,6 @@ export function App() {
 
       return runMutation(async () => {
         await tauriTaskTimerGateway.completeTask(task.id, hasIncompleteSubtasks);
-        return task.id;
       });
     },
     [runMutation],
@@ -328,7 +316,6 @@ export function App() {
     (taskId: string, isFavorite: boolean) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.toggleTaskFavorite(taskId, isFavorite);
-        return taskId;
       }),
     [runMutation],
   );
@@ -425,23 +412,7 @@ export function App() {
     >
       <header className="top-bar">
         <div className="top-bar-title">
-          <button
-            className="top-nav-toggle"
-            type="button"
-            aria-label={isNavigationOpen ? "左ペインを閉じる" : "左ペインを開く"}
-            title="左ペインを開閉"
-            onClick={() => setIsNavigationOpen((current) => !current)}
-          >
-            ☰
-          </button>
-          <div>
-            <p className="eyebrow">オフライン対応デスクトップタスクタイマー</p>
-            <h1>TaskTimer</h1>
-          </div>
-        </div>
-        <div className="runtime-status">
-          <span>実行環境</span>
-          <strong>{runtimeLabel}</strong>
+          <h1>TaskTimer</h1>
         </div>
       </header>
 
@@ -500,7 +471,7 @@ export function App() {
                 isMutating={isMutating}
                 onSelectTask={setSelectedTaskId}
                 onCreateTask={handleCreateTask}
-                onCompleteTask={handleCompleteTask}
+                onToggleTaskCompletion={handleToggleTaskCompletion}
                 onToggleTaskFavorite={handleToggleTaskFavorite}
               />
               {selectedTask ? (
@@ -517,7 +488,7 @@ export function App() {
                   onPauseTimer={handlePauseTimer}
                   onResumeTimer={handleResumeTimer}
                   onStopTimer={handleStopTimer}
-                  onCompleteTask={handleCompleteTask}
+                  onToggleTaskCompletion={handleToggleTaskCompletion}
                   onCompleteSubtask={handleCompleteSubtask}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
@@ -559,7 +530,7 @@ export function App() {
                   onPauseTimer={handlePauseTimer}
                   onResumeTimer={handleResumeTimer}
                   onStopTimer={handleStopTimer}
-                  onCompleteTask={handleCompleteTask}
+                  onToggleTaskCompletion={handleToggleTaskCompletion}
                   onCompleteSubtask={handleCompleteSubtask}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}

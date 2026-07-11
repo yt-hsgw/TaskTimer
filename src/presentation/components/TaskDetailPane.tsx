@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import type {
   TaskWithSubtasks,
   WorkItemDraft,
@@ -33,7 +33,7 @@ type TaskDetailPaneProps = {
   onPauseTimer(): Promise<boolean>;
   onResumeTimer(): Promise<boolean>;
   onStopTimer(): Promise<boolean>;
-  onCompleteTask(task: TaskWithSubtasks): Promise<boolean>;
+  onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onCompleteSubtask(subtask: Subtask): Promise<boolean>;
   onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
   onDeleteSubtask(subtask: Subtask): Promise<boolean>;
@@ -50,6 +50,7 @@ type DetailFormDraft = {
 };
 
 type RecurrenceFormFrequency = "none" | RecurrenceFrequency;
+type DetailSectionKey = "subtasks" | "timer" | "notifications";
 
 const statusLabels: Record<WorkStatus, string> = {
   todo: "未着手",
@@ -82,7 +83,7 @@ export function TaskDetailPane({
   onPauseTimer,
   onResumeTimer,
   onStopTimer,
-  onCompleteTask,
+  onToggleTaskCompletion,
   onCompleteSubtask,
   onDeleteTask,
   onDeleteSubtask,
@@ -94,11 +95,22 @@ export function TaskDetailPane({
     dueDate: "",
     memo: "",
   });
+  const [openSections, setOpenSections] = useState<
+    Record<DetailSectionKey, boolean>
+  >({
+    subtasks: false,
+    timer: false,
+    notifications: false,
+  });
   const taskTarget = useMemo<WorkTargetRef>(
     () => ({ type: "task", id: task.id }),
     [task.id],
   );
   const isTaskActive = isActiveTarget(activeTimer, taskTarget);
+  const completedSubtaskCount = useMemo(
+    () => task.subtasks.filter((subtask) => subtask.status === "done").length,
+    [task.subtasks],
+  );
 
   useEffect(() => {
     setTaskDraft(toDetailFormDraft(task));
@@ -109,6 +121,14 @@ export function TaskDetailPane({
       memo: "",
     });
   }, [task]);
+
+  useEffect(() => {
+    setOpenSections({
+      subtasks: false,
+      timer: false,
+      notifications: false,
+    });
+  }, [task.id]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -142,12 +162,35 @@ export function TaskDetailPane({
     }
   }
 
+  function toggleSection(section: DetailSectionKey) {
+    setOpenSections((current) => ({
+      ...current,
+      [section]: !current[section],
+    }));
+  }
+
   return (
     <aside className="task-detail-pane" aria-labelledby="task-detail-title">
       <div className="detail-pane-header">
-        <div>
-          <p className="eyebrow">タスク詳細</p>
-          <h2 id="task-detail-title">{task.title}</h2>
+        <div className="detail-title-row">
+          <button
+            className="task-check-button detail-check-button"
+            type="button"
+            aria-label={
+              task.status === "done"
+                ? `${task.title}を未完了に戻す`
+                : `${task.title}を完了`
+            }
+            title={task.status === "done" ? "未完了に戻す" : "完了"}
+            disabled={isMutating}
+            onClick={() => void onToggleTaskCompletion(task)}
+          >
+            {task.status === "done" ? "✓" : ""}
+          </button>
+          <div>
+            <p className="eyebrow">タスク詳細</p>
+            <h2 id="task-detail-title">{task.title}</h2>
+          </div>
         </div>
         <button
           className="inline-icon-button"
@@ -289,69 +332,18 @@ export function TaskDetailPane({
           <button className="primary-button" type="submit" disabled={isMutating}>
             保存
           </button>
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={isMutating || task.status === "done"}
-            onClick={() => void onCompleteTask(task)}
-          >
-            完了
-          </button>
-          <button
-            className="danger-button"
-            type="button"
-            disabled={isMutating}
-            onClick={() => void onDeleteTask(task)}
-          >
-            削除
-          </button>
         </div>
       </form>
 
-      <section className="detail-section" aria-label="タイマー">
-        <div className="detail-section-heading">
-          <h3>タイマー</h3>
-          <TimerControls
-            target={taskTarget}
-            label={task.title}
-            status={task.status}
-            activeTimer={activeTimer}
-            isMutating={isMutating}
-            onStartTimer={onStartTimer}
-            onPauseTimer={onPauseTimer}
-            onResumeTimer={onResumeTimer}
-            onStopTimer={onStopTimer}
-          />
-        </div>
-        <div className="detail-metrics">
-          <span>
-            {isTaskActive
-              ? activeTimer?.pausedAt
-                ? "一時停止中"
-                : "実行中"
-              : statusLabels[task.status]}
-          </span>
-          <span>{formatTimerTarget(task.timerTargetSeconds)}</span>
-          <span>{formatRecurrence(taskDraft)}</span>
-        </div>
-      </section>
-
-      <section className="detail-section" aria-label="通知">
-        <div className="detail-section-heading">
-          <h3>通知</h3>
-          <span className="detail-chip">{displayModeLabels[displayMode]}</span>
-        </div>
-        <div className="notification-plan-grid">
-          <NotificationPlan label="開始日" date={task.plannedStartDate} />
-          <NotificationPlan label="終了日" date={task.dueDate} />
-        </div>
-      </section>
-
-      <section className="detail-section" aria-label="サブタスク">
-        <div className="detail-section-heading">
-          <h3>サブタスク</h3>
-          <span className="detail-chip">{task.subtasks.length}</span>
-        </div>
+      <DetailDisclosure
+        title="サブタスク"
+        badge={`${completedSubtaskCount}/${task.subtasks.length}`}
+        isOpen={openSections.subtasks}
+        onToggle={() => toggleSection("subtasks")}
+      >
+        <p className="detail-section-description">
+          親タスク「{task.title}」に紐づく作業です。
+        </p>
 
         <form
           className="detail-form subtask-create-form"
@@ -428,8 +420,96 @@ export function TaskDetailPane({
             />
           ))}
         </div>
-      </section>
+      </DetailDisclosure>
+
+      <DetailDisclosure
+        title="タイマー"
+        badge={isTaskActive ? (activeTimer?.pausedAt ? "一時停止中" : "実行中") : statusLabels[task.status]}
+        isOpen={openSections.timer}
+        onToggle={() => toggleSection("timer")}
+      >
+        <div className="detail-section-heading">
+          <h3>親タスクのタイマー</h3>
+          <TimerControls
+            target={taskTarget}
+            label={task.title}
+            status={task.status}
+            activeTimer={activeTimer}
+            isMutating={isMutating}
+            onStartTimer={onStartTimer}
+            onPauseTimer={onPauseTimer}
+            onResumeTimer={onResumeTimer}
+            onStopTimer={onStopTimer}
+          />
+        </div>
+        <div className="detail-metrics">
+          <span>
+            {isTaskActive
+              ? activeTimer?.pausedAt
+                ? "一時停止中"
+                : "実行中"
+              : statusLabels[task.status]}
+          </span>
+          <span>{formatTimerTarget(task.timerTargetSeconds)}</span>
+          <span>{formatRecurrence(taskDraft)}</span>
+        </div>
+      </DetailDisclosure>
+
+      <DetailDisclosure
+        title="通知"
+        badge={displayModeLabels[displayMode]}
+        isOpen={openSections.notifications}
+        onToggle={() => toggleSection("notifications")}
+      >
+        <div className="notification-plan-grid">
+          <NotificationPlan label="開始日" date={task.plannedStartDate} />
+          <NotificationPlan label="終了日" date={task.dueDate} />
+        </div>
+      </DetailDisclosure>
+
+      <div className="detail-danger-zone">
+        <button
+          className="danger-button"
+          type="button"
+          disabled={isMutating}
+          onClick={() => void onDeleteTask(task)}
+        >
+          削除
+        </button>
+      </div>
     </aside>
+  );
+}
+
+type DetailDisclosureProps = {
+  title: string;
+  badge: string;
+  isOpen: boolean;
+  children: ReactNode;
+  onToggle(): void;
+};
+
+function DetailDisclosure({
+  title,
+  badge,
+  isOpen,
+  children,
+  onToggle,
+}: DetailDisclosureProps) {
+  return (
+    <section className="detail-section" aria-label={title}>
+      <button
+        className="completed-toggle detail-section-toggle"
+        type="button"
+        aria-expanded={isOpen}
+        onClick={onToggle}
+      >
+        <span>{isOpen ? "⌄" : "›"}</span>
+        {title}
+        <strong>{badge}</strong>
+      </button>
+      {isOpen ? <div className="detail-section-body">{children}</div> : null}
+    </section>
   );
 }
 

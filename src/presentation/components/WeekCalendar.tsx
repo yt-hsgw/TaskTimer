@@ -38,13 +38,26 @@ export function WeekCalendar({
           </p>
           <h2 id="calendar-title">週カレンダー</h2>
         </div>
-        <div className="segmented-control" aria-label="週カレンダー移動">
-          <button type="button" aria-label="前の週" onClick={onPreviousWeek}>
-            ‹
-          </button>
-          <button type="button" aria-label="次の週" onClick={onNextWeek}>
-            ›
-          </button>
+        <div className="calendar-heading-controls">
+          <div className="calendar-view-switch" aria-label="カレンダー表示切替">
+            <button className="is-active" type="button" aria-pressed="true">
+              週
+            </button>
+            <button type="button" disabled title="今後対応">
+              日
+            </button>
+            <button type="button" disabled title="今後対応">
+              月
+            </button>
+          </div>
+          <div className="segmented-control" aria-label="週カレンダー移動">
+            <button type="button" aria-label="前の週" onClick={onPreviousWeek}>
+              ‹
+            </button>
+            <button type="button" aria-label="次の週" onClick={onNextWeek}>
+              ›
+            </button>
+          </div>
         </div>
       </div>
 
