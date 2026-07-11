@@ -21,7 +21,7 @@ MVPで対象外にするもの:
 
 - 自動更新。
 - ストア配布。
-- Windowsコード署名。
+- Windowsコード署名の導入。v0.1.xでは [ADR 0005](adr/0005-windows-code-signing-policy.md) に従い、未署名配布を既知制限付きで継続する。
 - Mac App Store配布。
 - Linux配布。
 - 遠隔同期、クラウドバックアップ、分析、クラッシュレポート。
@@ -67,6 +67,7 @@ Draft Release公開前に問題が見つかった場合は、Releaseを公開せ
 
 - Release workflowは全体で `contents: read` を基本とし、artifactを添付するjobだけ `contents: write` を要求する。
 - macOS署名・公証用SecretsはGitHub Repository Secretsで管理する。
+- Windowsコード署名を導入する場合は、別IssueでSecret名、workflow変更、確認手順、証明書更新手順を設計し、GitHub SecretsまたはGitHub Environment Secretsだけを秘密情報の保存先にする。
 - 通常のCIは `contents: read` のみを維持する。
 - アプリ本体にはリモート通信、分析、クラッシュアップロード、自動更新の権限を追加しない。
 - IssueやDiscussionsには秘密情報、Apple証明書、Apple認証情報、個人データ、SQLite DB、ログを投稿しない。
@@ -76,6 +77,7 @@ Draft Release公開前に問題が見つかった場合は、Releaseを公開せ
 - READMEからGitHub Releases、Issue、Discussions、Security Policyへ移動できる。
 - LICENSEがMIT Licenseである。
 - `docs/adr/0004-public-distribution-license.md` にライセンスと配布方針が記録されている。
+- `docs/adr/0005-windows-code-signing-policy.md` にWindowsコード署名方針が記録されている。
 - `app-v*` タグまたは手動実行でDraft Releaseを作るGitHub Actionsがある。
 - Release workflowが自動更新artifactを作らない設定である。
 - Release workflowが既定でWindows artifactを作成する設定である。
@@ -86,7 +88,8 @@ Draft Release公開前に問題が見つかった場合は、Releaseを公開せ
 
 - ユーザーのタスク名、メモ本文、通知本文、DBをIssueやReleaseへ添付しない。
 - macOS署名・公証Secretsをリポジトリ、Issue、PR、Release notesに書かない。
-- Windows未署名artifactによるOS警告を既知制限として扱う。
+- Windows未署名artifactによるSmartScreenまたは組織ポリシーの警告を既知制限として扱う。
+- Windowsコード署名を導入する場合も、証明書、秘密鍵、証明書パスワード、Azure認証情報をリポジトリ、Issue、PR、Release notes、Actionsログへ書かない。
 - Release artifact作成時に `.env`、秘密鍵、証明書、ログ、DBを含めない。
 - GitHub ActionsとDependabotの通信は開発・運用時通信であり、アプリ実行時通信ではない。
 
@@ -104,11 +107,13 @@ Draft Release公開前に問題が見つかった場合は、Releaseを公開せ
 - 自動更新を見送るため、利用者は新バージョンを手動で確認する必要がある。
 - Windows配布を先行するため、macOS利用者向けの正式配布は遅れる。
 - macOS署名・公証により配布信頼性は上がるが、Apple Developer ProgramとSecrets更新の運用負荷が増える。
+- Windowsコード署名を保留するため、v0.1.xではSmartScreen警告の可能性が残る。
 
 ## 危険ケース
 
 - 未確認のDraft Releaseを公開して、壊れたインストーラーを配布する。
 - Release notesに既知制限を書かず、Windows署名警告や通知権限の挙動を利用者が誤解する。
+- 署名済みになればSmartScreen警告が必ず消えると誤説明する。
 - Windows先行Releaseなのに、Release notesがmacOS artifact提供済みであるように見える。
 - Issueに実データやDBが添付され、公開リポジトリ上に残る。
 - `contents: write` 以外の不要な権限をRelease workflowに追加する。

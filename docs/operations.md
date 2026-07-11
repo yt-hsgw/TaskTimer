@@ -88,6 +88,7 @@ Release workflowの権限:
 - workflow全体は `contents: read` を基本権限として扱う。
 - `build-release` jobだけ `contents: write` を持つ。Releaseとartifact作成に必要な最小権限として扱う。
 - macOS署名・公証用SecretsはRepository Secretsとして扱い、workflowログ、Issue、PR、Release notesには出さない。
+- Windowsコード署名を導入する場合のSecrets、workflow、確認手順は [ADR 0005](adr/0005-windows-code-signing-policy.md) に従って別Issueで設計する。証明書、秘密鍵、証明書パスワード、Azure認証情報はworkflowログ、Issue、PR、Release notesには出さない。
 
 Release workflowの制約:
 
@@ -95,6 +96,7 @@ Release workflowの制約:
 - 自動更新artifactは作成しない。
 - v0.1.0の主配布対象はWindowsとする。
 - macOS artifactはApple Developer Programと署名・公証Secretsの準備が完了するまで後回しにする。
+- Windowsコード署名はv0.1.xでは導入せず、未署名配布を既知制限付きで継続する。
 - macOS artifactを作成する場合はDeveloper ID署名とApple公証を行う。
 - macOS署名・公証Secretsが未設定の場合、`preflight-macos` jobで失敗させ、macOS込みmatrix buildへ進めない。
 - macOS job内でもSecrets検証を行い、matrix実行時の防御層として扱う。
@@ -109,7 +111,7 @@ Windows installer smoke workflowの制約:
 - 実機での通知、GUI操作、SmartScreen表示確認の代替にしない。
 - 成功した場合も、Release notesにはWindows実機確認または未確認状態を明示する。
 - Release asset取得には `GITHUB_TOKEN` を使い、追加Secretは使わない。
-- Draft Releaseを `GITHUB_TOKEN` で取得できない場合は、pre-releaseとして公開してから検証し、確認結果をRelease notesへ追記する。
+- Draft Releaseを `GITHUB_TOKEN` で取得できない場合は、通常Releaseとして公開せず、検証版として公開するか別手段でartifactを取得し、確認結果をRelease notesへ追記する。
 
 ## ブランチ運用
 
@@ -168,9 +170,9 @@ MVPの配布形式:
 
 - v0.1.0ではWindows配布を先行し、macOS利用者向けの正式artifact提供は遅れる。
 - macOS署名・公証にはApple Developer ProgramとSecrets運用が必要になる。
-- Windowsコード署名は未設定のため、SmartScreenなどのOS警告が出る可能性がある。
+- Windowsコード署名はv0.1.xでは未導入のため、SmartScreenまたは組織ポリシーの警告が出る可能性がある。
 - `msi` やストア配布よりも企業端末での一括配布には弱い。
-- 公開配布前には署名とインストール手順を別ADRで再検討する。
+- Windowsコード署名の判断は [ADR 0005](adr/0005-windows-code-signing-policy.md) に従う。導入する場合は別IssueでSecrets、workflow、確認手順を設計する。
 
 代替案:
 

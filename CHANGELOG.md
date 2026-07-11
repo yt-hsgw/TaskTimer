@@ -7,6 +7,7 @@
 ### 変更
 
 - v0.1.0公開後のREADME、Release notes、次作業一覧を通常Release状態へ更新。
+- Windowsコード署名方針をADR 0005として追加し、v0.1.xでは未署名Windows artifactを既知制限付きで配布する判断を記録。
 
 ## 0.1.0
 
