@@ -22,12 +22,14 @@ git ls-files | grep -E '(^|/)(\.env(\..*)?|.*\.(db|sqlite|sqlite3|pem|key|p12|mo
 git grep -n -E '(/[U]sers/|[A-Za-z]:\\[U]sers\\|/[h]ome/[^/]+/)' -- . ':!package-lock.json' ':!src-tauri/Cargo.lock'
 git grep -n -E '[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}' -- . ':!package-lock.json' ':!src-tauri/Cargo.lock'
 npm audit --audit-level=moderate
+npm run audit:runtime-privacy
 ```
 
 期待結果:
 
 - 最初の3コマンドは何も出力しない。
 - `npm audit` はmoderate以上の既知脆弱性を報告しない。
+- `npm run audit:runtime-privacy` は実行時外部通信、実行時ログ出力、リモートアセット、自動更新権限を検出しない。
 
 ## CIで確認すること
 
@@ -35,6 +37,7 @@ npm audit --audit-level=moderate
 
 - 公開前に必要な運用ファイルが存在する。
 - npm依存関係にmoderate以上の既知脆弱性がない。
+- 実行時外部通信、実行時ログ出力、リモートアセット、自動更新権限がない。
 - `.env`、ローカルDB、秘密鍵、証明書、ログファイルが追跡されていない。
 - 追跡ファイルに個人環境の絶対パスが含まれていない。
 - 追跡ファイルにメールアドレスが含まれていない。

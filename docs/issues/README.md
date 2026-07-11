@@ -28,6 +28,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [020 Windows優先Release workflowへ切り替える](020-windows-first-release-workflow.md) / GitHub #20/#24
 - [021 Windows runnerでインストーラー最低限検証を追加する](021-windows-installer-runner-smoke.md) / GitHub #20
 - [022 カレンダー週/日/月ビューと時間軸表示を実装する](022-calendar-view-modes-time-grid.md) / GitHub #60
+- [023 実行時外部通信・ログ出力の静的監査を追加する](023-runtime-privacy-audit.md) / GitHub #49
 
 ## 運用
 
