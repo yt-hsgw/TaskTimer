@@ -16,6 +16,8 @@ type TaskPanelProps = {
   showTaskForm?: boolean;
   isLoading: boolean;
   isMutating: boolean;
+  isCreatingTaskPending: boolean;
+  pendingTaskActionIds: ReadonlySet<string>;
   onSelectTask(taskId: string): void;
   onCreateTask(input: WorkItemDraft): Promise<boolean>;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
@@ -39,6 +41,8 @@ export function TaskPanel({
   showTaskForm = true,
   isLoading,
   isMutating,
+  isCreatingTaskPending,
+  pendingTaskActionIds,
   onSelectTask,
   onCreateTask,
   onToggleTaskCompletion,
@@ -60,6 +64,7 @@ export function TaskPanel({
   );
   const incompleteRows = taskRows.filter((task) => task.status !== "done");
   const completedRows = taskRows.filter((task) => task.status === "done");
+  const isCreateDisabled = isMutating || isCreatingTaskPending;
 
   useEffect(() => {
     if (!showTaskForm) {
@@ -119,7 +124,7 @@ export function TaskPanel({
               type="button"
               aria-label="タスクを追加"
               title="タスクを追加"
-              disabled={isMutating || isCreatingTask}
+              disabled={isCreateDisabled || isCreatingTask}
               onClick={() => setIsCreatingTask(true)}
             >
               ＋
@@ -139,7 +144,7 @@ export function TaskPanel({
             key={row.id}
             row={row}
             isSelected={row.id === selectedTaskId}
-            isMutating={isMutating}
+            isMutating={isMutating || pendingTaskActionIds.has(row.id)}
             onSelectTask={onSelectTask}
             onToggleTaskCompletion={handleCompleteRow}
             onToggleTaskFavorite={onToggleTaskFavorite}
@@ -164,7 +169,7 @@ export function TaskPanel({
                     }))
                   }
                   placeholder="例: 週次レビュー"
-                  disabled={isMutating}
+                  disabled={isCreateDisabled}
                   maxLength={120}
                   required
                 />
@@ -181,7 +186,7 @@ export function TaskPanel({
                         plannedStartDate: event.target.value,
                       }))
                     }
-                    disabled={isMutating}
+                    disabled={isCreateDisabled}
                   />
                 </label>
                 <label>
@@ -195,7 +200,7 @@ export function TaskPanel({
                         dueDate: event.target.value,
                       }))
                     }
-                    disabled={isMutating}
+                    disabled={isCreateDisabled}
                   />
                 </label>
               </div>
@@ -209,7 +214,7 @@ export function TaskPanel({
                       memo: event.target.value,
                     }))
                   }
-                  disabled={isMutating}
+                  disabled={isCreateDisabled}
                   rows={3}
                 />
               </label>
@@ -217,14 +222,14 @@ export function TaskPanel({
                 <button
                   className="primary-button"
                   type="submit"
-                  disabled={isMutating}
+                  disabled={isCreateDisabled}
                 >
                   追加
                 </button>
                 <button
                   className="secondary-button"
                   type="button"
-                  disabled={isMutating}
+                  disabled={isCreateDisabled}
                   onClick={() => setIsCreatingTask(false)}
                 >
                   キャンセル
@@ -253,7 +258,7 @@ export function TaskPanel({
                     key={row.id}
                     row={row}
                     isSelected={row.id === selectedTaskId}
-                    isMutating={isMutating}
+                    isMutating={isMutating || pendingTaskActionIds.has(row.id)}
                     onSelectTask={onSelectTask}
                     onToggleTaskCompletion={handleCompleteRow}
                     onToggleTaskFavorite={onToggleTaskFavorite}

@@ -18,6 +18,10 @@ import { TaskDetailPane } from "./components/TaskDetailPane";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { LeftNavigation, type AppView } from "./components/LeftNavigation";
 
+type LoadSnapshotOptions = {
+  showLoading?: boolean;
+};
+
 export function App() {
   const [tasks, setTasks] = useState<TaskWithSubtasks[]>([]);
   const [taskRows, setTaskRows] = useState<TaskRow[]>([]);
@@ -39,6 +43,10 @@ export function App() {
   const [weekStartDate, setWeekStartDate] = useState(getCurrentWeekStartDate);
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
+  const [isCreatingTaskPending, setIsCreatingTaskPending] = useState(false);
+  const [pendingTaskActionIds, setPendingTaskActionIds] = useState<
+    ReadonlySet<string>
+  >(new Set());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const favoriteCount = useMemo(
@@ -80,8 +88,11 @@ export function App() {
     return visibleTasks.find((task) => task.id === selectedTaskId) ?? null;
   }, [selectedTaskId, visibleTasks]);
 
-  const loadSnapshot = useCallback(async () => {
-    setIsLoading(true);
+  const loadSnapshot = useCallback(async (options?: LoadSnapshotOptions) => {
+    const showLoading = options?.showLoading ?? true;
+    if (showLoading) {
+      setIsLoading(true);
+    }
     setErrorMessage(null);
 
     try {
@@ -117,12 +128,14 @@ export function App() {
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
-      setIsLoading(false);
+      if (showLoading) {
+        setIsLoading(false);
+      }
     }
   }, [activeView, weekStartDate]);
 
   useEffect(() => {
-    void loadSnapshot();
+    void loadSnapshot({ showLoading: true });
   }, [loadSnapshot]);
 
   useEffect(() => {
@@ -177,7 +190,7 @@ export function App() {
 
       try {
         const nextSelectedTaskId = await operation();
-        await loadSnapshot();
+        await loadSnapshot({ showLoading: false });
         if (nextSelectedTaskId) {
           setSelectedTaskId(nextSelectedTaskId);
         }
@@ -192,12 +205,57 @@ export function App() {
     [loadSnapshot],
   );
 
+  const runTaskActionMutation = useCallback(
+    async (taskId: string, operation: () => Promise<string | void>) => {
+      setPendingTaskActionIds((current) => new Set(current).add(taskId));
+      setErrorMessage(null);
+
+      try {
+        const nextSelectedTaskId = await operation();
+        await loadSnapshot({ showLoading: false });
+        if (nextSelectedTaskId) {
+          setSelectedTaskId(nextSelectedTaskId);
+        }
+        return true;
+      } catch (error) {
+        setErrorMessage(toErrorMessage(error));
+        return false;
+      } finally {
+        setPendingTaskActionIds((current) => {
+          const next = new Set(current);
+          next.delete(taskId);
+          return next;
+        });
+      }
+    },
+    [loadSnapshot],
+  );
+
+  const runCreateTaskMutation = useCallback(
+    async (operation: () => Promise<void>) => {
+      setIsCreatingTaskPending(true);
+      setErrorMessage(null);
+
+      try {
+        await operation();
+        await loadSnapshot({ showLoading: false });
+        return true;
+      } catch (error) {
+        setErrorMessage(toErrorMessage(error));
+        return false;
+      } finally {
+        setIsCreatingTaskPending(false);
+      }
+    },
+    [loadSnapshot],
+  );
+
   const handleCreateTask = useCallback(
     (input: WorkItemDraft) =>
-      runMutation(async () => {
+      runCreateTaskMutation(async () => {
         await tauriTaskTimerGateway.createTask(input);
       }),
-    [runMutation],
+    [runCreateTaskMutation],
   );
 
   const handleCreateSubtask = useCallback(
@@ -279,7 +337,7 @@ export function App() {
   const handleToggleTaskCompletion = useCallback(
     (task: TaskWithSubtasks) => {
       if (task.status === "done") {
-        return runMutation(async () => {
+        return runTaskActionMutation(task.id, async () => {
           await tauriTaskTimerGateway.reopenTask(task.id);
         });
       }
@@ -296,11 +354,11 @@ export function App() {
         return Promise.resolve(false);
       }
 
-      return runMutation(async () => {
+      return runTaskActionMutation(task.id, async () => {
         await tauriTaskTimerGateway.completeTask(task.id, hasIncompleteSubtasks);
       });
     },
-    [runMutation],
+    [runTaskActionMutation],
   );
 
   const handleCompleteSubtask = useCallback(
@@ -314,10 +372,10 @@ export function App() {
 
   const handleToggleTaskFavorite = useCallback(
     (taskId: string, isFavorite: boolean) =>
-      runMutation(async () => {
+      runTaskActionMutation(taskId, async () => {
         await tauriTaskTimerGateway.toggleTaskFavorite(taskId, isFavorite);
       }),
-    [runMutation],
+    [runTaskActionMutation],
   );
 
   const handleDeleteTask = useCallback(
@@ -420,7 +478,10 @@ export function App() {
         <div className="app-alert" role="alert">
           <strong>処理に失敗しました</strong>
           <span>{errorMessage}</span>
-          <button type="button" onClick={() => void loadSnapshot()}>
+          <button
+            type="button"
+            onClick={() => void loadSnapshot({ showLoading: true })}
+          >
             再読み込み
           </button>
         </div>
@@ -469,6 +530,8 @@ export function App() {
                 showTaskForm={activeView.kind === "list"}
                 isLoading={isLoading}
                 isMutating={isMutating}
+                isCreatingTaskPending={isCreatingTaskPending}
+                pendingTaskActionIds={pendingTaskActionIds}
                 onSelectTask={setSelectedTaskId}
                 onCreateTask={handleCreateTask}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
