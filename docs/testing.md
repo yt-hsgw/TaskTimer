@@ -95,6 +95,7 @@ CIで保証しないもの:
 - インストーラーartifactの実インストール。
 - macOS artifactを配布する場合の署名・公証済みDMGのGatekeeper実機挙動。
 - Windows未署名artifactに対するOS警告。
+- Windows実機またはVMでのOSスリープ/復帰後のタイマー復元、経過時間、通知重複なし確認。手順は [Issue 025](issues/025-sleep-resume-timer-notification.md) に記録する。
 - オフライン起動の実機確認。
 
 ## パフォーマンス確認

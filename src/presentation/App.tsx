@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   NotificationDispatchSummary,
   TaskListItem,
@@ -48,6 +48,10 @@ export function App() {
     ReadonlySet<string>
   >(new Set());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const resumeSyncRef = useRef({
+    isSyncing: false,
+    lastSyncedAt: Date.now(),
+  });
 
   const favoriteCount = useMemo(
     () => tasks.filter((task) => task.isFavorite).length,
@@ -149,6 +153,37 @@ export function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
+
+  useEffect(() => {
+    const syncAfterResume = () => {
+      const now = Date.now();
+      if (
+        resumeSyncRef.current.isSyncing ||
+        now - resumeSyncRef.current.lastSyncedAt < 2_000
+      ) {
+        return;
+      }
+
+      resumeSyncRef.current.isSyncing = true;
+      resumeSyncRef.current.lastSyncedAt = now;
+      void loadSnapshot({ showLoading: false }).finally(() => {
+        resumeSyncRef.current.isSyncing = false;
+      });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        syncAfterResume();
+      }
+    };
+
+    window.addEventListener("focus", syncAfterResume);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", syncAfterResume);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [loadSnapshot]);
 
   useEffect(() => {
     if (activeView.kind !== "list" || taskLists.length === 0) {
