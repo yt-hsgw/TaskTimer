@@ -1,7 +1,10 @@
 use crate::domain::{
     notification::{build_notification_content, NotificationDisplayMode},
     recurrence::RecurrenceFrequency,
-    task::{validate_date_range, validate_memo, validate_optional_date, validate_title},
+    task::{
+        validate_date_range, validate_due_time_requires_due_date, validate_memo,
+        validate_optional_date, validate_optional_time, validate_title,
+    },
     timer::WorkTargetRef,
 };
 
@@ -24,6 +27,7 @@ pub struct WorkItemDraft {
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub memo: Option<String>,
 }
 
@@ -32,6 +36,7 @@ pub struct WorkItemUpdateDraft {
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleDraft>,
     pub memo: Option<String>,
@@ -151,6 +156,15 @@ pub fn complete_subtask(
     repository.complete_subtask(subtask_id, clock.now_utc_iso8601())
 }
 
+pub fn reopen_subtask(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    subtask_id: String,
+) -> RepositoryResult<SubtaskRecord> {
+    let subtask_id = validate_identifier(&subtask_id, "サブタスクID")?;
+    repository.reopen_subtask(subtask_id, clock.now_utc_iso8601())
+}
+
 pub fn toggle_task_favorite(
     repository: &impl TaskTimerCommandRepository,
     clock: &impl Clock,
@@ -246,14 +260,17 @@ pub fn dispatch_due_notifications(
 fn validate_work_item_draft(draft: WorkItemDraft, now: String) -> RepositoryResult<WorkItemCreate> {
     let title = validate_title(&draft.title)?;
     let planned_start_date = validate_optional_date(draft.planned_start_date.as_deref(), "開始日")?;
-    let due_date = validate_optional_date(draft.due_date.as_deref(), "終了日")?;
+    let due_date = validate_optional_date(draft.due_date.as_deref(), "期限日")?;
+    let due_time = validate_optional_time(draft.due_time.as_deref(), "期限時刻")?;
     validate_date_range(&planned_start_date, &due_date)?;
+    validate_due_time_requires_due_date(&due_date, &due_time)?;
     let memo = validate_memo(draft.memo.as_deref())?;
 
     Ok(WorkItemCreate {
         title,
         planned_start_date,
         due_date,
+        due_time,
         memo,
         now,
     })
@@ -265,8 +282,10 @@ fn validate_work_item_update_draft(
 ) -> RepositoryResult<WorkItemUpdate> {
     let title = validate_title(&draft.title)?;
     let planned_start_date = validate_optional_date(draft.planned_start_date.as_deref(), "開始日")?;
-    let due_date = validate_optional_date(draft.due_date.as_deref(), "終了日")?;
+    let due_date = validate_optional_date(draft.due_date.as_deref(), "期限日")?;
+    let due_time = validate_optional_time(draft.due_time.as_deref(), "期限時刻")?;
     validate_date_range(&planned_start_date, &due_date)?;
+    validate_due_time_requires_due_date(&due_date, &due_time)?;
     let timer_target_seconds = validate_timer_target_seconds(draft.timer_target_seconds)?;
     let recurrence_rule =
         validate_recurrence_rule(draft.recurrence_rule, &planned_start_date, &due_date)?;
@@ -276,6 +295,7 @@ fn validate_work_item_update_draft(
         title,
         planned_start_date,
         due_date,
+        due_time,
         timer_target_seconds,
         recurrence_rule,
         memo,
@@ -340,6 +360,7 @@ mod tests {
                 title: "   ".to_string(),
                 planned_start_date: None,
                 due_date: None,
+                due_time: None,
                 memo: None,
             },
             "2026-07-06T00:00:00Z".to_string(),
@@ -355,11 +376,28 @@ mod tests {
                 title: "設計レビュー".to_string(),
                 planned_start_date: Some("2026-07-07".to_string()),
                 due_date: Some("2026-07-06".to_string()),
+                due_time: None,
                 memo: None,
             },
             "2026-07-06T00:00:00Z".to_string(),
         );
 
         assert!(result.expect_err("reversed date range").contains("期限日"));
+    }
+
+    #[test]
+    fn validate_work_item_draft_rejects_due_time_without_due_date() {
+        let result = validate_work_item_draft(
+            WorkItemDraft {
+                title: "通知時刻だけ".to_string(),
+                planned_start_date: None,
+                due_date: None,
+                due_time: Some("09:30".to_string()),
+                memo: None,
+            },
+            "2026-07-06T00:00:00Z".to_string(),
+        );
+
+        assert!(result.expect_err("due date is required").contains("期限日"));
     }
 }

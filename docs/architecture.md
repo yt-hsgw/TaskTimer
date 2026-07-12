@@ -136,7 +136,9 @@ Issue #30 では、`PauseActiveTimer`、`ResumeActiveTimer`、`StopActiveTimer` 
 
 Issue #58 では、OS復帰またはウィンドウ再フォーカス相当のイベントでPresentationがスナップショットを再取得し、期限到来通知dispatchを再実行する。タイマーの正はDBに置き、停止時の `elapsed_seconds` は `started_at` と停止時刻のwall-clock差分から一時停止区間を差し引いて確定する。成功済み通知は `registered` として保持し、復帰後のdispatch対象から除外する。
 
-Issue #60 では、カレンダーRead Modelを週専用から開始日・終了日の範囲取得へ拡張する。表示切替、基準日、選択中カレンダー項目はPresentation状態であり、DB更新を行わない。取得範囲は93日以内に制限し、週/日/月表示で必要な範囲だけをSQLiteから読み取る。サブタスク項目は親タスク名をRead Modelに含め、実行中タイマーは `started_at` から表示用時刻を派生する。
+Issue #60 では、カレンダーRead Modelを週専用から開始予定日・期限日の範囲取得へ拡張する。表示切替、基準日、選択中カレンダー項目はPresentation状態であり、DB更新を行わない。取得範囲は93日以内に制限し、週/日/月表示で必要な範囲だけをSQLiteから読み取る。サブタスク項目は親タスク名をRead Modelに含め、実行中タイマーは `started_at` から表示用時刻を派生する。
+
+Issue #68 では、右詳細ペインの編集対象を期限日/期限時刻中心へ寄せる。`planned_start_date` は互換性のため保持するが、詳細UIからの作成・更新では `null` を渡す。期限通知の `notify_at` は `due_date` と `due_time` から同一トランザクション内で同期し、期限時刻がない場合は従来通り日付開始時刻を使う。
 
 ## Read Model
 

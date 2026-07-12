@@ -209,6 +209,16 @@ pub fn complete_subtask(
 }
 
 #[tauri::command]
+pub fn reopen_subtask(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::ReopenSubtaskRequestDto,
+) -> Result<super::dto::SubtaskDto, String> {
+    super::usecases::reopen_subtask(database.inner(), clock.inner(), request.subtask_id)
+        .map(Into::into)
+}
+
+#[tauri::command]
 pub fn toggle_task_favorite(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,

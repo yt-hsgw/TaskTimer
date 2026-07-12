@@ -49,6 +49,8 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<Task>("reopen_task", { request: { taskId } }),
   completeSubtask: (subtaskId: string) =>
     invoke<Subtask>("complete_subtask", { request: { subtaskId } }),
+  reopenSubtask: (subtaskId: string) =>
+    invoke<Subtask>("reopen_subtask", { request: { subtaskId } }),
   toggleTaskFavorite: (taskId: string, isFavorite: boolean) =>
     invoke<Task>("toggle_task_favorite", {
       request: { taskId, isFavorite },

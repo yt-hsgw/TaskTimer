@@ -51,6 +51,7 @@ pub struct WorkItemCreate {
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub memo: String,
     pub now: String,
 }
@@ -60,6 +61,7 @@ pub struct WorkItemUpdate {
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleInput>,
     pub memo: String,
@@ -104,6 +106,7 @@ pub struct TaskRecord {
     pub is_favorite: bool,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleRecord>,
     pub memo: String,
@@ -122,6 +125,7 @@ pub struct SubtaskRecord {
     pub status: WorkStatus,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleRecord>,
     pub memo: String,
@@ -147,6 +151,7 @@ pub struct TaskRowRecord {
     pub is_favorite: bool,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -242,6 +247,8 @@ pub trait TaskTimerCommandRepository {
     fn reopen_task(&self, task_id: String, now: String) -> RepositoryResult<TaskRecord>;
 
     fn complete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<SubtaskRecord>;
+
+    fn reopen_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<SubtaskRecord>;
 
     fn toggle_task_favorite(
         &self,

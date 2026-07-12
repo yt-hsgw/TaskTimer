@@ -11,6 +11,7 @@ export type Task = {
   isFavorite: boolean;
   plannedStartDate: string | null;
   dueDate: string | null;
+  dueTime: string | null;
   timerTargetSeconds: number | null;
   recurrenceRule: RecurrenceRule | null;
   memo: string;
@@ -28,6 +29,7 @@ export type Subtask = {
   status: WorkStatus;
   plannedStartDate: string | null;
   dueDate: string | null;
+  dueTime: string | null;
   timerTargetSeconds: number | null;
   recurrenceRule: RecurrenceRule | null;
   memo: string;

@@ -4,12 +4,13 @@ import type {
   TaskWithSubtasks,
   WorkItemDraft,
 } from "../../application/usecases/contracts";
-import type { Task } from "../../domain/task/types";
+import type { Subtask, Task } from "../../domain/task/types";
 
 type TaskPanelProps = {
   tasks: TaskWithSubtasks[];
   taskRows: TaskRow[];
   selectedTaskId: string | null;
+  selectedSubtaskId: string | null;
   eyebrow?: string;
   title?: string;
   emptyMessage?: string;
@@ -19,6 +20,7 @@ type TaskPanelProps = {
   isCreatingTaskPending: boolean;
   pendingTaskActionIds: ReadonlySet<string>;
   onSelectTask(taskId: string): void;
+  onSelectSubtask(taskId: string, subtaskId: string): void;
   onCreateTask(input: WorkItemDraft): Promise<boolean>;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
@@ -35,6 +37,7 @@ export function TaskPanel({
   tasks,
   taskRows,
   selectedTaskId,
+  selectedSubtaskId,
   eyebrow = "DB接続済みタスク",
   title = "タスク",
   emptyMessage = "まだタスクはありません。",
@@ -44,16 +47,20 @@ export function TaskPanel({
   isCreatingTaskPending,
   pendingTaskActionIds,
   onSelectTask,
+  onSelectSubtask,
   onCreateTask,
   onToggleTaskCompletion,
   onToggleTaskFavorite,
 }: TaskPanelProps) {
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [isCompletedOpen, setIsCompletedOpen] = useState(true);
+  const [expandedTaskIds, setExpandedTaskIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
   const [taskDraft, setTaskDraft] = useState<WorkItemDraft>({
     title: "",
-    plannedStartDate: "",
     dueDate: "",
+    dueTime: "",
     memo: "",
   });
   const taskTitleInputRef = useRef<HTMLInputElement>(null);
@@ -96,7 +103,7 @@ export function TaskPanel({
     event.preventDefault();
     const created = await onCreateTask(normalizeDraft(taskDraft));
     if (created) {
-      setTaskDraft({ title: "", plannedStartDate: "", dueDate: "", memo: "" });
+      setTaskDraft({ title: "", dueDate: "", dueTime: "", memo: "" });
       setIsCreatingTask(false);
     }
   }
@@ -107,6 +114,18 @@ export function TaskPanel({
       return;
     }
     void onToggleTaskCompletion(task);
+  }
+
+  function toggleTaskExpansion(taskId: string) {
+    setExpandedTaskIds((current) => {
+      const next = new Set(current);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
   }
 
   return (
@@ -143,9 +162,14 @@ export function TaskPanel({
           <TaskRowItem
             key={row.id}
             row={row}
+            task={taskById.get(row.id) ?? null}
             isSelected={row.id === selectedTaskId}
+            selectedSubtaskId={selectedSubtaskId}
+            isExpanded={expandedTaskIds.has(row.id)}
             isMutating={isMutating || pendingTaskActionIds.has(row.id)}
             onSelectTask={onSelectTask}
+            onSelectSubtask={onSelectSubtask}
+            onToggleExpansion={toggleTaskExpansion}
             onToggleTaskCompletion={handleCompleteRow}
             onToggleTaskFavorite={onToggleTaskFavorite}
           />
@@ -176,21 +200,7 @@ export function TaskPanel({
               </label>
               <div className="date-fields">
                 <label>
-                  <span>開始日</span>
-                  <input
-                    type="date"
-                    value={taskDraft.plannedStartDate ?? ""}
-                    onChange={(event) =>
-                      setTaskDraft((current) => ({
-                        ...current,
-                        plannedStartDate: event.target.value,
-                      }))
-                    }
-                    disabled={isCreateDisabled}
-                  />
-                </label>
-                <label>
-                  <span>終了日</span>
+                  <span>期限日</span>
                   <input
                     type="date"
                     value={taskDraft.dueDate ?? ""}
@@ -201,6 +211,20 @@ export function TaskPanel({
                       }))
                     }
                     disabled={isCreateDisabled}
+                  />
+                </label>
+                <label>
+                  <span>期限時刻</span>
+                  <input
+                    type="time"
+                    value={taskDraft.dueTime ?? ""}
+                    onChange={(event) =>
+                      setTaskDraft((current) => ({
+                        ...current,
+                        dueTime: event.target.value,
+                      }))
+                    }
+                    disabled={isCreateDisabled || !taskDraft.dueDate}
                   />
                 </label>
               </div>
@@ -257,9 +281,14 @@ export function TaskPanel({
                   <TaskRowItem
                     key={row.id}
                     row={row}
+                    task={taskById.get(row.id) ?? null}
                     isSelected={row.id === selectedTaskId}
+                    selectedSubtaskId={selectedSubtaskId}
+                    isExpanded={expandedTaskIds.has(row.id)}
                     isMutating={isMutating || pendingTaskActionIds.has(row.id)}
                     onSelectTask={onSelectTask}
+                    onSelectSubtask={onSelectSubtask}
+                    onToggleExpansion={toggleTaskExpansion}
                     onToggleTaskCompletion={handleCompleteRow}
                     onToggleTaskFavorite={onToggleTaskFavorite}
                   />
@@ -275,93 +304,171 @@ export function TaskPanel({
 
 type TaskRowItemProps = {
   row: TaskRow;
+  task: TaskWithSubtasks | null;
   isSelected: boolean;
+  selectedSubtaskId: string | null;
+  isExpanded: boolean;
   isMutating: boolean;
   onSelectTask(taskId: string): void;
+  onSelectSubtask(taskId: string, subtaskId: string): void;
+  onToggleExpansion(taskId: string): void;
   onToggleTaskCompletion(row: TaskRow): void;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
 };
 
 function TaskRowItem({
   row,
+  task,
   isSelected,
+  selectedSubtaskId,
+  isExpanded,
   isMutating,
   onSelectTask,
+  onSelectSubtask,
+  onToggleExpansion,
   onToggleTaskCompletion,
   onToggleTaskFavorite,
 }: TaskRowItemProps) {
   const hasProgress = row.subtaskTotalCount > 0;
+  const subtasks = task?.subtasks ?? [];
   const progressPercent = hasProgress
     ? Math.round((row.completedSubtaskCount / row.subtaskTotalCount) * 100)
     : 0;
   const isDone = row.status === "done";
 
   return (
-    <div
-      className={`task-row ${isSelected ? "is-selected" : ""} ${
-        isDone ? "is-done" : ""
-      }`}
-    >
-      <button
-        className="task-check-button"
-        type="button"
-        aria-label={isDone ? `${row.title}を未完了に戻す` : `${row.title}を完了`}
-        title={isDone ? "未完了に戻す" : "完了"}
-        disabled={isMutating}
-        onClick={() => onToggleTaskCompletion(row)}
+    <div className="task-row-group">
+      <div
+        className={`task-row ${isSelected && !selectedSubtaskId ? "is-selected" : ""} ${
+          isDone ? "is-done" : ""
+        }`}
       >
-        {isDone ? "✓" : ""}
-      </button>
+        <button
+          className="task-check-button"
+          type="button"
+          aria-label={isDone ? `${row.title}を未完了に戻す` : `${row.title}を完了`}
+          title={isDone ? "未完了に戻す" : "完了"}
+          disabled={isMutating}
+          onClick={() => onToggleTaskCompletion(row)}
+        >
+          {isDone ? "✓" : ""}
+        </button>
 
-      <button
-        className="task-row-content"
-        type="button"
-        onClick={() => onSelectTask(row.id)}
-      >
-        <span className="task-row-title">{row.title}</span>
-        <span className="task-row-meta">
-          <span>{statusLabels[row.status]}</span>
-          {row.dueDate ? (
-            <span title="期限あり">◇ {formatDateLabel(row.dueDate)}</span>
-          ) : null}
-          {row.isTimerActive ? <span>実行中</span> : null}
-        </span>
         {hasProgress ? (
-          <span className="task-progress">
-            <span className="task-progress-bar">
-              <span style={{ width: `${progressPercent}%` }} />
-            </span>
-            <span className="task-progress-label">
-              {row.completedSubtaskCount}/{row.subtaskTotalCount}
-            </span>
-          </span>
-        ) : null}
-      </button>
+          <button
+            className="subtask-expand-button"
+            type="button"
+            aria-label={`${row.title}のサブタスクを${isExpanded ? "閉じる" : "開く"}`}
+            aria-expanded={isExpanded}
+            title={isExpanded ? "サブタスクを閉じる" : "サブタスクを開く"}
+            onClick={() => onToggleExpansion(row.id)}
+          >
+            {isExpanded ? "⌄" : "›"}
+          </button>
+        ) : (
+          <span className="subtask-expand-spacer" aria-hidden="true" />
+        )}
 
-      <button
-        className={`favorite-button ${row.isFavorite ? "is-favorite" : ""}`}
-        type="button"
-        aria-label={
-          row.isFavorite
-            ? `${row.title}のお気に入りを解除`
-            : `${row.title}をお気に入りに追加`
-        }
-        aria-pressed={row.isFavorite}
-        title={row.isFavorite ? "お気に入りを解除" : "お気に入り"}
-        disabled={isMutating}
-        onClick={() => void onToggleTaskFavorite(row.id, !row.isFavorite)}
-      >
-        {row.isFavorite ? "★" : "☆"}
-      </button>
+        <button
+          className="task-row-content"
+          type="button"
+          onClick={() => onSelectTask(row.id)}
+        >
+          <span className="task-row-title">{row.title}</span>
+          <span className="task-row-meta">
+            <span>{statusLabels[row.status]}</span>
+            {row.dueDate ? (
+              <span title="期限あり">
+                ◇ {formatDateLabel(row.dueDate)}
+                {row.dueTime ? ` ${row.dueTime}` : ""}
+              </span>
+            ) : null}
+            {row.isTimerActive ? <span>実行中</span> : null}
+          </span>
+          {hasProgress ? (
+            <span className="task-progress">
+              <span className="task-progress-bar">
+                <span style={{ width: `${progressPercent}%` }} />
+              </span>
+              <span className="task-progress-label">
+                {row.completedSubtaskCount}/{row.subtaskTotalCount}
+              </span>
+            </span>
+          ) : null}
+        </button>
+
+        <button
+          className={`favorite-button ${row.isFavorite ? "is-favorite" : ""}`}
+          type="button"
+          aria-label={
+            row.isFavorite
+              ? `${row.title}のお気に入りを解除`
+              : `${row.title}をお気に入りに追加`
+          }
+          aria-pressed={row.isFavorite}
+          title={row.isFavorite ? "お気に入りを解除" : "お気に入り"}
+          disabled={isMutating}
+          onClick={() => void onToggleTaskFavorite(row.id, !row.isFavorite)}
+        >
+          {row.isFavorite ? "★" : "☆"}
+        </button>
+      </div>
+
+      {isExpanded && subtasks.length > 0 ? (
+        <div className="task-row-subtasks" aria-label={`${row.title}のサブタスク`}>
+          {subtasks.map((subtask) => (
+            <SubtaskRowButton
+              key={subtask.id}
+              subtask={subtask}
+              isSelected={subtask.id === selectedSubtaskId}
+              onSelect={() => onSelectSubtask(row.id, subtask.id)}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
 
+type SubtaskRowButtonProps = {
+  subtask: Subtask;
+  isSelected: boolean;
+  onSelect(): void;
+};
+
+function SubtaskRowButton({
+  subtask,
+  isSelected,
+  onSelect,
+}: SubtaskRowButtonProps) {
+  return (
+    <button
+      className={`task-row-subtask ${isSelected ? "is-selected" : ""} ${
+        subtask.status === "done" ? "is-done" : ""
+      }`}
+      type="button"
+      onClick={onSelect}
+    >
+      <span className="subtask-dot" aria-hidden="true" />
+      <span>
+        <strong>{subtask.title}</strong>
+        <small>
+          {statusLabels[subtask.status]}
+          {subtask.dueDate ? ` / 期限 ${formatDateLabel(subtask.dueDate)}` : ""}
+          {subtask.dueTime ? ` ${subtask.dueTime}` : ""}
+        </small>
+      </span>
+    </button>
+  );
+}
+
 function normalizeDraft(input: WorkItemDraft): WorkItemDraft {
+  const dueDate = normalizeOptionalText(input.dueDate);
   return {
     title: input.title,
-    plannedStartDate: normalizeOptionalText(input.plannedStartDate),
-    dueDate: normalizeOptionalText(input.dueDate),
+    plannedStartDate: null,
+    dueDate,
+    dueTime: dueDate ? normalizeOptionalText(input.dueTime) : null,
     memo: input.memo ?? "",
   };
 }

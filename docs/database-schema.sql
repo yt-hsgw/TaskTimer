@@ -21,6 +21,14 @@ CREATE TABLE tasks (
   is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1)),
   planned_start_date TEXT NULL,
   due_date TEXT NULL,
+  due_time TEXT NULL CHECK (
+    due_time IS NULL OR (
+      length(due_time) = 5
+      AND substr(due_time, 3, 1) = ':'
+      AND substr(due_time, 1, 2) BETWEEN '00' AND '23'
+      AND substr(due_time, 4, 2) BETWEEN '00' AND '59'
+    )
+  ),
   timer_target_seconds INTEGER NULL CHECK (
     timer_target_seconds IS NULL OR timer_target_seconds >= 0
   ),
@@ -45,6 +53,14 @@ CREATE TABLE subtasks (
   status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
   planned_start_date TEXT NULL,
   due_date TEXT NULL,
+  due_time TEXT NULL CHECK (
+    due_time IS NULL OR (
+      length(due_time) = 5
+      AND substr(due_time, 3, 1) = ':'
+      AND substr(due_time, 1, 2) BETWEEN '00' AND '23'
+      AND substr(due_time, 4, 2) BETWEEN '00' AND '59'
+    )
+  ),
   timer_target_seconds INTEGER NULL CHECK (
     timer_target_seconds IS NULL OR timer_target_seconds >= 0
   ),
@@ -174,10 +190,18 @@ CREATE INDEX tasks_calendar_idx
 ON tasks (planned_start_date, due_date)
 WHERE deleted_at IS NULL;
 
+CREATE INDEX tasks_due_time_idx
+ON tasks (due_date, due_time)
+WHERE deleted_at IS NULL;
+
 CREATE INDEX subtasks_task_status_idx
 ON subtasks (task_id, status)
 WHERE deleted_at IS NULL;
 
 CREATE INDEX subtasks_calendar_idx
 ON subtasks (planned_start_date, due_date)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX subtasks_due_time_idx
+ON subtasks (due_date, due_time)
 WHERE deleted_at IS NULL;

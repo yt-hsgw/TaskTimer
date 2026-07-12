@@ -1,9 +1,11 @@
 #![allow(dead_code)]
 
-use time::{macros::format_description, Date};
+use time::{macros::format_description, Date, Time};
 
 const DATE_FORMAT: &[time::format_description::FormatItem<'_>] =
     format_description!("[year]-[month]-[day]");
+const TIME_FORMAT: &[time::format_description::FormatItem<'_>] =
+    format_description!("[hour]:[minute]");
 const MEMO_MAX_CHARS: usize = 10_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +73,33 @@ pub fn validate_date_range(
         if due_date < planned_start_date {
             return Err("期限日は開始予定日より前にできません".to_string());
         }
+    }
+    Ok(())
+}
+
+pub fn validate_optional_time(
+    value: Option<&str>,
+    field_label: &str,
+) -> Result<Option<String>, String> {
+    let Some(raw_value) = value else {
+        return Ok(None);
+    };
+    let trimmed = raw_value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    Time::parse(trimmed, TIME_FORMAT)
+        .map_err(|_| format!("{field_label}はHH:MM形式で入力してください"))?;
+    Ok(Some(trimmed.to_string()))
+}
+
+pub fn validate_due_time_requires_due_date(
+    due_date: &Option<String>,
+    due_time: &Option<String>,
+) -> Result<(), String> {
+    if due_date.is_none() && due_time.is_some() {
+        return Err("期限時刻を設定する場合は期限日も設定してください".to_string());
     }
     Ok(())
 }

@@ -26,6 +26,7 @@ pub struct CreateTaskRequestDto {
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub memo: Option<String>,
 }
 
@@ -36,6 +37,7 @@ pub struct CreateSubtaskRequestDto {
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub memo: Option<String>,
 }
 
@@ -46,6 +48,7 @@ pub struct UpdateTaskRequestDto {
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleRequestDto>,
     pub memo: Option<String>,
@@ -58,6 +61,7 @@ pub struct UpdateSubtaskRequestDto {
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleRequestDto>,
     pub memo: Option<String>,
@@ -92,6 +96,12 @@ pub struct ReopenTaskRequestDto {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompleteSubtaskRequestDto {
+    pub subtask_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReopenSubtaskRequestDto {
     pub subtask_id: String,
 }
 
@@ -174,6 +184,7 @@ pub struct TaskDto {
     pub is_favorite: bool,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleDto>,
     pub memo: String,
@@ -193,6 +204,7 @@ pub struct SubtaskDto {
     pub status: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleDto>,
     pub memo: String,
@@ -213,6 +225,7 @@ pub struct TaskWithSubtasksDto {
     pub is_favorite: bool,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleDto>,
     pub memo: String,
@@ -247,6 +260,7 @@ pub struct TaskRowDto {
     pub is_favorite: bool,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
+    pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -292,6 +306,7 @@ impl From<CreateTaskRequestDto> for WorkItemDraft {
             title: value.title,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
+            due_time: value.due_time,
             memo: value.memo,
         }
     }
@@ -303,6 +318,7 @@ impl From<CreateSubtaskRequestDto> for WorkItemDraft {
             title: value.title,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
+            due_time: value.due_time,
             memo: value.memo,
         }
     }
@@ -314,6 +330,7 @@ impl From<UpdateTaskRequestDto> for WorkItemUpdateDraft {
             title: value.title,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
+            due_time: value.due_time,
             timer_target_seconds: value.timer_target_seconds,
             recurrence_rule: value.recurrence_rule.map(Into::into),
             memo: value.memo,
@@ -327,6 +344,7 @@ impl From<UpdateSubtaskRequestDto> for WorkItemUpdateDraft {
             title: value.title,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
+            due_time: value.due_time,
             timer_target_seconds: value.timer_target_seconds,
             recurrence_rule: value.recurrence_rule.map(Into::into),
             memo: value.memo,
@@ -371,6 +389,7 @@ impl From<TaskRecord> for TaskDto {
             is_favorite: value.is_favorite,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
+            due_time: value.due_time,
             timer_target_seconds: value.timer_target_seconds,
             recurrence_rule: value.recurrence_rule.map(Into::into),
             memo: value.memo,
@@ -392,6 +411,7 @@ impl From<SubtaskRecord> for SubtaskDto {
             status: value.status.as_str().to_string(),
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
+            due_time: value.due_time,
             timer_target_seconds: value.timer_target_seconds,
             recurrence_rule: value.recurrence_rule.map(Into::into),
             memo: value.memo,
@@ -414,6 +434,7 @@ impl From<TaskWithSubtasksRecord> for TaskWithSubtasksDto {
             is_favorite: value.task.is_favorite,
             planned_start_date: value.task.planned_start_date,
             due_date: value.task.due_date,
+            due_time: value.task.due_time,
             timer_target_seconds: value.task.timer_target_seconds,
             recurrence_rule: value.task.recurrence_rule.map(Into::into),
             memo: value.task.memo,
@@ -475,6 +496,7 @@ impl From<TaskRowRecord> for TaskRowDto {
             is_favorite: value.is_favorite,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
+            due_time: value.due_time,
             timer_target_seconds: value.timer_target_seconds,
             sort_order: value.sort_order,
             completed_at: value.completed_at,

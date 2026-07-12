@@ -32,6 +32,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [024 Windowsコード署名方針を決める](024-windows-code-signing-policy.md) / GitHub #50
 - [025 OSスリープ・復帰時のタイマーと通知を強化する](025-sleep-resume-timer-notification.md) / GitHub #58
 - [026 通知の全体有効・無効設定を追加する](026-notification-rule-toggle-ui.md) / GitHub #55
+- [027 タスク詳細とサブタスク選択UXを改善する](027-task-detail-subtask-ux.md) / GitHub #68
 
 ## 運用
 
