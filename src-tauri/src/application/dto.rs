@@ -7,8 +7,9 @@ use crate::domain::{
 
 use super::{
     repositories::{
-        ActiveTimer, NotificationDispatchSummary, RecurrenceRuleRecord, SubtaskRecord,
-        TaskListRecord, TaskRecord, TaskRowRecord, TaskWithSubtasksRecord, WeekCalendarItem,
+        ActiveTimer, NotificationDeliveryAttemptRecord, NotificationDispatchSummary,
+        RecurrenceRuleRecord, SubtaskRecord, TaskListRecord, TaskRecord, TaskRowRecord,
+        TaskWithSubtasksRecord, WeekCalendarItem,
     },
     usecases::{RecurrenceRuleDraft, WorkItemDraft, WorkItemUpdateDraft},
 };
@@ -281,6 +282,20 @@ pub struct NotificationDispatchSummaryDto {
     pub last_error: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationDeliveryAttemptDto {
+    pub id: String,
+    pub notification_rule_id: String,
+    pub target: WorkTargetRefDto,
+    pub kind: String,
+    pub notify_at: String,
+    pub attempted_at: String,
+    pub result: String,
+    pub error_message: Option<String>,
+    pub attempt_count: i64,
+}
+
 impl TryFrom<UpdateNotificationDisplayModeRequestDto> for NotificationDisplayMode {
     type Error = String;
 
@@ -535,6 +550,25 @@ impl From<NotificationDispatchSummary> for NotificationDispatchSummaryDto {
             succeeded: value.succeeded,
             failed: value.failed,
             last_error: value.last_error,
+        }
+    }
+}
+
+impl From<NotificationDeliveryAttemptRecord> for NotificationDeliveryAttemptDto {
+    fn from(value: NotificationDeliveryAttemptRecord) -> Self {
+        Self {
+            id: value.id,
+            notification_rule_id: value.notification_rule_id,
+            target: WorkTargetRefDto {
+                r#type: value.target.target_type.as_str().to_string(),
+                id: value.target.id,
+            },
+            kind: value.kind.as_str().to_string(),
+            notify_at: value.notify_at,
+            attempted_at: value.attempted_at,
+            result: value.result.as_str().to_string(),
+            error_message: value.error_message,
+            attempt_count: value.attempt_count,
         }
     }
 }

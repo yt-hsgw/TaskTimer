@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  NotificationDeliveryAttempt,
   NotificationDispatchSummary,
   TaskListItem,
   TaskRow,
@@ -42,6 +43,9 @@ export function App() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [notificationSummary, setNotificationSummary] =
     useState<NotificationDispatchSummary | null>(null);
+  const [notificationFailureHistory, setNotificationFailureHistory] = useState<
+    NotificationDeliveryAttempt[]
+  >([]);
   const [calendarViewMode, setCalendarViewMode] =
     useState<CalendarViewMode>("week");
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(
@@ -178,6 +182,9 @@ export function App() {
       setNotificationsEnabled(nextNotificationsEnabled);
       setNotificationSummary(
         await tauriTaskTimerGateway.dispatchDueNotifications(),
+      );
+      setNotificationFailureHistory(
+        await tauriTaskTimerGateway.listNotificationFailureHistory(),
       );
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
@@ -542,9 +549,7 @@ export function App() {
   const handleRetryNotifications = useCallback(
     () =>
       runMutation(async () => {
-        setNotificationSummary(
-          await tauriTaskTimerGateway.dispatchDueNotifications(),
-        );
+        return;
       }),
     [runMutation],
   );
@@ -792,6 +797,7 @@ export function App() {
               notificationsEnabled={notificationsEnabled}
               isMutating={isMutating}
               notificationSummary={notificationSummary}
+              notificationFailureHistory={notificationFailureHistory}
               onUpdateDisplayMode={handleUpdateNotificationDisplayMode}
               onUpdateNotificationsEnabled={handleUpdateNotificationsEnabled}
               onRetryNotifications={handleRetryNotifications}

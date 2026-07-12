@@ -51,6 +51,18 @@ export type NotificationDispatchSummary = {
   lastError: string | null;
 };
 
+export type NotificationDeliveryAttempt = {
+  id: string;
+  notificationRuleId: string;
+  target: WorkTargetRef;
+  kind: "planned_start" | "due";
+  notifyAt: string;
+  attemptedAt: string;
+  result: "success" | "failed";
+  errorMessage: string | null;
+  attemptCount: number;
+};
+
 export type TaskListItem = {
   id: string;
   name: string;
@@ -112,6 +124,7 @@ export type TaskTimerGateway = {
   getNotificationsEnabled(): Promise<boolean>;
   updateNotificationsEnabled(enabled: boolean): Promise<boolean>;
   dispatchDueNotifications(): Promise<NotificationDispatchSummary>;
+  listNotificationFailureHistory(): Promise<NotificationDeliveryAttempt[]>;
 };
 
 export type TaskWithSubtasks = Task & {

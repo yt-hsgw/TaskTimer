@@ -1,5 +1,8 @@
 use crate::domain::{
-    notification::{NotificationDisplayMode, NotificationKind, NotificationRegistrationStatus},
+    notification::{
+        NotificationDeliveryResult, NotificationDisplayMode, NotificationKind,
+        NotificationRegistrationStatus,
+    },
     recurrence::RecurrenceFrequency,
     task::WorkStatus,
     timer::{WorkTargetRef, WorkTargetType},
@@ -180,6 +183,19 @@ pub struct NotificationDispatchSummary {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationDeliveryAttemptRecord {
+    pub id: String,
+    pub notification_rule_id: String,
+    pub target: WorkTargetRef,
+    pub kind: NotificationKind,
+    pub notify_at: String,
+    pub attempted_at: String,
+    pub result: NotificationDeliveryResult,
+    pub error_message: Option<String>,
+    pub attempt_count: i64,
+}
+
 pub type RepositoryResult<T> = Result<T, String>;
 
 pub trait CalendarRepository {
@@ -268,6 +284,13 @@ pub trait NotificationPreferenceRepository {
     fn get_notifications_enabled(&self) -> RepositoryResult<bool>;
 }
 
+pub trait NotificationHistoryRepository {
+    fn list_notification_failure_history(
+        &self,
+        limit: i64,
+    ) -> RepositoryResult<Vec<NotificationDeliveryAttemptRecord>>;
+}
+
 pub trait NotificationCommandRepository {
     fn update_notification_display_mode(
         &self,
@@ -283,9 +306,18 @@ pub trait NotificationCommandRepository {
         limit: i64,
     ) -> RepositoryResult<Vec<NotificationJob>>;
 
-    fn mark_notification_registered(&self, id: &str, now: &str) -> RepositoryResult<()>;
+    fn mark_notification_registered(
+        &self,
+        job: &NotificationJob,
+        now: &str,
+    ) -> RepositoryResult<()>;
 
-    fn mark_notification_failed(&self, id: &str, error: &str, now: &str) -> RepositoryResult<()>;
+    fn mark_notification_failed(
+        &self,
+        job: &NotificationJob,
+        error: &str,
+        now: &str,
+    ) -> RepositoryResult<()>;
 }
 
 pub fn target_ref(target_type: WorkTargetType, id: String) -> WorkTargetRef {

@@ -137,6 +137,26 @@ CREATE INDEX IF NOT EXISTS notification_rules_target_idx
 ON notification_rules (target_type, target_id)
 WHERE deleted_at IS NULL;
 
+CREATE TABLE IF NOT EXISTS notification_delivery_attempts (
+  id TEXT PRIMARY KEY,
+  notification_rule_id TEXT NOT NULL,
+  target_type TEXT NOT NULL CHECK (target_type IN ('task', 'subtask')),
+  target_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('planned_start', 'due')),
+  notify_at TEXT NOT NULL,
+  attempted_at TEXT NOT NULL,
+  result TEXT NOT NULL CHECK (result IN ('success', 'failed')),
+  error_message TEXT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (notification_rule_id) REFERENCES notification_rules(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS notification_delivery_attempts_recent_idx
+ON notification_delivery_attempts (attempted_at DESC, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS notification_delivery_attempts_rule_idx
+ON notification_delivery_attempts (notification_rule_id, attempted_at DESC);
+
 CREATE TABLE IF NOT EXISTS notification_preferences (
   id TEXT PRIMARY KEY CHECK (id = 'default'),
   display_mode TEXT NOT NULL CHECK (display_mode IN ('title_only', 'generic')),

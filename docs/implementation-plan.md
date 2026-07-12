@@ -137,6 +137,7 @@ UI専用にすべてのタスク、サブタスク、タイマー履歴を一括
 - 送信成功時は `registered`、失敗時は `failed` と `last_error` を保存する。
 - 設定画面で通知全体をON/OFFできる。
 - 設定画面でdispatch結果と失敗メッセージを確認でき、再試行できる。
+- 通知送信の成功/失敗は `notification_delivery_attempts` に保存し、設定画面で最新履歴を確認できる。
 
 設計判断:
 
