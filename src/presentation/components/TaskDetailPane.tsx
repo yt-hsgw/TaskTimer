@@ -463,6 +463,9 @@ export function TaskDetailPane({
         isOpen={openSections.notifications}
         onToggle={() => toggleSection("notifications")}
       >
+        <p className="detail-section-description">
+          表示タイプ: {displayModeLabels[displayMode]}
+        </p>
         <div className="notification-plan-grid">
           <NotificationPlan label="開始日" date={task.plannedStartDate} />
           <NotificationPlan label="終了日" date={task.dueDate} />

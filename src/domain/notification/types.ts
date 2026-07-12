@@ -23,7 +23,7 @@ export type NotificationRule = {
 
 export type NotificationPreference = {
   displayMode: NotificationDisplayMode;
+  notificationsEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 };
-

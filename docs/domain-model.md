@@ -219,9 +219,12 @@ erDiagram
 ルール:
 
 - `display_mode` は `title_only` または `generic`。
+- `notifications_enabled` は通知全体のON/OFFを表す。
 - デフォルトは `title_only`。
+- デフォルトでは通知全体をONにする。
 - `title_only` はタスクまたはサブタスクのタイトルのみを表示する。
 - `generic` はタスクまたはサブタスクのタイトルをOS通知adapterへ渡さず、汎用メッセージだけを表示する。
+- 通知全体がOFFの場合、通知ルールは保持したままdispatch対象から除外する。
 
 ### RecurrenceRule
 

@@ -3,17 +3,21 @@ import type { NotificationDispatchSummary } from "../../application/usecases/con
 
 type SettingsPanelProps = {
   displayMode: NotificationDisplayMode;
+  notificationsEnabled: boolean;
   isMutating: boolean;
   notificationSummary: NotificationDispatchSummary | null;
   onUpdateDisplayMode(displayMode: NotificationDisplayMode): Promise<boolean>;
+  onUpdateNotificationsEnabled(enabled: boolean): Promise<boolean>;
   onRetryNotifications(): Promise<boolean>;
 };
 
 export function SettingsPanel({
   displayMode,
+  notificationsEnabled,
   isMutating,
   notificationSummary,
   onUpdateDisplayMode,
+  onUpdateNotificationsEnabled,
   onRetryNotifications,
 }: SettingsPanelProps) {
   return (
@@ -24,6 +28,23 @@ export function SettingsPanel({
           <h2 id="settings-title">通知</h2>
         </div>
       </div>
+
+      <label className="settings-toggle-row">
+        <input
+          type="checkbox"
+          checked={notificationsEnabled}
+          disabled={isMutating}
+          onChange={(event) =>
+            void onUpdateNotificationsEnabled(event.currentTarget.checked)
+          }
+        />
+        <span>
+          <strong>通知を有効にする</strong>
+          <small>
+            OFFの間は期限到来通知を送信しません。タスクの日付と通知ルールは保持します。
+          </small>
+        </span>
+      </label>
 
       <div className="field-group">
         <label htmlFor="notification-mode">表示タイプ</label>
@@ -44,7 +65,7 @@ export function SettingsPanel({
 
       <div className="notification-status">
         <strong>期限到来通知</strong>
-        <span>{formatSummary(notificationSummary)}</span>
+        <span>{formatSummary(notificationSummary, notificationsEnabled)}</span>
       </div>
 
       {notificationSummary?.failed ? (
@@ -56,7 +77,7 @@ export function SettingsPanel({
       <button
         className="secondary-button"
         type="button"
-        disabled={isMutating}
+        disabled={isMutating || !notificationsEnabled}
         onClick={() => void onRetryNotifications()}
       >
         通知を再試行
@@ -65,7 +86,13 @@ export function SettingsPanel({
   );
 }
 
-function formatSummary(summary: NotificationDispatchSummary | null) {
+function formatSummary(
+  summary: NotificationDispatchSummary | null,
+  notificationsEnabled: boolean,
+) {
+  if (!notificationsEnabled) {
+    return "全体設定OFF";
+  }
   if (!summary) {
     return "未確認";
   }

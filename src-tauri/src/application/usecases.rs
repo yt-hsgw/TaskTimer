@@ -187,12 +187,29 @@ pub fn update_notification_display_mode(
     repository.update_notification_display_mode(display_mode, clock.now_utc_iso8601())
 }
 
+pub fn update_notifications_enabled(
+    repository: &impl NotificationCommandRepository,
+    clock: &impl Clock,
+    enabled: bool,
+) -> RepositoryResult<bool> {
+    repository.update_notifications_enabled(enabled, clock.now_utc_iso8601())
+}
+
 pub fn dispatch_due_notifications(
     repository: &(impl NotificationCommandRepository + NotificationPreferenceRepository),
     notification_gateway: &impl LocalNotificationGateway,
     clock: &impl Clock,
 ) -> RepositoryResult<NotificationDispatchSummary> {
     let now = clock.now_utc_iso8601();
+    if !repository.get_notifications_enabled()? {
+        return Ok(NotificationDispatchSummary {
+            attempted: 0,
+            succeeded: 0,
+            failed: 0,
+            last_error: None,
+        });
+    }
+
     let display_mode = repository.get_notification_display_mode()?;
     let jobs = repository.list_due_notification_jobs(&now, NOTIFICATION_DISPATCH_LIMIT)?;
 

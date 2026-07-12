@@ -61,6 +61,11 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<NotificationDisplayMode>("update_notification_display_mode", {
       request: { displayMode },
     }),
+  getNotificationsEnabled: () => invoke<boolean>("get_notifications_enabled"),
+  updateNotificationsEnabled: (enabled: boolean) =>
+    invoke<boolean>("update_notifications_enabled", {
+      request: { enabled },
+    }),
   dispatchDueNotifications: () =>
     invoke<NotificationDispatchSummary>("dispatch_due_notifications"),
 };

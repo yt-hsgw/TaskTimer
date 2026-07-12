@@ -257,6 +257,8 @@ pub trait TaskTimerCommandRepository {
 
 pub trait NotificationPreferenceRepository {
     fn get_notification_display_mode(&self) -> RepositoryResult<NotificationDisplayMode>;
+
+    fn get_notifications_enabled(&self) -> RepositoryResult<bool>;
 }
 
 pub trait NotificationCommandRepository {
@@ -265,6 +267,8 @@ pub trait NotificationCommandRepository {
         display_mode: NotificationDisplayMode,
         now: String,
     ) -> RepositoryResult<NotificationDisplayMode>;
+
+    fn update_notifications_enabled(&self, enabled: bool, now: String) -> RepositoryResult<bool>;
 
     fn list_due_notification_jobs(
         &self,

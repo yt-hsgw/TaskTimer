@@ -480,6 +480,23 @@ impl NotificationPreferenceRepository for SqliteDatabase {
             NotificationDisplayMode::from_db(&display_mode)
         })
     }
+
+    fn get_notifications_enabled(&self) -> RepositoryResult<bool> {
+        self.with_connection(|connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT notifications_enabled
+                    FROM notification_preferences
+                    WHERE id = 'default'
+                    ",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|value| value != 0)
+                .map_err(|error| format!("通知有効設定を取得できません: {error}"))
+        })
+    }
 }
 
 impl NotificationCommandRepository for SqliteDatabase {
@@ -513,6 +530,38 @@ impl NotificationCommandRepository for SqliteDatabase {
                 )
                 .map_err(|error| format!("通知表示設定を取得できません: {error}"))?;
             NotificationDisplayMode::from_db(&display_mode)
+        })
+    }
+
+    fn update_notifications_enabled(&self, enabled: bool, now: String) -> RepositoryResult<bool> {
+        self.with_transaction(|transaction| {
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE notification_preferences
+                    SET notifications_enabled = ?1,
+                        updated_at = ?2
+                    WHERE id = 'default'
+                    ",
+                    params![enabled, now],
+                )
+                .map_err(|error| format!("通知有効設定を保存できません: {error}"))?;
+            if updated != 1 {
+                return Err("通知有効設定を保存できませんでした".to_string());
+            }
+
+            let enabled: i64 = transaction
+                .query_row(
+                    "
+                    SELECT notifications_enabled
+                    FROM notification_preferences
+                    WHERE id = 'default'
+                    ",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("通知有効設定を取得できません: {error}"))?;
+            Ok(enabled != 0)
         })
     }
 
@@ -847,23 +896,25 @@ fn sync_notification_rule_for_kind(
             &existing.id,
             now,
         )?;
-        if existing.notify_at == notify_at && existing.enabled {
+        if existing.notify_at == notify_at {
             return Ok(());
         }
 
+        let enabled = existing.enabled;
+        let registration_status = if enabled { "pending" } else { "disabled" };
         transaction
             .execute(
                 "
                 UPDATE notification_rules
                 SET notify_at = ?1,
-                    enabled = 1,
-                    registration_status = 'pending',
+                    enabled = ?2,
+                    registration_status = ?3,
                     last_error = NULL,
-                    updated_at = ?2
-                WHERE id = ?3
+                    updated_at = ?4
+                WHERE id = ?5
                   AND deleted_at IS NULL
                 ",
-                params![notify_at, now, existing.id],
+                params![notify_at, enabled, registration_status, now, existing.id],
             )
             .map(|_| ())
             .map_err(|error| format!("通知ルールを更新できません: {error}"))
@@ -2352,7 +2403,17 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
         .execute_batch(INITIAL_SCHEMA)
         .map_err(|error| format!("SQLite初期マイグレーションに失敗しました: {error}"))?;
     run_timer_recurrence_migration(connection)?;
-    run_ui_read_model_migration(connection)
+    run_ui_read_model_migration(connection)?;
+    run_notification_preference_migration(connection)
+}
+
+fn run_notification_preference_migration(connection: &Connection) -> RepositoryResult<()> {
+    ensure_column(
+        connection,
+        "notification_preferences",
+        "notifications_enabled",
+        "ALTER TABLE notification_preferences ADD COLUMN notifications_enabled INTEGER NOT NULL DEFAULT 1 CHECK (notifications_enabled IN (0, 1))",
+    )
 }
 
 fn run_timer_recurrence_migration(connection: &Connection) -> RepositoryResult<()> {
@@ -2581,11 +2642,12 @@ fn seed_default_preferences(connection: &Connection) -> RepositoryResult<()> {
         .execute(
             "
             INSERT OR IGNORE INTO notification_preferences (
-              id, display_mode, created_at, updated_at
+              id, display_mode, notifications_enabled, created_at, updated_at
             )
             VALUES (
               'default',
               'title_only',
+              1,
               strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
               strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
             )
@@ -2825,7 +2887,7 @@ mod tests {
         application::{
             clock::Clock,
             notification::{LocalNotificationGateway, LocalNotificationMessage},
-            repositories::TaskReadRepository,
+            repositories::{NotificationPreferenceRepository, TaskReadRepository},
             usecases,
         },
         domain::{notification::NotificationDisplayMode, task::WorkStatus, timer::WorkTargetType},
@@ -2959,15 +3021,20 @@ mod tests {
         run_initial_migration(&connection).expect("migrate");
         seed_default_preferences(&connection).expect("seed");
 
-        let display_mode: String = connection
+        let (display_mode, notifications_enabled): (String, i64) = connection
             .query_row(
-                "SELECT display_mode FROM notification_preferences WHERE id = 'default'",
+                "
+                SELECT display_mode, notifications_enabled
+                FROM notification_preferences
+                WHERE id = 'default'
+                ",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("default preference");
 
         assert_eq!(display_mode, "title_only");
+        assert_eq!(notifications_enabled, 1);
     }
 
     #[test]
@@ -3698,6 +3765,70 @@ mod tests {
             )
         );
         assert_eq!(disabled_due_rules, 1);
+    }
+
+    #[test]
+    fn update_notifications_enabled_skips_and_resumes_dispatch() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let enable_clock = FixedClock {
+            now: "2026-07-06T00:10:00Z",
+        };
+        let notification_gateway = RecordingNotificationGateway::ok();
+        let task = usecases::create_task(
+            &database,
+            &create_clock,
+            usecases::WorkItemDraft {
+                title: "通知切替対象".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-06".to_string()),
+                memo: None,
+            },
+        )
+        .expect("create task");
+        usecases::update_notifications_enabled(&database, &create_clock, false)
+            .expect("disable notifications");
+        let skipped_summary =
+            usecases::dispatch_due_notifications(&database, &notification_gateway, &create_clock)
+                .expect("dispatch disabled");
+        let pending_count_after_skip: i64 = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "
+                        SELECT COUNT(*)
+                        FROM notification_rules
+                        WHERE target_id = ?1
+                          AND registration_status = 'pending'
+                          AND enabled = 1
+                          AND deleted_at IS NULL
+                        ",
+                        params![task.id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("pending count: {error}"))
+            })
+            .expect("pending notifications");
+
+        assert!(!database
+            .get_notifications_enabled()
+            .expect("enabled setting"));
+        assert_eq!(skipped_summary.attempted, 0);
+        assert!(notification_gateway.messages().is_empty());
+        assert_eq!(pending_count_after_skip, 1);
+
+        let enabled = usecases::update_notifications_enabled(&database, &enable_clock, true)
+            .expect("enable notifications");
+        let delivered_summary =
+            usecases::dispatch_due_notifications(&database, &notification_gateway, &enable_clock)
+                .expect("dispatch reenabled");
+
+        assert!(enabled);
+        assert_eq!(delivered_summary.attempted, 1);
+        assert_eq!(delivered_summary.succeeded, 1);
+        assert_eq!(notification_gateway.messages().len(), 1);
     }
 
     #[test]

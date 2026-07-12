@@ -106,6 +106,8 @@ export type TaskTimerGateway = {
   updateNotificationDisplayMode(
     displayMode: NotificationDisplayMode,
   ): Promise<NotificationDisplayMode>;
+  getNotificationsEnabled(): Promise<boolean>;
+  updateNotificationsEnabled(enabled: boolean): Promise<boolean>;
   dispatchDueNotifications(): Promise<NotificationDispatchSummary>;
 };
 

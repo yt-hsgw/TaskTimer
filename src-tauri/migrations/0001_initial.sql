@@ -124,6 +124,7 @@ WHERE deleted_at IS NULL;
 CREATE TABLE IF NOT EXISTS notification_preferences (
   id TEXT PRIMARY KEY CHECK (id = 'default'),
   display_mode TEXT NOT NULL CHECK (display_mode IN ('title_only', 'generic')),
+  notifications_enabled INTEGER NOT NULL DEFAULT 1 CHECK (notifications_enabled IN (0, 1)),
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

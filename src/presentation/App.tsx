@@ -38,6 +38,7 @@ export function App() {
   const [isNavigationOpen, setIsNavigationOpen] = useState(true);
   const [displayMode, setDisplayMode] =
     useState<NotificationDisplayMode>("title_only");
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [notificationSummary, setNotificationSummary] =
     useState<NotificationDispatchSummary | null>(null);
   const [calendarViewMode, setCalendarViewMode] =
@@ -119,6 +120,7 @@ export function App() {
         nextItems,
         nextActiveTimer,
         nextDisplayMode,
+        nextNotificationsEnabled,
       ] =
         await Promise.all([
           tauriTaskTimerGateway.listTasks(),
@@ -130,6 +132,7 @@ export function App() {
           ),
           tauriTaskTimerGateway.getActiveTimer(),
           tauriTaskTimerGateway.getNotificationDisplayMode(),
+          tauriTaskTimerGateway.getNotificationsEnabled(),
         ]);
 
       setTasks(nextTasks);
@@ -138,6 +141,7 @@ export function App() {
       setItems(nextItems);
       setActiveTimer(nextActiveTimer);
       setDisplayMode(nextDisplayMode);
+      setNotificationsEnabled(nextNotificationsEnabled);
       setNotificationSummary(
         await tauriTaskTimerGateway.dispatchDueNotifications(),
       );
@@ -483,6 +487,14 @@ export function App() {
     [runMutation],
   );
 
+  const handleUpdateNotificationsEnabled = useCallback(
+    (enabled: boolean) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.updateNotificationsEnabled(enabled);
+      }),
+    [runMutation],
+  );
+
   const handleRetryNotifications = useCallback(
     () =>
       runMutation(async () => {
@@ -674,9 +686,11 @@ export function App() {
           {activeView.kind === "settings" ? (
             <SettingsPanel
               displayMode={displayMode}
+              notificationsEnabled={notificationsEnabled}
               isMutating={isMutating}
               notificationSummary={notificationSummary}
               onUpdateDisplayMode={handleUpdateNotificationDisplayMode}
+              onUpdateNotificationsEnabled={handleUpdateNotificationsEnabled}
               onRetryNotifications={handleRetryNotifications}
             />
           ) : null}

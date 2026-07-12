@@ -31,6 +31,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [023 実行時外部通信・ログ出力の静的監査を追加する](023-runtime-privacy-audit.md) / GitHub #49
 - [024 Windowsコード署名方針を決める](024-windows-code-signing-policy.md) / GitHub #50
 - [025 OSスリープ・復帰時のタイマーと通知を強化する](025-sleep-resume-timer-notification.md) / GitHub #58
+- [026 通知の全体有効・無効設定を追加する](026-notification-rule-toggle-ui.md) / GitHub #55
 
 ## 運用
 

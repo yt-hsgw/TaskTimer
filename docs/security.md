@@ -48,6 +48,7 @@ Application境界で検証する。
 - `target_id`: UUID形式。
 - `status`: enum。
 - `notification_display_mode`: `title_only` または `generic`。
+- `notifications_enabled`: boolean。
 
 ## 通知プライバシー
 
@@ -55,7 +56,8 @@ Application境界で検証する。
 - `title_only` はタスクまたはサブタスクのタイトルのみを表示する。
 - `generic` はタスクまたはサブタスクのタイトルをOS通知adapterへ渡さず、プライバシー保護メッセージだけを表示する。
 - メモ本文は通知に含めない。
-- 通知表示モードはローカル設定として保存する。
+- 通知表示モードと通知全体ON/OFFはローカル設定として保存する。
+- 通知全体OFF時は、通知ルールを保持したままOS通知adapterへタスク名、サブタスク名、通知本文を渡さない。
 - OS通知はTauri公式notification pluginをRust側adapterから呼び出す。JS側へ通知plugin権限を追加しない。
 
 ## ログルール

@@ -116,7 +116,7 @@ flowchart LR
 | CompleteSubtask | サブタスクを完了し、完了日時を記録する。 |
 | DeleteTask | タスク、子サブタスク、タイマーセッション、通知ルールをソフト削除する。開始中タイマーも通常検索から除外する。 |
 | DeleteSubtask | サブタスク、タイマーセッション、通知ルールをソフト削除する。開始中タイマーも通常検索から除外する。 |
-| UpdateNotificationPreference | ローカル通知表示モードを保存する。 |
+| UpdateNotificationPreference | ローカル通知表示モードと通知全体ON/OFFを保存する。 |
 | DispatchDueNotifications | 期限到来した通知ルールを取得し、OS通知送信後に `registered` または `failed` を保存する。 |
 | ListTaskLists | 左ペインのリスト一覧を取得する。読み取り専用。 |
 | CreateTaskList | リスト名を検証し、リストを作成する。 |

@@ -120,6 +120,12 @@ pub struct UpdateNotificationDisplayModeRequestDto {
     pub display_mode: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateNotificationsEnabledRequestDto {
+    pub enabled: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WeekCalendarItemDto {
