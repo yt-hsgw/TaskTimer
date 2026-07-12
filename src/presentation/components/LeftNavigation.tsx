@@ -2,6 +2,7 @@ import type { TaskListItem } from "../../application/usecases/contracts";
 
 export type AppView =
   | { kind: "list"; listId: string }
+  | { kind: "today" }
   | { kind: "favorites" }
   | { kind: "calendar" }
   | { kind: "settings" };
@@ -9,6 +10,7 @@ export type AppView =
 type LeftNavigationProps = {
   activeView: AppView;
   favoriteCount: number;
+  todayCount: number;
   isOpen: boolean;
   taskLists: TaskListItem[];
   onSelectView(view: AppView): void;
@@ -18,6 +20,7 @@ type LeftNavigationProps = {
 export function LeftNavigation({
   activeView,
   favoriteCount,
+  todayCount,
   isOpen,
   taskLists,
   onSelectView,
@@ -40,7 +43,7 @@ export function LeftNavigation({
           aria-expanded={isOpen}
           onClick={onToggle}
         >
-          ☰
+          <span className="nav-panel-icon" aria-hidden="true" />
         </button>
       </div>
 
@@ -70,6 +73,14 @@ export function LeftNavigation({
         </div>
 
         <div className="nav-section">
+          <NavButton
+            icon="◎"
+            label="今日"
+            count={todayCount}
+            isOpen={isOpen}
+            isActive={activeView.kind === "today"}
+            onClick={() => onSelectView({ kind: "today" })}
+          />
           <NavButton
             icon="☆"
             label="お気に入り"
