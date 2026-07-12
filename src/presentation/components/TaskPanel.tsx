@@ -335,6 +335,7 @@ function TaskRowItem({
     ? Math.round((row.completedSubtaskCount / row.subtaskTotalCount) * 100)
     : 0;
   const isDone = row.status === "done";
+  const memoPreview = formatMemoPreview(task?.memo ?? "");
 
   return (
     <div className="task-row-group">
@@ -378,13 +379,16 @@ function TaskRowItem({
           <span className="task-row-meta">
             <span>{statusLabels[row.status]}</span>
             {row.dueDate ? (
-              <span title="期限あり">
-                ◇ {formatDateLabel(row.dueDate)}
+              <span className="task-due-label" title="期限あり">
+                期限 {formatDateLabel(row.dueDate)}
                 {row.dueTime ? ` ${row.dueTime}` : ""}
               </span>
             ) : null}
             {row.isTimerActive ? <span>実行中</span> : null}
           </span>
+          {memoPreview ? (
+            <span className="task-row-memo">{memoPreview}</span>
+          ) : null}
           {hasProgress ? (
             <span className="task-progress">
               <span className="task-progress-bar">
@@ -486,4 +490,12 @@ function formatDateLabel(value: string | null) {
   }
   const [, month, day] = value.split("-");
   return `${Number(month)}/${Number(day)}`;
+}
+
+function formatMemoPreview(value: string) {
+  const normalized = value.trim().replace(/\s+/g, " ");
+  if (!normalized) {
+    return "";
+  }
+  return normalized.length > 48 ? `${normalized.slice(0, 48)}...` : normalized;
 }

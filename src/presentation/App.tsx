@@ -63,6 +63,23 @@ export function App() {
     () => tasks.filter((task) => task.isFavorite).length,
     [tasks],
   );
+  const todayDate = getTodayDateInputValue();
+  const todayTaskIds = useMemo(
+    () =>
+      new Set(
+        tasks
+          .filter((task) => isTaskDueOnDate(task, todayDate))
+          .map((task) => task.id),
+      ),
+    [tasks, todayDate],
+  );
+  const todayCount = useMemo(
+    () =>
+      tasks.filter(
+        (task) => todayTaskIds.has(task.id) && task.status !== "done",
+      ).length,
+    [tasks, todayTaskIds],
+  );
 
   const activeTaskList = useMemo(() => {
     if (activeView.kind !== "list") {
@@ -77,6 +94,9 @@ export function App() {
   );
 
   const visibleTasks = useMemo(() => {
+    if (activeView.kind === "today") {
+      return tasks.filter((task) => todayTaskIds.has(task.id));
+    }
     if (activeView.kind === "favorites") {
       return tasks.filter((task) => task.isFavorite);
     }
@@ -84,9 +104,12 @@ export function App() {
       return tasks.filter((task) => task.listId === activeView.listId);
     }
     return tasks;
-  }, [activeView, tasks]);
+  }, [activeView, tasks, todayTaskIds]);
 
   const visibleTaskRows = useMemo(() => {
+    if (activeView.kind === "today") {
+      return taskRows.filter((task) => todayTaskIds.has(task.id));
+    }
     if (activeView.kind === "favorites") {
       return taskRows.filter((task) => task.isFavorite);
     }
@@ -94,7 +117,7 @@ export function App() {
       return taskRows.filter((task) => task.listId === activeView.listId);
     }
     return taskRows;
-  }, [activeView, taskRows]);
+  }, [activeView, taskRows, todayTaskIds]);
 
   const selectedTask = useMemo(() => {
     if (!selectedTaskId) {
@@ -642,6 +665,7 @@ export function App() {
         <LeftNavigation
           activeView={activeView}
           favoriteCount={favoriteCount}
+          todayCount={todayCount}
           isOpen={isNavigationOpen}
           taskLists={taskLists}
           onSelectView={handleSelectView}
@@ -649,7 +673,9 @@ export function App() {
         />
 
         <section className="workspace-main" aria-label="現在のビュー">
-          {(activeView.kind === "list" || activeView.kind === "favorites") ? (
+          {activeView.kind === "list" ||
+          activeView.kind === "today" ||
+          activeView.kind === "favorites" ? (
             <div
               className={`task-workspace ${
                 selectedTask ? "is-detail-open" : ""
@@ -659,16 +685,20 @@ export function App() {
                 tasks={visibleTasks}
                 taskRows={visibleTaskRows}
                 selectedTaskId={selectedTaskId}
-                eyebrow={activeView.kind === "favorites" ? "お気に入り" : "リスト"}
+                eyebrow={getTaskPanelEyebrow(activeView)}
                 title={
-                  activeView.kind === "favorites"
-                    ? "お気に入り"
-                    : activeTaskList?.name ?? "タスク"
+                  activeView.kind === "today"
+                    ? "今日"
+                    : activeView.kind === "favorites"
+                      ? "お気に入り"
+                      : activeTaskList?.name ?? "タスク"
                 }
                 emptyMessage={
-                  activeView.kind === "favorites"
-                    ? "お気に入りにしたタスクはまだありません。"
-                    : "まだタスクはありません。"
+                  activeView.kind === "today"
+                    ? "今日が期限のタスクはありません。"
+                    : activeView.kind === "favorites"
+                      ? "お気に入りにしたタスクはまだありません。"
+                      : "まだタスクはありません。"
                 }
                 showTaskForm={activeView.kind === "list"}
                 isLoading={isLoading}
@@ -770,6 +800,23 @@ export function App() {
         </section>
       </div>
     </main>
+  );
+}
+
+function getTaskPanelEyebrow(activeView: AppView) {
+  if (activeView.kind === "today") {
+    return "今日のタスク";
+  }
+  if (activeView.kind === "favorites") {
+    return "お気に入り";
+  }
+  return "リスト";
+}
+
+function isTaskDueOnDate(task: TaskWithSubtasks, date: string) {
+  return (
+    task.dueDate === date ||
+    task.subtasks.some((subtask) => subtask.dueDate === date)
   );
 }
 

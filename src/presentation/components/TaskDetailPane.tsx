@@ -117,7 +117,9 @@ export function TaskDetailPane({
     [detailItem.id, selectedSubtask],
   );
   const isTaskDetail = !selectedSubtask;
+  const hasSubtasks = task.subtasks.length > 0;
   const detailKey = `${selectedSubtask ? "subtask" : "task"}:${detailItem.id}`;
+  const detailMemo = detailItem.memo.trim();
   const [draft, setDraft] = useState(() => toDetailFormDraft(detailItem));
   const [isCoreEditOpen, setIsCoreEditOpen] = useState(false);
   const [isDuePopoverOpen, setIsDuePopoverOpen] = useState(false);
@@ -136,7 +138,7 @@ export function TaskDetailPane({
   const [openSections, setOpenSections] = useState<
     Record<DetailSectionKey, boolean>
   >({
-    subtasks: isTaskDetail,
+    subtasks: isTaskDetail && hasSubtasks,
     timer: false,
     notifications: false,
   });
@@ -160,11 +162,11 @@ export function TaskDetailPane({
     setIsSubtaskCreateOpen(false);
     setIsDeleteConfirming(false);
     setOpenSections({
-      subtasks: isTaskDetail,
+      subtasks: isTaskDetail && hasSubtasks,
       timer: false,
       notifications: false,
     });
-  }, [detailKey, isTaskDetail]);
+  }, [detailKey, hasSubtasks, isTaskDetail]);
 
   useEffect(() => {
     setSubtaskDraft({
@@ -238,6 +240,34 @@ export function TaskDetailPane({
       ...current,
       [section]: !current[section],
     }));
+  }
+
+  function handleToggleRecurrence(enabled: boolean) {
+    setDraft((current) => {
+      if (enabled && !current.dueDate) {
+        return {
+          ...current,
+          recurrenceEnabled: true,
+          dueDate: getTodayDateInputValue(),
+        };
+      }
+      if (
+        !enabled &&
+        !detailItem.dueDate &&
+        current.dueDate === getTodayDateInputValue()
+      ) {
+        return {
+          ...current,
+          recurrenceEnabled: false,
+          dueDate: "",
+          dueTime: "",
+        };
+      }
+      return {
+        ...current,
+        recurrenceEnabled: enabled,
+      };
+    });
   }
 
   function handleDeleteClick() {
@@ -325,6 +355,13 @@ export function TaskDetailPane({
           <strong>{formatRecurrenceFromItem(detailItem)}</strong>
         </div>
       </section>
+
+      {detailMemo ? (
+        <section className="detail-memo-card" aria-label="メモ">
+          <span>メモ</span>
+          <p>{detailMemo}</p>
+        </section>
+      ) : null}
 
       <div className="detail-due-area" aria-label="期限クイック設定">
         <div className="detail-quick-actions">
@@ -485,15 +522,14 @@ export function TaskDetailPane({
               checked={draft.recurrenceEnabled}
               disabled={isMutating}
               onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  recurrenceEnabled: event.currentTarget.checked,
-                }))
+                handleToggleRecurrence(event.currentTarget.checked)
               }
             />
             <span>
               <strong>繰り返しを有効にする</strong>
-              <small>有効時だけ頻度と間隔を設定します。</small>
+              <small>
+                有効時だけ頻度と間隔を設定します。期限未設定の場合は今日を基準にします。
+              </small>
             </span>
           </label>
 
