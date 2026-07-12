@@ -31,8 +31,10 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [023 実行時外部通信・ログ出力の静的監査を追加する](023-runtime-privacy-audit.md) / GitHub #49
 - [024 Windowsコード署名方針を決める](024-windows-code-signing-policy.md) / GitHub #50
 - [025 OSスリープ・復帰時のタイマーと通知を強化する](025-sleep-resume-timer-notification.md) / GitHub #58
-- [026 通知の全体有効・無効設定を追加する](026-notification-rule-toggle-ui.md) / GitHub #55
+- [026 通知の全体有効・無効設定を追加する](026-notification-rule-toggle-ui.md) / GitHub #55（完了）
 - [027 タスク詳細とサブタスク選択UXを改善する](027-task-detail-subtask-ux.md) / GitHub #68
+- [028 大量データで一覧とカレンダー表示を検証する](028-performance-large-dataset.md) / GitHub #72
+- [029 ローカルデータのバックアップとエクスポート方針を設計する](029-data-backup-export.md) / GitHub #73
 
 ## 運用
 

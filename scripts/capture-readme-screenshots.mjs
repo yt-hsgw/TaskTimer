@@ -577,6 +577,7 @@ function buildTauriInvokeMockSource() {
         list_week_calendar_items: () => clone(calendarItems),
         get_active_timer: () => clone(activeTimer),
         get_notification_display_mode: () => "title_only",
+        get_notifications_enabled: () => true,
         dispatch_due_notifications: () => ({
           attempted: 1,
           succeeded: 1,
