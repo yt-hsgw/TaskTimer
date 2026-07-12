@@ -21,6 +21,8 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   listTaskLists: () => invoke<TaskListItem[]>("list_task_lists"),
   listTaskRows: (listId?: string | null) =>
     invoke<TaskRow[]>("list_task_rows", { listId: listId ?? null }),
+  listCalendarItems: (startDate, endDate) =>
+    invoke<WeekCalendarItem[]>("list_calendar_items", { startDate, endDate }),
   listWeekCalendarItems: (weekStartDate) =>
     invoke<WeekCalendarItem[]>("list_week_calendar_items", { weekStartDate }),
   getActiveTimer: () => invoke<ActiveTimer | null>("get_active_timer"),

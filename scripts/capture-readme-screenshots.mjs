@@ -535,38 +535,46 @@ function buildTauriInvokeMockSource() {
 
   window.__TAURI_INTERNALS__ = {
     invoke(command, args = {}) {
-      const weekStart = args.weekStartDate ?? "2026-07-06";
+      const rangeStart = args.startDate ?? args.weekStartDate ?? "2026-07-06";
+      const calendarItems = [
+        {
+          id: "cal-review-start",
+          target: { type: "task", id: "task-weekly-review" },
+          title: "週次レビュー資料を作成",
+          parentTitle: null,
+          date: addDays(rangeStart, 0),
+          time: null,
+          marker: "planned_start",
+          status: "in_progress"
+        },
+        {
+          id: "cal-summary-active",
+          target: { type: "subtask", id: "subtask-summary" },
+          title: "要点を3つにまとめる",
+          parentTitle: "週次レビュー資料を作成",
+          date: addDays(rangeStart, 2),
+          time: "10:15",
+          marker: "active_timer",
+          status: "in_progress"
+        },
+        {
+          id: "cal-release-due",
+          target: { type: "task", id: "task-release-check" },
+          title: "リリース前チェック",
+          parentTitle: null,
+          date: addDays(rangeStart, 4),
+          time: null,
+          marker: "due",
+          status: "todo"
+        }
+      ];
       const commands = {
         health_check: () => "tauri-ready",
         list_tasks: () => clone(tasks),
         list_task_lists: () => clone(taskLists),
         list_task_rows: () => clone(taskRows),
-        list_week_calendar_items: () => [
-          {
-            id: "cal-review-start",
-            target: { type: "task", id: "task-weekly-review" },
-            title: "週次レビュー資料を作成",
-            date: addDays(weekStart, 0),
-            marker: "planned_start",
-            status: "in_progress"
-          },
-          {
-            id: "cal-summary-active",
-            target: { type: "subtask", id: "subtask-summary" },
-            title: "要点を3つにまとめる",
-            date: addDays(weekStart, 2),
-            marker: "active_timer",
-            status: "in_progress"
-          },
-          {
-            id: "cal-release-due",
-            target: { type: "task", id: "task-release-check" },
-            title: "リリース前チェック",
-            date: addDays(weekStart, 4),
-            marker: "due",
-            status: "todo"
-          }
-        ],
+        list_calendar_items: () => clone(calendarItems),
+        list_week_calendar_items: () => clone(calendarItems),
         get_active_timer: () => clone(activeTimer),
         get_notification_display_mode: () => "title_only",
         dispatch_due_notifications: () => ({

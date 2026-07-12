@@ -126,7 +126,9 @@ pub struct WeekCalendarItemDto {
     pub id: String,
     pub target: WorkTargetRefDto,
     pub title: String,
+    pub parent_title: Option<String>,
     pub date: String,
+    pub time: Option<String>,
     pub marker: String,
     pub status: String,
 }
@@ -344,7 +346,9 @@ impl From<WeekCalendarItem> for WeekCalendarItemDto {
                 id: value.target.id,
             },
             title: value.title,
+            parent_title: value.parent_title,
             date: value.date,
+            time: value.time,
             marker: value.marker.as_str().to_string(),
             status: value.status.as_str().to_string(),
         }

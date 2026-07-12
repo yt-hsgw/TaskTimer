@@ -13,6 +13,19 @@ pub fn health_check(database: DatabaseState<'_>) -> Result<&'static str, String>
 }
 
 #[tauri::command]
+pub fn list_calendar_items(
+    database: DatabaseState<'_>,
+    start_date: String,
+    end_date: String,
+) -> Result<Vec<super::dto::WeekCalendarItemDto>, String> {
+    use crate::application::repositories::CalendarRepository;
+
+    database
+        .list_calendar_items(&start_date, &end_date)
+        .map(|items| items.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
 pub fn list_week_calendar_items(
     database: DatabaseState<'_>,
     week_start_date: String,

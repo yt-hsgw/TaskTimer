@@ -36,7 +36,9 @@ export type WeekCalendarItem = {
   id: string;
   target: WorkTargetRef;
   title: string;
+  parentTitle: string | null;
   date: string;
+  time: string | null;
   marker: "planned_start" | "due" | "active_timer";
   status: Task["status"];
 };
@@ -83,6 +85,7 @@ export type TaskTimerGateway = {
   listTasks(): Promise<TaskWithSubtasks[]>;
   listTaskLists(): Promise<TaskListItem[]>;
   listTaskRows(listId?: string | null): Promise<TaskRow[]>;
+  listCalendarItems(startDate: string, endDate: string): Promise<WeekCalendarItem[]>;
   listWeekCalendarItems(weekStartDate: string): Promise<WeekCalendarItem[]>;
   getActiveTimer(): Promise<ActiveTimer | null>;
   getNotificationDisplayMode(): Promise<NotificationDisplayMode>;
