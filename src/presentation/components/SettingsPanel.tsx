@@ -1,11 +1,15 @@
 import type { NotificationDisplayMode } from "../../domain/notification/types";
-import type { NotificationDispatchSummary } from "../../application/usecases/contracts";
+import type {
+  NotificationDeliveryAttempt,
+  NotificationDispatchSummary,
+} from "../../application/usecases/contracts";
 
 type SettingsPanelProps = {
   displayMode: NotificationDisplayMode;
   notificationsEnabled: boolean;
   isMutating: boolean;
   notificationSummary: NotificationDispatchSummary | null;
+  notificationFailureHistory: NotificationDeliveryAttempt[];
   onUpdateDisplayMode(displayMode: NotificationDisplayMode): Promise<boolean>;
   onUpdateNotificationsEnabled(enabled: boolean): Promise<boolean>;
   onRetryNotifications(): Promise<boolean>;
@@ -16,6 +20,7 @@ export function SettingsPanel({
   notificationsEnabled,
   isMutating,
   notificationSummary,
+  notificationFailureHistory,
   onUpdateDisplayMode,
   onUpdateNotificationsEnabled,
   onRetryNotifications,
@@ -82,6 +87,60 @@ export function SettingsPanel({
       >
         通知を再試行
       </button>
+
+      <div
+        className="notification-history"
+        aria-labelledby="notification-history-title"
+      >
+        <div className="notification-history-heading">
+          <div>
+            <strong id="notification-history-title">通知失敗履歴</strong>
+            <span>失敗が絡む通知の最新20件</span>
+          </div>
+        </div>
+
+        {notificationFailureHistory.length > 0 ? (
+          <ol className="notification-history-list">
+            {notificationFailureHistory.map((attempt) => (
+              <li
+                className={`notification-history-item is-${attempt.result}`}
+                key={attempt.id}
+              >
+                <div className="notification-history-item-header">
+                  <span>{formatResult(attempt.result)}</span>
+                  <strong>
+                    {formatTarget(attempt.target.type)} /{" "}
+                    {formatKind(attempt.kind)}
+                  </strong>
+                </div>
+                <dl>
+                  <div>
+                    <dt>予定</dt>
+                    <dd>{formatDateTime(attempt.notifyAt)}</dd>
+                  </div>
+                  <div>
+                    <dt>試行</dt>
+                    <dd>
+                      {formatDateTime(attempt.attemptedAt)} /{" "}
+                      {attempt.attemptCount}回目
+                    </dd>
+                  </div>
+                  {attempt.errorMessage ? (
+                    <div>
+                      <dt>理由</dt>
+                      <dd>{attempt.errorMessage}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="notification-history-empty">
+            現在確認が必要な通知失敗履歴はありません。
+          </p>
+        )}
+      </div>
     </section>
   );
 }
@@ -100,4 +159,29 @@ function formatSummary(
     return "処理対象なし";
   }
   return `処理 ${summary.attempted}件 / 成功 ${summary.succeeded}件 / 失敗 ${summary.failed}件`;
+}
+
+function formatTarget(targetType: NotificationDeliveryAttempt["target"]["type"]) {
+  return targetType === "subtask" ? "サブタスク" : "タスク";
+}
+
+function formatKind(kind: NotificationDeliveryAttempt["kind"]) {
+  return kind === "planned_start" ? "開始予定" : "期限";
+}
+
+function formatResult(result: NotificationDeliveryAttempt["result"]) {
+  return result === "success" ? "成功" : "失敗";
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("ja-JP", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }

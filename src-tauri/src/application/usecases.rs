@@ -12,13 +12,15 @@ use super::{
     clock::Clock,
     notification::{LocalNotificationGateway, LocalNotificationMessage},
     repositories::{
-        ActiveTimer, NotificationCommandRepository, NotificationDispatchSummary,
+        ActiveTimer, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
+        NotificationDispatchSummary, NotificationHistoryRepository,
         NotificationPreferenceRepository, RecurrenceRuleInput, RepositoryResult, SubtaskRecord,
         TaskRecord, TaskTimerCommandRepository, WorkItemCreate, WorkItemUpdate,
     },
 };
 
 const NOTIFICATION_DISPATCH_LIMIT: i64 = 20;
+const NOTIFICATION_HISTORY_LIMIT: i64 = 20;
 const TIMER_TARGET_MAX_SECONDS: i64 = 60 * 60 * 24 * 30;
 const RECURRENCE_INTERVAL_MAX: i64 = 365;
 
@@ -243,11 +245,11 @@ pub fn dispatch_due_notifications(
 
         match result {
             Ok(()) => {
-                repository.mark_notification_registered(&job.id, &now)?;
+                repository.mark_notification_registered(&job, &now)?;
                 summary.succeeded += 1;
             }
             Err(error) => {
-                repository.mark_notification_failed(&job.id, &error, &now)?;
+                repository.mark_notification_failed(&job, &error, &now)?;
                 summary.failed += 1;
                 summary.last_error = Some(error);
             }
@@ -255,6 +257,12 @@ pub fn dispatch_due_notifications(
     }
 
     Ok(summary)
+}
+
+pub fn list_notification_failure_history(
+    repository: &impl NotificationHistoryRepository,
+) -> RepositoryResult<Vec<NotificationDeliveryAttemptRecord>> {
+    repository.list_notification_failure_history(NOTIFICATION_HISTORY_LIMIT)
 }
 
 fn validate_work_item_draft(draft: WorkItemDraft, now: String) -> RepositoryResult<WorkItemCreate> {

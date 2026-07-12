@@ -19,13 +19,17 @@ use uuid::Uuid;
 use crate::{
     application::repositories::{
         target_ref, ActiveTimer, CalendarMarker, CalendarRepository, NotificationCommandRepository,
-        NotificationJob, NotificationPreferenceRepository, RecurrenceRuleInput,
-        RecurrenceRuleRecord, RepositoryResult, SubtaskRecord, TaskListRecord, TaskReadRepository,
-        TaskRecord, TaskRowRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord,
-        TimerRepository, WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
+        NotificationDeliveryAttemptRecord, NotificationHistoryRepository, NotificationJob,
+        NotificationPreferenceRepository, RecurrenceRuleInput, RecurrenceRuleRecord,
+        RepositoryResult, SubtaskRecord, TaskListRecord, TaskReadRepository, TaskRecord,
+        TaskRowRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
+        WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
     },
     domain::{
-        notification::{NotificationDisplayMode, NotificationKind, NotificationRegistrationStatus},
+        notification::{
+            NotificationDeliveryResult, NotificationDisplayMode, NotificationKind,
+            NotificationRegistrationStatus,
+        },
         recurrence::RecurrenceFrequency,
         task::{assert_completable, assert_timer_startable, WorkStatus},
         timer::{WorkTargetRef, WorkTargetType},
@@ -527,6 +531,16 @@ impl NotificationPreferenceRepository for SqliteDatabase {
     }
 }
 
+impl NotificationHistoryRepository for SqliteDatabase {
+    fn list_notification_failure_history(
+        &self,
+        limit: i64,
+    ) -> RepositoryResult<Vec<NotificationDeliveryAttemptRecord>> {
+        let limit = limit.clamp(1, 100);
+        self.with_connection(|connection| select_notification_failure_history(connection, limit))
+    }
+}
+
 impl NotificationCommandRepository for SqliteDatabase {
     fn update_notification_display_mode(
         &self,
@@ -602,7 +616,11 @@ impl NotificationCommandRepository for SqliteDatabase {
         self.with_connection(|connection| select_due_notification_jobs(connection, now, limit))
     }
 
-    fn mark_notification_registered(&self, id: &str, now: &str) -> RepositoryResult<()> {
+    fn mark_notification_registered(
+        &self,
+        job: &NotificationJob,
+        now: &str,
+    ) -> RepositoryResult<()> {
         self.with_transaction(|transaction| {
             transaction
                 .execute(
@@ -614,14 +632,26 @@ impl NotificationCommandRepository for SqliteDatabase {
                     WHERE id = ?2
                       AND deleted_at IS NULL
                     ",
-                    params![now, id],
+                    params![now, job.id.as_str()],
                 )
-                .map(|_| ())
-                .map_err(|error| format!("通知登録成功状態を保存できません: {error}"))
+                .map_err(|error| format!("通知登録成功状態を保存できません: {error}"))?;
+
+            insert_notification_delivery_attempt(
+                transaction,
+                job,
+                NotificationDeliveryResult::Success,
+                None,
+                now,
+            )
         })
     }
 
-    fn mark_notification_failed(&self, id: &str, error: &str, now: &str) -> RepositoryResult<()> {
+    fn mark_notification_failed(
+        &self,
+        job: &NotificationJob,
+        error: &str,
+        now: &str,
+    ) -> RepositoryResult<()> {
         self.with_transaction(|transaction| {
             transaction
                 .execute(
@@ -633,10 +663,17 @@ impl NotificationCommandRepository for SqliteDatabase {
                     WHERE id = ?3
                       AND deleted_at IS NULL
                     ",
-                    params![truncate_error(error), now, id],
+                    params![truncate_error(error), now, job.id.as_str()],
                 )
-                .map(|_| ())
-                .map_err(|error| format!("通知登録失敗状態を保存できません: {error}"))
+                .map_err(|error| format!("通知登録失敗状態を保存できません: {error}"))?;
+
+            insert_notification_delivery_attempt(
+                transaction,
+                job,
+                NotificationDeliveryResult::Failed,
+                Some(error),
+                now,
+            )
         })
     }
 }
@@ -1284,6 +1321,105 @@ fn select_due_notification_jobs(
 
     rows.map(|row| row.map_err(|error| format!("通知ジョブ行を読めません: {error}")))
         .collect()
+}
+
+fn select_notification_failure_history(
+    connection: &Connection,
+    limit: i64,
+) -> RepositoryResult<Vec<NotificationDeliveryAttemptRecord>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT attempts.id,
+                   attempts.notification_rule_id,
+                   attempts.target_type,
+                   attempts.target_id,
+                   attempts.kind,
+                   attempts.notify_at,
+                   attempts.attempted_at,
+                   attempts.result,
+                   attempts.error_message,
+                   (
+                     SELECT COUNT(*)
+                     FROM notification_delivery_attempts AS counted_attempts
+                     WHERE counted_attempts.notification_rule_id = attempts.notification_rule_id
+                       AND (
+                         counted_attempts.attempted_at < attempts.attempted_at
+                         OR (
+                           counted_attempts.attempted_at = attempts.attempted_at
+                           AND counted_attempts.rowid <= attempts.rowid
+                         )
+                       )
+                   ) AS attempt_count
+            FROM notification_delivery_attempts AS attempts
+            WHERE EXISTS (
+              SELECT 1
+              FROM notification_delivery_attempts AS failed_attempts
+              WHERE failed_attempts.notification_rule_id = attempts.notification_rule_id
+                AND failed_attempts.result = 'failed'
+            )
+            ORDER BY attempts.attempted_at DESC,
+                     attempts.created_at DESC
+            LIMIT ?1
+            ",
+        )
+        .map_err(|error| format!("通知失敗履歴クエリを準備できません: {error}"))?;
+
+    let rows = statement
+        .query_map(params![limit], |row| {
+            let target_type_text: String = row.get(2)?;
+            let target_type = WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?;
+            let kind_text: String = row.get(4)?;
+            let result_text: String = row.get(7)?;
+            Ok(NotificationDeliveryAttemptRecord {
+                id: row.get(0)?,
+                notification_rule_id: row.get(1)?,
+                target: target_ref(target_type, row.get(3)?),
+                kind: NotificationKind::from_db(&kind_text).map_err(db_value_error)?,
+                notify_at: row.get(5)?,
+                attempted_at: row.get(6)?,
+                result: NotificationDeliveryResult::from_db(&result_text)
+                    .map_err(db_value_error)?,
+                error_message: row.get(8)?,
+                attempt_count: row.get(9)?,
+            })
+        })
+        .map_err(|error| format!("通知失敗履歴を取得できません: {error}"))?;
+
+    rows.map(|row| row.map_err(|error| format!("通知失敗履歴行を読めません: {error}")))
+        .collect()
+}
+
+fn insert_notification_delivery_attempt(
+    transaction: &Transaction<'_>,
+    job: &NotificationJob,
+    result: NotificationDeliveryResult,
+    error: Option<&str>,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            INSERT INTO notification_delivery_attempts (
+              id, notification_rule_id, target_type, target_id, kind, notify_at,
+              attempted_at, result, error_message, created_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?7)
+            ",
+            params![
+                Uuid::new_v4().to_string(),
+                job.id.as_str(),
+                job.target.target_type.as_str(),
+                job.target.id.as_str(),
+                job.kind.as_str(),
+                job.notify_at.as_str(),
+                now,
+                result.as_str(),
+                error.map(truncate_error),
+            ],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("通知送信履歴を保存できません: {error}"))
 }
 
 fn truncate_error(error: &str) -> String {
@@ -2469,7 +2605,8 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
     run_timer_recurrence_migration(connection)?;
     run_due_time_migration(connection)?;
     run_ui_read_model_migration(connection)?;
-    run_notification_preference_migration(connection)
+    run_notification_preference_migration(connection)?;
+    run_notification_delivery_attempt_migration(connection)
 }
 
 fn run_due_time_migration(connection: &Connection) -> RepositoryResult<()> {
@@ -2507,6 +2644,58 @@ fn run_notification_preference_migration(connection: &Connection) -> RepositoryR
         "notifications_enabled",
         "ALTER TABLE notification_preferences ADD COLUMN notifications_enabled INTEGER NOT NULL DEFAULT 1 CHECK (notifications_enabled IN (0, 1))",
     )
+}
+
+fn run_notification_delivery_attempt_migration(connection: &Connection) -> RepositoryResult<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS notification_delivery_attempts (
+              id TEXT PRIMARY KEY,
+              notification_rule_id TEXT NOT NULL,
+              target_type TEXT NOT NULL CHECK (target_type IN ('task', 'subtask')),
+              target_id TEXT NOT NULL,
+              kind TEXT NOT NULL CHECK (kind IN ('planned_start', 'due')),
+              notify_at TEXT NOT NULL,
+              attempted_at TEXT NOT NULL,
+              result TEXT NOT NULL CHECK (result IN ('success', 'failed')),
+              error_message TEXT NULL,
+              created_at TEXT NOT NULL,
+              FOREIGN KEY (notification_rule_id) REFERENCES notification_rules(id) ON DELETE RESTRICT
+            );
+
+            CREATE INDEX IF NOT EXISTS notification_delivery_attempts_recent_idx
+            ON notification_delivery_attempts (attempted_at DESC, created_at DESC);
+
+            CREATE INDEX IF NOT EXISTS notification_delivery_attempts_rule_idx
+            ON notification_delivery_attempts (notification_rule_id, attempted_at DESC);
+
+            INSERT INTO notification_delivery_attempts (
+              id, notification_rule_id, target_type, target_id, kind, notify_at,
+              attempted_at, result, error_message, created_at
+            )
+            SELECT lower(hex(randomblob(16))),
+                   notification_rules.id,
+                   notification_rules.target_type,
+                   notification_rules.target_id,
+                   notification_rules.kind,
+                   notification_rules.notify_at,
+                   notification_rules.updated_at,
+                   'failed',
+                   notification_rules.last_error,
+                   notification_rules.updated_at
+            FROM notification_rules
+            WHERE notification_rules.deleted_at IS NULL
+              AND notification_rules.registration_status = 'failed'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM notification_delivery_attempts AS attempts
+                WHERE attempts.notification_rule_id = notification_rules.id
+              );
+            ",
+        )
+        .map(|_| ())
+        .map_err(|error| format!("通知送信履歴テーブルを作成できません: {error}"))
 }
 
 fn run_timer_recurrence_migration(connection: &Connection) -> RepositoryResult<()> {
@@ -2984,10 +3173,16 @@ mod tests {
         application::{
             clock::Clock,
             notification::{LocalNotificationGateway, LocalNotificationMessage},
-            repositories::{NotificationPreferenceRepository, TaskReadRepository},
+            repositories::{
+                NotificationHistoryRepository, NotificationPreferenceRepository, TaskReadRepository,
+            },
             usecases,
         },
-        domain::{notification::NotificationDisplayMode, task::WorkStatus, timer::WorkTargetType},
+        domain::{
+            notification::{NotificationDeliveryResult, NotificationDisplayMode, NotificationKind},
+            task::WorkStatus,
+            timer::WorkTargetType,
+        },
     };
 
     struct FixedClock {
@@ -3133,6 +3328,61 @@ mod tests {
 
         assert_eq!(display_mode, "title_only");
         assert_eq!(notifications_enabled, 1);
+    }
+
+    #[test]
+    fn migration_backfills_failed_notification_delivery_attempts() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        configure_connection(&connection).expect("configure");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE notification_rules (
+                  id TEXT PRIMARY KEY,
+                  target_type TEXT NOT NULL CHECK (target_type IN ('task', 'subtask')),
+                  target_id TEXT NOT NULL,
+                  kind TEXT NOT NULL CHECK (kind IN ('planned_start', 'due')),
+                  notify_at TEXT NOT NULL,
+                  enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+                  registration_status TEXT NOT NULL CHECK (
+                    registration_status IN ('pending', 'registered', 'failed', 'disabled')
+                  ),
+                  last_error TEXT NULL,
+                  deleted_at TEXT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+
+                INSERT INTO notification_rules (
+                  id, target_type, target_id, kind, notify_at, enabled,
+                  registration_status, last_error, created_at, updated_at
+                )
+                VALUES (
+                  'failed-rule', 'task', 'task-1', 'due', '2026-07-06T00:00:00Z',
+                  1, 'failed', 'permission denied',
+                  '2026-07-06T00:00:00Z', '2026-07-06T00:05:00Z'
+                );
+                ",
+            )
+            .expect("legacy notification rules");
+
+        run_initial_migration(&connection).expect("migrate");
+
+        let (count, error_message): (i64, String) = connection
+            .query_row(
+                "
+                SELECT COUNT(*), MAX(error_message)
+                FROM notification_delivery_attempts
+                WHERE notification_rule_id = 'failed-rule'
+                  AND result = 'failed'
+                ",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("backfilled attempts");
+
+        assert_eq!(count, 1);
+        assert_eq!(error_message, "permission denied");
     }
 
     #[test]
@@ -4477,7 +4727,11 @@ mod tests {
         let clock = FixedClock {
             now: "2026-07-06T00:00:00Z",
         };
+        let retry_clock = FixedClock {
+            now: "2026-07-06T00:05:00Z",
+        };
         let notification_gateway = RecordingNotificationGateway::failing("permission denied");
+        let retry_gateway = RecordingNotificationGateway::ok();
 
         usecases::create_task(
             &database,
@@ -4530,6 +4784,35 @@ mod tests {
         assert_eq!(summary.last_error.as_deref(), Some("permission denied"));
         assert_eq!(failed_count, 1);
         assert_eq!(last_error, "permission denied");
+
+        let failed_history = usecases::list_notification_failure_history(&database)
+            .expect("failed notification history");
+        assert_eq!(failed_history.len(), 1);
+        assert_eq!(failed_history[0].target.target_type, WorkTargetType::Task);
+        assert_eq!(failed_history[0].kind, NotificationKind::Due);
+        assert_eq!(failed_history[0].result, NotificationDeliveryResult::Failed);
+        assert_eq!(failed_history[0].attempt_count, 1);
+        assert_eq!(
+            failed_history[0].error_message.as_deref(),
+            Some("permission denied")
+        );
+
+        let retry_summary =
+            usecases::dispatch_due_notifications(&database, &retry_gateway, &retry_clock)
+                .expect("retry notifications");
+        let retry_history = database
+            .list_notification_failure_history(20)
+            .expect("retry notification history");
+
+        assert_eq!(retry_summary.attempted, 1);
+        assert_eq!(retry_summary.succeeded, 1);
+        assert_eq!(retry_summary.failed, 0);
+        assert_eq!(retry_history.len(), 2);
+        assert_eq!(retry_history[0].result, NotificationDeliveryResult::Success);
+        assert_eq!(retry_history[0].attempt_count, 2);
+        assert_eq!(retry_history[0].error_message, None);
+        assert_eq!(retry_history[1].result, NotificationDeliveryResult::Failed);
+        assert_eq!(retry_history[1].attempt_count, 1);
     }
 
     #[test]

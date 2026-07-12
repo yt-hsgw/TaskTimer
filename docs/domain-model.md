@@ -217,6 +217,20 @@ erDiagram
 - dispatchに失敗した通知ルールは `failed` とし、再試行対象に残す。
 - ソフト削除済み通知ルールは無効化され、通知登録対象から除外する。
 
+### NotificationDeliveryAttempt
+
+ローカル通知送信の試行イベントを表す。
+
+ルール:
+
+- `notification_rule_id` で通知意図と関連付ける。
+- `result` は `success` または `failed`。
+- 送信成功時も失敗時も1試行として保存する。
+- `target_type`、`target_id`、`kind`、`notify_at` は履歴表示用のスナップショットとして保存する。
+- `error_message` は失敗時のみ保存し、500文字までに切り詰める。
+- タスク名、サブタスク名、メモ本文、通知本文は保存しない。
+- UI表示は最新件数に制限し、全履歴読み込みに依存しない。
+
 ### NotificationPreference
 
 ローカル通知本文の表示設定を表す。

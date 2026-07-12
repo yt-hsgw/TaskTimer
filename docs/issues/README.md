@@ -35,6 +35,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [027 タスク詳細とサブタスク選択UXを改善する](027-task-detail-subtask-ux.md) / GitHub #68
 - [028 大量データで一覧とカレンダー表示を検証する](028-performance-large-dataset.md) / GitHub #72
 - [029 ローカルデータのバックアップとエクスポート方針を設計する](029-data-backup-export.md) / GitHub #73
+- [030 通知失敗履歴と再試行結果を表示する](030-notification-failure-history.md) / GitHub #53
 
 ## 運用
 

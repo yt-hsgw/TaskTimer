@@ -46,6 +46,7 @@ flowchart TD
 - 汎用通知モードではタスク/サブタスクタイトルを含めない。
 - 期限到来通知のdispatch成功で `registered` になる。
 - OS通知送信失敗時は `failed` と `last_error` が保存される。
+- OS通知送信の成功/失敗は `notification_delivery_attempts` に保存され、設定画面で最新履歴として確認できる。
 - 通知全体OFF中はdispatch対象から除外され、ONへ戻すと既存の `pending` / `failed` 通知が対象に戻る。
 - 期限時刻がある期限通知は `due_date + due_time` を `notify_at` として保存する。
 

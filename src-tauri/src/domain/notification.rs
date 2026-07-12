@@ -76,6 +76,29 @@ impl NotificationRegistrationStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotificationDeliveryResult {
+    Success,
+    Failed,
+}
+
+impl NotificationDeliveryResult {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub fn from_db(value: &str) -> Result<Self, String> {
+        match value {
+            "success" => Ok(Self::Success),
+            "failed" => Ok(Self::Failed),
+            _ => Err(format!("不正な通知送信結果です: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationContent {
     pub title: String,
     pub body: String,

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   CreateSubtaskDraft,
+  NotificationDeliveryAttempt,
   NotificationDispatchSummary,
   TaskTimerGateway,
   TaskListItem,
@@ -70,4 +71,6 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     }),
   dispatchDueNotifications: () =>
     invoke<NotificationDispatchSummary>("dispatch_due_notifications"),
+  listNotificationFailureHistory: () =>
+    invoke<NotificationDeliveryAttempt[]>("list_notification_failure_history"),
 };

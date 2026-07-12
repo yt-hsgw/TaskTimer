@@ -99,6 +99,14 @@ pub fn get_notifications_enabled(database: DatabaseState<'_>) -> Result<bool, St
 }
 
 #[tauri::command]
+pub fn list_notification_failure_history(
+    database: DatabaseState<'_>,
+) -> Result<Vec<super::dto::NotificationDeliveryAttemptDto>, String> {
+    super::usecases::list_notification_failure_history(database.inner())
+        .map(|attempts| attempts.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
 pub fn create_task(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,
