@@ -19,10 +19,10 @@ use uuid::Uuid;
 use crate::{
     application::repositories::{
         target_ref, ActiveTimer, CalendarMarker, CalendarRepository, NotificationCommandRepository,
-        NotificationJob, NotificationPreferenceRepository, NotificationRuleRecord,
-        RecurrenceRuleInput, RecurrenceRuleRecord, RepositoryResult, SubtaskRecord, TaskListRecord,
-        TaskReadRepository, TaskRecord, TaskRowRecord, TaskTimerCommandRepository,
-        TaskWithSubtasksRecord, TimerRepository, WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
+        NotificationJob, NotificationPreferenceRepository, RecurrenceRuleInput,
+        RecurrenceRuleRecord, RepositoryResult, SubtaskRecord, TaskListRecord, TaskReadRepository,
+        TaskRecord, TaskRowRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord,
+        TimerRepository, WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
     },
     domain::{
         notification::{NotificationDisplayMode, NotificationKind, NotificationRegistrationStatus},
@@ -165,13 +165,12 @@ impl TaskReadRepository for SqliteDatabase {
         let limit = limit.clamp(1, 500);
 
         self.with_connection(|connection| {
-            let mut tasks = select_task_list(connection, limit)?;
+            let tasks = select_task_list(connection, limit)?;
             if tasks.is_empty() {
                 return Ok(Vec::new());
             }
 
-            let mut subtasks = select_subtasks_for_task_list(connection, limit)?;
-            attach_notification_rules(connection, &mut tasks, &mut subtasks)?;
+            let subtasks = select_subtasks_for_task_list(connection, limit)?;
             Ok(build_task_tree(tasks, subtasks))
         })
     }
@@ -481,6 +480,23 @@ impl NotificationPreferenceRepository for SqliteDatabase {
             NotificationDisplayMode::from_db(&display_mode)
         })
     }
+
+    fn get_notifications_enabled(&self) -> RepositoryResult<bool> {
+        self.with_connection(|connection| {
+            connection
+                .query_row(
+                    "
+                    SELECT notifications_enabled
+                    FROM notification_preferences
+                    WHERE id = 'default'
+                    ",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|value| value != 0)
+                .map_err(|error| format!("通知有効設定を取得できません: {error}"))
+        })
+    }
 }
 
 impl NotificationCommandRepository for SqliteDatabase {
@@ -517,38 +533,35 @@ impl NotificationCommandRepository for SqliteDatabase {
         })
     }
 
-    fn set_notification_rule_enabled(
-        &self,
-        rule_id: String,
-        enabled: bool,
-        now: String,
-    ) -> RepositoryResult<NotificationRuleRecord> {
+    fn update_notifications_enabled(&self, enabled: bool, now: String) -> RepositoryResult<bool> {
         self.with_transaction(|transaction| {
-            let current = select_existing_notification_rule_by_id(transaction, &rule_id)?;
-            if current.enabled == enabled {
-                return Ok(current);
-            }
-
-            let registration_status = if enabled { "pending" } else { "disabled" };
             let updated = transaction
                 .execute(
                     "
-                    UPDATE notification_rules
-                    SET enabled = ?1,
-                        registration_status = ?2,
-                        last_error = NULL,
-                        updated_at = ?3
-                    WHERE id = ?4
-                      AND deleted_at IS NULL
+                    UPDATE notification_preferences
+                    SET notifications_enabled = ?1,
+                        updated_at = ?2
+                    WHERE id = 'default'
                     ",
-                    params![enabled, registration_status, now, rule_id],
+                    params![enabled, now],
                 )
-                .map_err(|error| format!("通知ルールの有効状態を保存できません: {error}"))?;
+                .map_err(|error| format!("通知有効設定を保存できません: {error}"))?;
             if updated != 1 {
-                return Err("通知ルールの有効状態を保存できませんでした".to_string());
+                return Err("通知有効設定を保存できませんでした".to_string());
             }
 
-            select_existing_notification_rule_by_id(transaction, &rule_id)
+            let enabled: i64 = transaction
+                .query_row(
+                    "
+                    SELECT notifications_enabled
+                    FROM notification_preferences
+                    WHERE id = 'default'
+                    ",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("通知有効設定を取得できません: {error}"))?;
+            Ok(enabled != 0)
         })
     }
 
@@ -1217,129 +1230,6 @@ fn select_due_notification_jobs(
 
     rows.map(|row| row.map_err(|error| format!("通知ジョブ行を読めません: {error}")))
         .collect()
-}
-
-fn select_existing_notification_rule_by_id(
-    connection: &Connection,
-    id: &str,
-) -> RepositoryResult<NotificationRuleRecord> {
-    connection
-        .query_row(
-            "
-            SELECT id, target_type, target_id, kind, notify_at, enabled,
-                   registration_status, last_error, deleted_at, created_at, updated_at
-            FROM notification_rules
-            WHERE id = ?1
-              AND deleted_at IS NULL
-            ",
-            params![id],
-            map_notification_rule_row,
-        )
-        .map_err(|error| format!("通知ルールを取得できません: {error}"))
-}
-
-fn select_notification_rules_for_targets(
-    connection: &Connection,
-    task_ids: &[String],
-    subtask_ids: &[String],
-) -> RepositoryResult<HashMap<String, Vec<NotificationRuleRecord>>> {
-    if task_ids.is_empty() && subtask_ids.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let mut clauses = Vec::new();
-    let mut values = Vec::new();
-    if !task_ids.is_empty() {
-        clauses.push(format!(
-            "(target_type = 'task' AND target_id IN ({}))",
-            placeholders(task_ids.len())
-        ));
-        values.extend(task_ids.iter().cloned());
-    }
-    if !subtask_ids.is_empty() {
-        clauses.push(format!(
-            "(target_type = 'subtask' AND target_id IN ({}))",
-            placeholders(subtask_ids.len())
-        ));
-        values.extend(subtask_ids.iter().cloned());
-    }
-
-    let sql = format!(
-        "
-        SELECT id, target_type, target_id, kind, notify_at, enabled,
-               registration_status, last_error, deleted_at, created_at, updated_at
-        FROM notification_rules
-        WHERE deleted_at IS NULL
-          AND ({})
-        ORDER BY target_type ASC, target_id ASC, kind ASC, created_at ASC
-        ",
-        clauses.join(" OR ")
-    );
-    let mut statement = connection
-        .prepare(&sql)
-        .map_err(|error| format!("通知ルールRead Modelクエリを準備できません: {error}"))?;
-    let rows = statement
-        .query_map(
-            rusqlite::params_from_iter(values.iter()),
-            map_notification_rule_row,
-        )
-        .map_err(|error| format!("通知ルールRead Modelを取得できません: {error}"))?;
-
-    let mut rules_by_target: HashMap<String, Vec<NotificationRuleRecord>> = HashMap::new();
-    for row in rows {
-        let rule = row.map_err(|error| format!("通知ルールRead Model行を読めません: {error}"))?;
-        rules_by_target
-            .entry(notification_rule_target_key(&rule.target))
-            .or_default()
-            .push(rule);
-    }
-    Ok(rules_by_target)
-}
-
-fn attach_notification_rules(
-    connection: &Connection,
-    tasks: &mut [TaskRecord],
-    subtasks: &mut [SubtaskRecord],
-) -> RepositoryResult<()> {
-    let task_ids = tasks.iter().map(|task| task.id.clone()).collect::<Vec<_>>();
-    let subtask_ids = subtasks
-        .iter()
-        .map(|subtask| subtask.id.clone())
-        .collect::<Vec<_>>();
-    let mut rules_by_target =
-        select_notification_rules_for_targets(connection, &task_ids, &subtask_ids)?;
-
-    for task in tasks {
-        let target = WorkTargetRef {
-            target_type: WorkTargetType::Task,
-            id: task.id.clone(),
-        };
-        task.notification_rules = rules_by_target
-            .remove(&notification_rule_target_key(&target))
-            .unwrap_or_default();
-    }
-
-    for subtask in subtasks {
-        let target = WorkTargetRef {
-            target_type: WorkTargetType::Subtask,
-            id: subtask.id.clone(),
-        };
-        subtask.notification_rules = rules_by_target
-            .remove(&notification_rule_target_key(&target))
-            .unwrap_or_default();
-    }
-
-    Ok(())
-}
-
-fn placeholders(count: usize) -> String {
-    std::iter::repeat_n("?", count)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn notification_rule_target_key(target: &WorkTargetRef) -> String {
-    format!("{}:{}", target.target_type.as_str(), target.id)
 }
 
 fn truncate_error(error: &str) -> String {
@@ -2029,7 +1919,7 @@ fn mark_target_in_progress(
 }
 
 fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<TaskRecord> {
-    let mut task = connection
+    connection
         .query_row(
             "
             SELECT id, list_id, title, status, is_favorite,
@@ -2072,13 +1962,11 @@ fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<Task
             params![id],
             map_task_row,
         )
-        .map_err(|error| format!("タスクを取得できません: {error}"))?;
-    attach_notification_rules_to_task(connection, &mut task)?;
-    Ok(task)
+        .map_err(|error| format!("タスクを取得できません: {error}"))
 }
 
 fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<TaskRecord> {
-    let mut task = connection
+    connection
         .query_row(
             "
             SELECT id, list_id, title, status, is_favorite,
@@ -2122,13 +2010,11 @@ fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryRe
             params![id],
             map_task_row,
         )
-        .map_err(|error| format!("タスクを取得できません: {error}"))?;
-    attach_notification_rules_to_task(connection, &mut task)?;
-    Ok(task)
+        .map_err(|error| format!("タスクを取得できません: {error}"))
 }
 
 fn select_subtask_by_id(connection: &Connection, id: &str) -> RepositoryResult<SubtaskRecord> {
-    let mut subtask = connection
+    connection
         .query_row(
             "
             SELECT id, task_id, title, status, planned_start_date, due_date,
@@ -2170,16 +2056,14 @@ fn select_subtask_by_id(connection: &Connection, id: &str) -> RepositoryResult<S
             params![id],
             map_subtask_row,
         )
-        .map_err(|error| format!("サブタスクを取得できません: {error}"))?;
-    attach_notification_rules_to_subtask(connection, &mut subtask)?;
-    Ok(subtask)
+        .map_err(|error| format!("サブタスクを取得できません: {error}"))
 }
 
 fn select_existing_subtask_by_id(
     connection: &Connection,
     id: &str,
 ) -> RepositoryResult<SubtaskRecord> {
-    let mut subtask = connection
+    connection
         .query_row(
             "
             SELECT id, task_id, title, status, planned_start_date, due_date,
@@ -2222,9 +2106,7 @@ fn select_existing_subtask_by_id(
             params![id],
             map_subtask_row,
         )
-        .map_err(|error| format!("サブタスクを取得できません: {error}"))?;
-    attach_notification_rules_to_subtask(connection, &mut subtask)?;
-    Ok(subtask)
+        .map_err(|error| format!("サブタスクを取得できません: {error}"))
 }
 
 fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
@@ -2238,7 +2120,6 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
         due_date: row.get(6)?,
         timer_target_seconds: row.get(7)?,
         recurrence_rule: map_optional_recurrence_rule(row, 14)?,
-        notification_rules: Vec::new(),
         memo: row.get(8)?,
         sort_order: row.get(9)?,
         completed_at: row.get(10)?,
@@ -2258,7 +2139,6 @@ fn map_subtask_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubtaskRecord> {
         due_date: row.get(5)?,
         timer_target_seconds: row.get(6)?,
         recurrence_rule: map_optional_recurrence_rule(row, 13)?,
-        notification_rules: Vec::new(),
         memo: row.get(7)?,
         sort_order: row.get(8)?,
         completed_at: row.get(9)?,
@@ -2288,61 +2168,6 @@ fn map_optional_recurrence_rule(
         created_at: row.get(start_index + 6)?,
         updated_at: row.get(start_index + 7)?,
     }))
-}
-
-fn map_notification_rule_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<NotificationRuleRecord> {
-    let target_type_text: String = row.get(1)?;
-    let kind_text: String = row.get(3)?;
-    let registration_status_text: String = row.get(6)?;
-
-    Ok(NotificationRuleRecord {
-        id: row.get(0)?,
-        target: target_ref(
-            WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?,
-            row.get(2)?,
-        ),
-        kind: NotificationKind::from_db(&kind_text).map_err(db_value_error)?,
-        notify_at: row.get(4)?,
-        enabled: row.get::<_, i64>(5)? != 0,
-        registration_status: NotificationRegistrationStatus::from_db(&registration_status_text)
-            .map_err(db_value_error)?,
-        last_error: row.get(7)?,
-        deleted_at: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
-    })
-}
-
-fn attach_notification_rules_to_task(
-    connection: &Connection,
-    task: &mut TaskRecord,
-) -> RepositoryResult<()> {
-    let mut rules_by_target =
-        select_notification_rules_for_targets(connection, std::slice::from_ref(&task.id), &[])?;
-    let target = WorkTargetRef {
-        target_type: WorkTargetType::Task,
-        id: task.id.clone(),
-    };
-    task.notification_rules = rules_by_target
-        .remove(&notification_rule_target_key(&target))
-        .unwrap_or_default();
-    Ok(())
-}
-
-fn attach_notification_rules_to_subtask(
-    connection: &Connection,
-    subtask: &mut SubtaskRecord,
-) -> RepositoryResult<()> {
-    let mut rules_by_target =
-        select_notification_rules_for_targets(connection, &[], std::slice::from_ref(&subtask.id))?;
-    let target = WorkTargetRef {
-        target_type: WorkTargetType::Subtask,
-        id: subtask.id.clone(),
-    };
-    subtask.notification_rules = rules_by_target
-        .remove(&notification_rule_target_key(&target))
-        .unwrap_or_default();
-    Ok(())
 }
 
 fn map_task_read_model_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRowRecord> {
@@ -2578,7 +2403,17 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
         .execute_batch(INITIAL_SCHEMA)
         .map_err(|error| format!("SQLite初期マイグレーションに失敗しました: {error}"))?;
     run_timer_recurrence_migration(connection)?;
-    run_ui_read_model_migration(connection)
+    run_ui_read_model_migration(connection)?;
+    run_notification_preference_migration(connection)
+}
+
+fn run_notification_preference_migration(connection: &Connection) -> RepositoryResult<()> {
+    ensure_column(
+        connection,
+        "notification_preferences",
+        "notifications_enabled",
+        "ALTER TABLE notification_preferences ADD COLUMN notifications_enabled INTEGER NOT NULL DEFAULT 1 CHECK (notifications_enabled IN (0, 1))",
+    )
 }
 
 fn run_timer_recurrence_migration(connection: &Connection) -> RepositoryResult<()> {
@@ -2807,11 +2642,12 @@ fn seed_default_preferences(connection: &Connection) -> RepositoryResult<()> {
         .execute(
             "
             INSERT OR IGNORE INTO notification_preferences (
-              id, display_mode, created_at, updated_at
+              id, display_mode, notifications_enabled, created_at, updated_at
             )
             VALUES (
               'default',
               'title_only',
+              1,
               strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
               strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
             )
@@ -3051,16 +2887,10 @@ mod tests {
         application::{
             clock::Clock,
             notification::{LocalNotificationGateway, LocalNotificationMessage},
-            repositories::TaskReadRepository,
+            repositories::{NotificationPreferenceRepository, TaskReadRepository},
             usecases,
         },
-        domain::{
-            notification::{
-                NotificationDisplayMode, NotificationKind, NotificationRegistrationStatus,
-            },
-            task::WorkStatus,
-            timer::WorkTargetType,
-        },
+        domain::{notification::NotificationDisplayMode, task::WorkStatus, timer::WorkTargetType},
     };
 
     struct FixedClock {
@@ -3191,15 +3021,20 @@ mod tests {
         run_initial_migration(&connection).expect("migrate");
         seed_default_preferences(&connection).expect("seed");
 
-        let display_mode: String = connection
+        let (display_mode, notifications_enabled): (String, i64) = connection
             .query_row(
-                "SELECT display_mode FROM notification_preferences WHERE id = 'default'",
+                "
+                SELECT display_mode, notifications_enabled
+                FROM notification_preferences
+                WHERE id = 'default'
+                ",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("default preference");
 
         assert_eq!(display_mode, "title_only");
+        assert_eq!(notifications_enabled, 1);
     }
 
     #[test]
@@ -3933,7 +3768,7 @@ mod tests {
     }
 
     #[test]
-    fn set_notification_rule_enabled_disables_and_reenables_due_rule() {
+    fn update_notifications_enabled_skips_and_resumes_dispatch() {
         let database = in_memory_database();
         let create_clock = FixedClock {
             now: "2026-07-06T00:00:00Z",
@@ -3953,115 +3788,47 @@ mod tests {
             },
         )
         .expect("create task");
-        let due_rule = task
-            .notification_rules
-            .iter()
-            .find(|rule| rule.kind == NotificationKind::Due)
-            .expect("due rule");
-
-        let disabled = usecases::set_notification_rule_enabled(
-            &database,
-            &create_clock,
-            due_rule.id.clone(),
-            false,
-        )
-        .expect("disable rule");
+        usecases::update_notifications_enabled(&database, &create_clock, false)
+            .expect("disable notifications");
         let skipped_summary =
             usecases::dispatch_due_notifications(&database, &notification_gateway, &create_clock)
                 .expect("dispatch disabled");
-        let tree = database
-            .list_tasks_with_subtasks(200)
-            .expect("task tree with notification rule");
+        let pending_count_after_skip: i64 = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "
+                        SELECT COUNT(*)
+                        FROM notification_rules
+                        WHERE target_id = ?1
+                          AND registration_status = 'pending'
+                          AND enabled = 1
+                          AND deleted_at IS NULL
+                        ",
+                        params![task.id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("pending count: {error}"))
+            })
+            .expect("pending notifications");
 
-        assert!(!disabled.enabled);
-        assert_eq!(
-            disabled.registration_status,
-            NotificationRegistrationStatus::Disabled
-        );
+        assert!(!database
+            .get_notifications_enabled()
+            .expect("enabled setting"));
         assert_eq!(skipped_summary.attempted, 0);
         assert!(notification_gateway.messages().is_empty());
-        assert!(!tree[0].task.notification_rules[0].enabled);
+        assert_eq!(pending_count_after_skip, 1);
 
-        let enabled = usecases::set_notification_rule_enabled(
-            &database,
-            &enable_clock,
-            due_rule.id.clone(),
-            true,
-        )
-        .expect("reenable rule");
+        let enabled = usecases::update_notifications_enabled(&database, &enable_clock, true)
+            .expect("enable notifications");
         let delivered_summary =
             usecases::dispatch_due_notifications(&database, &notification_gateway, &enable_clock)
                 .expect("dispatch reenabled");
 
-        assert!(enabled.enabled);
-        assert_eq!(
-            enabled.registration_status,
-            NotificationRegistrationStatus::Pending
-        );
+        assert!(enabled);
         assert_eq!(delivered_summary.attempted, 1);
         assert_eq!(delivered_summary.succeeded, 1);
         assert_eq!(notification_gateway.messages().len(), 1);
-    }
-
-    #[test]
-    fn update_task_detail_keeps_individually_disabled_notification_off() {
-        let database = in_memory_database();
-        let create_clock = FixedClock {
-            now: "2026-07-06T00:00:00Z",
-        };
-        let update_clock = FixedClock {
-            now: "2026-07-06T00:20:00Z",
-        };
-        let task = usecases::create_task(
-            &database,
-            &create_clock,
-            usecases::WorkItemDraft {
-                title: "通知OFF維持".to_string(),
-                planned_start_date: Some("2026-07-06".to_string()),
-                due_date: None,
-                memo: None,
-            },
-        )
-        .expect("create task");
-        let planned_rule = task
-            .notification_rules
-            .iter()
-            .find(|rule| rule.kind == NotificationKind::PlannedStart)
-            .expect("planned start rule");
-
-        usecases::set_notification_rule_enabled(
-            &database,
-            &create_clock,
-            planned_rule.id.clone(),
-            false,
-        )
-        .expect("disable planned rule");
-        let updated = usecases::update_task(
-            &database,
-            &update_clock,
-            task.id.clone(),
-            usecases::WorkItemUpdateDraft {
-                title: "通知OFF維持 更新".to_string(),
-                planned_start_date: Some("2026-07-07".to_string()),
-                due_date: None,
-                timer_target_seconds: None,
-                recurrence_rule: None,
-                memo: None,
-            },
-        )
-        .expect("update task");
-        let rule_after_update = updated
-            .notification_rules
-            .iter()
-            .find(|rule| rule.kind == NotificationKind::PlannedStart)
-            .expect("planned rule after update");
-
-        assert_eq!(rule_after_update.notify_at, "2026-07-07T00:00:00Z");
-        assert!(!rule_after_update.enabled);
-        assert_eq!(
-            rule_after_update.registration_status,
-            NotificationRegistrationStatus::Disabled
-        );
     }
 
     #[test]

@@ -7,9 +7,8 @@ use crate::domain::{
 
 use super::{
     repositories::{
-        ActiveTimer, NotificationDispatchSummary, NotificationRuleRecord, RecurrenceRuleRecord,
-        SubtaskRecord, TaskListRecord, TaskRecord, TaskRowRecord, TaskWithSubtasksRecord,
-        WeekCalendarItem,
+        ActiveTimer, NotificationDispatchSummary, RecurrenceRuleRecord, SubtaskRecord,
+        TaskListRecord, TaskRecord, TaskRowRecord, TaskWithSubtasksRecord, WeekCalendarItem,
     },
     usecases::{RecurrenceRuleDraft, WorkItemDraft, WorkItemUpdateDraft},
 };
@@ -123,8 +122,7 @@ pub struct UpdateNotificationDisplayModeRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SetNotificationRuleEnabledRequestDto {
-    pub rule_id: String,
+pub struct UpdateNotificationsEnabledRequestDto {
     pub enabled: bool,
 }
 
@@ -168,21 +166,6 @@ pub struct RecurrenceRuleDto {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NotificationRuleDto {
-    pub id: String,
-    pub target: WorkTargetRefDto,
-    pub kind: String,
-    pub notify_at: String,
-    pub enabled: bool,
-    pub registration_status: String,
-    pub last_error: Option<String>,
-    pub deleted_at: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct TaskDto {
     pub id: String,
     pub list_id: String,
@@ -193,7 +176,6 @@ pub struct TaskDto {
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleDto>,
-    pub notification_rules: Vec<NotificationRuleDto>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -213,7 +195,6 @@ pub struct SubtaskDto {
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleDto>,
-    pub notification_rules: Vec<NotificationRuleDto>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -234,7 +215,6 @@ pub struct TaskWithSubtasksDto {
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleDto>,
-    pub notification_rules: Vec<NotificationRuleDto>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -393,11 +373,6 @@ impl From<TaskRecord> for TaskDto {
             due_date: value.due_date,
             timer_target_seconds: value.timer_target_seconds,
             recurrence_rule: value.recurrence_rule.map(Into::into),
-            notification_rules: value
-                .notification_rules
-                .into_iter()
-                .map(Into::into)
-                .collect(),
             memo: value.memo,
             sort_order: value.sort_order,
             completed_at: value.completed_at,
@@ -419,11 +394,6 @@ impl From<SubtaskRecord> for SubtaskDto {
             due_date: value.due_date,
             timer_target_seconds: value.timer_target_seconds,
             recurrence_rule: value.recurrence_rule.map(Into::into),
-            notification_rules: value
-                .notification_rules
-                .into_iter()
-                .map(Into::into)
-                .collect(),
             memo: value.memo,
             sort_order: value.sort_order,
             completed_at: value.completed_at,
@@ -446,12 +416,6 @@ impl From<TaskWithSubtasksRecord> for TaskWithSubtasksDto {
             due_date: value.task.due_date,
             timer_target_seconds: value.task.timer_target_seconds,
             recurrence_rule: value.task.recurrence_rule.map(Into::into),
-            notification_rules: value
-                .task
-                .notification_rules
-                .into_iter()
-                .map(Into::into)
-                .collect(),
             memo: value.task.memo,
             sort_order: value.task.sort_order,
             completed_at: value.task.completed_at,
@@ -473,26 +437,6 @@ impl From<RecurrenceRuleRecord> for RecurrenceRuleDto {
             },
             frequency: value.frequency.as_str().to_string(),
             interval: value.interval,
-            deleted_at: value.deleted_at,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-        }
-    }
-}
-
-impl From<NotificationRuleRecord> for NotificationRuleDto {
-    fn from(value: NotificationRuleRecord) -> Self {
-        Self {
-            id: value.id,
-            target: WorkTargetRefDto {
-                r#type: value.target.target_type.as_str().to_string(),
-                id: value.target.id,
-            },
-            kind: value.kind.as_str().to_string(),
-            notify_at: value.notify_at,
-            enabled: value.enabled,
-            registration_status: value.registration_status.as_str().to_string(),
-            last_error: value.last_error,
             deleted_at: value.deleted_at,
             created_at: value.created_at,
             updated_at: value.updated_at,

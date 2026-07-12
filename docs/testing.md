@@ -46,7 +46,7 @@ flowchart TD
 - 汎用通知モードではタスク/サブタスクタイトルを含めない。
 - 期限到来通知のdispatch成功で `registered` になる。
 - OS通知送信失敗時は `failed` と `last_error` が保存される。
-- 通知ルール個別OFFはdispatch対象から除外され、再ONで `pending` に戻る。
+- 通知全体OFF中はdispatch対象から除外され、ONへ戻すと既存の `pending` / `failed` 通知が対象に戻る。
 
 ## SQLiteテスト
 

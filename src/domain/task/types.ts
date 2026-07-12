@@ -1,5 +1,4 @@
 import type { RecurrenceRule } from "../recurrence/types";
-import type { NotificationRule } from "../notification/types";
 
 export type WorkStatus = "todo" | "in_progress" | "done" | "archived";
 export type WorkTargetType = "task" | "subtask";
@@ -14,7 +13,6 @@ export type Task = {
   dueDate: string | null;
   timerTargetSeconds: number | null;
   recurrenceRule: RecurrenceRule | null;
-  notificationRules: NotificationRule[];
   memo: string;
   sortOrder: number;
   completedAt: string | null;
@@ -32,7 +30,6 @@ export type Subtask = {
   dueDate: string | null;
   timerTargetSeconds: number | null;
   recurrenceRule: RecurrenceRule | null;
-  notificationRules: NotificationRule[];
   memo: string;
   sortOrder: number;
   completedAt: string | null;

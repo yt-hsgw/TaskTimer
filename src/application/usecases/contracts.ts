@@ -1,8 +1,5 @@
 import type { ActiveTimer, TimerSession } from "../../domain/timer/types";
-import type {
-  NotificationDisplayMode,
-  NotificationRule,
-} from "../../domain/notification/types";
+import type { NotificationDisplayMode } from "../../domain/notification/types";
 import type { RecurrenceFrequency } from "../../domain/recurrence/types";
 import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
 
@@ -109,10 +106,8 @@ export type TaskTimerGateway = {
   updateNotificationDisplayMode(
     displayMode: NotificationDisplayMode,
   ): Promise<NotificationDisplayMode>;
-  setNotificationRuleEnabled(
-    ruleId: string,
-    enabled: boolean,
-  ): Promise<NotificationRule>;
+  getNotificationsEnabled(): Promise<boolean>;
+  updateNotificationsEnabled(enabled: boolean): Promise<boolean>;
   dispatchDueNotifications(): Promise<NotificationDispatchSummary>;
 };
 

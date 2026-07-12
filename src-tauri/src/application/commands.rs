@@ -92,6 +92,13 @@ pub fn get_notification_display_mode(database: DatabaseState<'_>) -> Result<Stri
 }
 
 #[tauri::command]
+pub fn get_notifications_enabled(database: DatabaseState<'_>) -> Result<bool, String> {
+    use crate::application::repositories::NotificationPreferenceRepository;
+
+    database.get_notifications_enabled()
+}
+
+#[tauri::command]
 pub fn create_task(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,
@@ -246,18 +253,12 @@ pub fn update_notification_display_mode(
 }
 
 #[tauri::command]
-pub fn set_notification_rule_enabled(
+pub fn update_notifications_enabled(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,
-    request: super::dto::SetNotificationRuleEnabledRequestDto,
-) -> Result<super::dto::NotificationRuleDto, String> {
-    super::usecases::set_notification_rule_enabled(
-        database.inner(),
-        clock.inner(),
-        request.rule_id,
-        request.enabled,
-    )
-    .map(Into::into)
+    request: super::dto::UpdateNotificationsEnabledRequestDto,
+) -> Result<bool, String> {
+    super::usecases::update_notifications_enabled(database.inner(), clock.inner(), request.enabled)
 }
 
 #[tauri::command]

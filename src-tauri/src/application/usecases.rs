@@ -10,9 +10,8 @@ use super::{
     notification::{LocalNotificationGateway, LocalNotificationMessage},
     repositories::{
         ActiveTimer, NotificationCommandRepository, NotificationDispatchSummary,
-        NotificationPreferenceRepository, NotificationRuleRecord, RecurrenceRuleInput,
-        RepositoryResult, SubtaskRecord, TaskRecord, TaskTimerCommandRepository, WorkItemCreate,
-        WorkItemUpdate,
+        NotificationPreferenceRepository, RecurrenceRuleInput, RepositoryResult, SubtaskRecord,
+        TaskRecord, TaskTimerCommandRepository, WorkItemCreate, WorkItemUpdate,
     },
 };
 
@@ -188,14 +187,12 @@ pub fn update_notification_display_mode(
     repository.update_notification_display_mode(display_mode, clock.now_utc_iso8601())
 }
 
-pub fn set_notification_rule_enabled(
+pub fn update_notifications_enabled(
     repository: &impl NotificationCommandRepository,
     clock: &impl Clock,
-    rule_id: String,
     enabled: bool,
-) -> RepositoryResult<NotificationRuleRecord> {
-    let rule_id = validate_identifier(&rule_id, "通知ルールID")?;
-    repository.set_notification_rule_enabled(rule_id, enabled, clock.now_utc_iso8601())
+) -> RepositoryResult<bool> {
+    repository.update_notifications_enabled(enabled, clock.now_utc_iso8601())
 }
 
 pub fn dispatch_due_notifications(
@@ -204,6 +201,15 @@ pub fn dispatch_due_notifications(
     clock: &impl Clock,
 ) -> RepositoryResult<NotificationDispatchSummary> {
     let now = clock.now_utc_iso8601();
+    if !repository.get_notifications_enabled()? {
+        return Ok(NotificationDispatchSummary {
+            attempted: 0,
+            succeeded: 0,
+            failed: 0,
+            last_error: None,
+        });
+    }
+
     let display_mode = repository.get_notification_display_mode()?;
     let jobs = repository.list_due_notification_jobs(&now, NOTIFICATION_DISPATCH_LIMIT)?;
 

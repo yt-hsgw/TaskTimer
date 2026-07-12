@@ -207,8 +207,6 @@ erDiagram
 - 有効な通知では `notify_at` が必須。
 - OS通知サービスへの登録はDBコミット後の副作用として扱う。
 - タスク/サブタスク作成時に、開始予定日と期限がある場合は通知ルールを `pending` として作成する。
-- 個別OFFは `enabled = false`、`registration_status = disabled` として保存し、日付削除とは違って `deleted_at` を設定しない。
-- 個別OFFから再ONする場合は `enabled = true`、`registration_status = pending` に戻し、期限到来済みなら次回dispatch対象にする。
 - 期限到来後のdispatchに成功した通知ルールは `registered` とする。
 - `registered` の通知ルールは、OS復帰または再フォーカス後の再dispatch対象にしない。
 - dispatchに失敗した通知ルールは `failed` とし、再試行対象に残す。
@@ -221,9 +219,12 @@ erDiagram
 ルール:
 
 - `display_mode` は `title_only` または `generic`。
+- `notifications_enabled` は通知全体のON/OFFを表す。
 - デフォルトは `title_only`。
+- デフォルトでは通知全体をONにする。
 - `title_only` はタスクまたはサブタスクのタイトルのみを表示する。
 - `generic` はタスクまたはサブタスクのタイトルをOS通知adapterへ渡さず、汎用メッセージだけを表示する。
+- 通知全体がOFFの場合、通知ルールは保持したままdispatch対象から除外する。
 
 ### RecurrenceRule
 
