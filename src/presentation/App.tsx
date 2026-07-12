@@ -447,10 +447,14 @@ export function App() {
     [runTaskActionMutation],
   );
 
-  const handleCompleteSubtask = useCallback(
+  const handleToggleSubtaskCompletion = useCallback(
     (subtask: Subtask) =>
       runMutation(async () => {
-        await tauriTaskTimerGateway.completeSubtask(subtask.id);
+        if (subtask.status === "done") {
+          await tauriTaskTimerGateway.reopenSubtask(subtask.id);
+        } else {
+          await tauriTaskTimerGateway.completeSubtask(subtask.id);
+        }
         return subtask.taskId;
       }),
     [runMutation],
@@ -476,6 +480,13 @@ export function App() {
 
       return runMutation(async () => {
         await tauriTaskTimerGateway.deleteTask(task.id);
+      }).then((deleted) => {
+        if (deleted) {
+          setSelectedTaskId(null);
+          setSelectedSubtaskId(null);
+          setSelectedCalendarTarget(null);
+        }
+        return deleted;
       });
     },
     [runMutation],
@@ -494,6 +505,12 @@ export function App() {
       return runMutation(async () => {
         await tauriTaskTimerGateway.deleteSubtask(subtask.id);
         return subtask.taskId;
+      }).then((deleted) => {
+        if (deleted) {
+          setSelectedSubtaskId(null);
+          setSelectedCalendarTarget({ type: "task", id: subtask.taskId });
+        }
+        return deleted;
       });
     },
     [runMutation],
@@ -701,7 +718,7 @@ export function App() {
                   onResumeTimer={handleResumeTimer}
                   onStopTimer={handleStopTimer}
                   onToggleTaskCompletion={handleToggleTaskCompletion}
-                  onCompleteSubtask={handleCompleteSubtask}
+                  onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
                 />
@@ -747,7 +764,7 @@ export function App() {
                   onResumeTimer={handleResumeTimer}
                   onStopTimer={handleStopTimer}
                   onToggleTaskCompletion={handleToggleTaskCompletion}
-                  onCompleteSubtask={handleCompleteSubtask}
+                  onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
                 />

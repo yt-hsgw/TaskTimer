@@ -101,6 +101,12 @@ pub struct CompleteSubtaskRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReopenSubtaskRequestDto {
+    pub subtask_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ToggleTaskFavoriteRequestDto {
     pub task_id: String,
     pub is_favorite: bool,

@@ -248,6 +248,8 @@ pub trait TaskTimerCommandRepository {
 
     fn complete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<SubtaskRecord>;
 
+    fn reopen_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<SubtaskRecord>;
+
     fn toggle_task_favorite(
         &self,
         task_id: String,

@@ -34,7 +34,7 @@ type TaskDetailPaneProps = {
   onResumeTimer(): Promise<boolean>;
   onStopTimer(): Promise<boolean>;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
-  onCompleteSubtask(subtask: Subtask): Promise<boolean>;
+  onToggleSubtaskCompletion(subtask: Subtask): Promise<boolean>;
   onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
   onDeleteSubtask(subtask: Subtask): Promise<boolean>;
 };
@@ -96,7 +96,7 @@ export function TaskDetailPane({
   onResumeTimer,
   onStopTimer,
   onToggleTaskCompletion,
-  onCompleteSubtask,
+  onToggleSubtaskCompletion,
   onDeleteTask,
   onDeleteSubtask,
 }: TaskDetailPaneProps) {
@@ -119,6 +119,7 @@ export function TaskDetailPane({
   const [draft, setDraft] = useState(() => toDetailFormDraft(detailItem));
   const [isCoreEditOpen, setIsCoreEditOpen] = useState(false);
   const [isDuePopoverOpen, setIsDuePopoverOpen] = useState(false);
+  const [isSubtaskCreateOpen, setIsSubtaskCreateOpen] = useState(false);
   const [customDueDraft, setCustomDueDraft] = useState({
     dueDate: detailItem.dueDate ?? getTodayDateInputValue(),
     dueTime: detailItem.dueTime ?? "",
@@ -150,6 +151,7 @@ export function TaskDetailPane({
     });
     setIsCoreEditOpen(false);
     setIsDuePopoverOpen(false);
+    setIsSubtaskCreateOpen(false);
     setOpenSections({
       subtasks: !selectedSubtask,
       timer: false,
@@ -207,6 +209,7 @@ export function TaskDetailPane({
         dueTime: "",
         memo: "",
       });
+      setIsSubtaskCreateOpen(false);
     }
   }
 
@@ -243,14 +246,14 @@ export function TaskDetailPane({
             type="button"
             aria-label={
               detailItem.status === "done"
-                ? `${detailItem.title}は完了済み`
+                ? `${detailItem.title}を未完了に戻す`
                 : `${detailItem.title}を完了`
             }
-            title={detailItem.status === "done" ? "完了済み" : "完了"}
-            disabled={isMutating || Boolean(selectedSubtask && detailItem.status === "done")}
+            title={detailItem.status === "done" ? "未完了に戻す" : "完了"}
+            disabled={isMutating}
             onClick={() =>
               selectedSubtask
-                ? void onCompleteSubtask(selectedSubtask)
+                ? void onToggleSubtaskCompletion(selectedSubtask)
                 : void onToggleTaskCompletion(task)
             }
           >
@@ -303,9 +306,9 @@ export function TaskDetailPane({
         </div>
       </section>
 
-      <div className="detail-quick-actions">
+      <div className="detail-quick-actions" aria-label="期限クイック設定">
         <button
-          className="secondary-button"
+          className="due-chip-button"
           type="button"
           disabled={isMutating}
           onClick={() => void applyDue(getTodayDateInputValue(), null)}
@@ -313,7 +316,7 @@ export function TaskDetailPane({
           今日
         </button>
         <button
-          className="secondary-button"
+          className="due-chip-button"
           type="button"
           disabled={isMutating}
           onClick={() => void applyDue(getTomorrowDateInputValue(), null)}
@@ -322,13 +325,13 @@ export function TaskDetailPane({
         </button>
         <div className="due-popover-anchor">
           <button
-            className="secondary-button"
+            className="due-chip-button"
             type="button"
             disabled={isMutating}
             aria-expanded={isDuePopoverOpen}
             onClick={() => setIsDuePopoverOpen((current) => !current)}
           >
-            時間設定
+            ◷ 時間設定
           </button>
           {isDuePopoverOpen ? (
             <form
@@ -384,14 +387,18 @@ export function TaskDetailPane({
             </form>
           ) : null}
         </div>
-        <button
-          className="secondary-button"
-          type="button"
-          disabled={isMutating || !detailItem.dueDate}
-          onClick={() => void applyDue(null, null)}
-        >
-          解除
-        </button>
+        {detailItem.dueDate ? (
+          <button
+            className="due-clear-button"
+            type="button"
+            aria-label="期限を削除"
+            title="期限を削除"
+            disabled={isMutating}
+            onClick={() => void applyDue(null, null)}
+          >
+            ×
+          </button>
+        ) : null}
       </div>
 
       <DetailDisclosure
@@ -537,60 +544,81 @@ export function TaskDetailPane({
             親タスク「{task.title}」に紐づく作業です。既存サブタスクの編集は選択して開きます。
           </p>
 
-          <form
-            className="detail-form subtask-create-form"
-            onSubmit={(event) => void handleCreateSubtask(event)}
-          >
-            <label>
-              <span>サブタスク名</span>
-              <input
-                value={subtaskDraft.title}
-                onChange={(event) =>
-                  setSubtaskDraft((current) => ({
-                    ...current,
-                    title: event.target.value,
-                  }))
-                }
-                placeholder="例: チェック項目を整理"
-                disabled={isMutating}
-                maxLength={120}
-                required
-              />
-            </label>
-            <div className="date-fields">
+          {isSubtaskCreateOpen ? (
+            <form
+              className="detail-form subtask-create-form"
+              onSubmit={(event) => void handleCreateSubtask(event)}
+            >
               <label>
-                <span>期限日</span>
+                <span>サブタスク名</span>
                 <input
-                  type="date"
-                  value={subtaskDraft.dueDate}
+                  value={subtaskDraft.title}
                   onChange={(event) =>
                     setSubtaskDraft((current) => ({
                       ...current,
-                      dueDate: event.target.value,
+                      title: event.target.value,
                     }))
                   }
+                  placeholder="例: チェック項目を整理"
                   disabled={isMutating}
+                  maxLength={120}
+                  required
                 />
               </label>
-              <label>
-                <span>期限時刻</span>
-                <input
-                  type="time"
-                  value={subtaskDraft.dueTime}
-                  onChange={(event) =>
-                    setSubtaskDraft((current) => ({
-                      ...current,
-                      dueTime: event.target.value,
-                    }))
-                  }
-                  disabled={isMutating || !subtaskDraft.dueDate}
-                />
-              </label>
-            </div>
-            <button className="secondary-button" type="submit" disabled={isMutating}>
-              追加
+              <div className="date-fields">
+                <label>
+                  <span>期限日</span>
+                  <input
+                    type="date"
+                    value={subtaskDraft.dueDate}
+                    onChange={(event) =>
+                      setSubtaskDraft((current) => ({
+                        ...current,
+                        dueDate: event.target.value,
+                      }))
+                    }
+                    disabled={isMutating}
+                  />
+                </label>
+                <label>
+                  <span>期限時刻</span>
+                  <input
+                    type="time"
+                    value={subtaskDraft.dueTime}
+                    onChange={(event) =>
+                      setSubtaskDraft((current) => ({
+                        ...current,
+                        dueTime: event.target.value,
+                      }))
+                    }
+                    disabled={isMutating || !subtaskDraft.dueDate}
+                  />
+                </label>
+              </div>
+              <div className="subtask-create-actions">
+                <button className="primary-button" type="submit" disabled={isMutating}>
+                  追加
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={isMutating}
+                  onClick={() => setIsSubtaskCreateOpen(false)}
+                >
+                  キャンセル
+                </button>
+              </div>
+            </form>
+          ) : (
+            <button
+              className="subtask-add-button"
+              type="button"
+              disabled={isMutating}
+              onClick={() => setIsSubtaskCreateOpen(true)}
+            >
+              ＋ サブタスクの追加
             </button>
-          </form>
+          )}
 
           <div className="detail-subtask-list">
             {task.subtasks.length === 0 ? (
@@ -603,7 +631,7 @@ export function TaskDetailPane({
                 activeTimer={activeTimer}
                 isMutating={isMutating}
                 onSelect={() => onSelectSubtask(subtask.id)}
-                onCompleteSubtask={onCompleteSubtask}
+                onToggleSubtaskCompletion={onToggleSubtaskCompletion}
                 onStartTimer={onStartTimer}
                 onPauseTimer={onPauseTimer}
                 onResumeTimer={onResumeTimer}
@@ -720,7 +748,7 @@ type SubtaskSummaryRowProps = {
   activeTimer: ActiveTimer | null;
   isMutating: boolean;
   onSelect(): void;
-  onCompleteSubtask(subtask: Subtask): Promise<boolean>;
+  onToggleSubtaskCompletion(subtask: Subtask): Promise<boolean>;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
   onPauseTimer(): Promise<boolean>;
   onResumeTimer(): Promise<boolean>;
@@ -732,7 +760,7 @@ function SubtaskSummaryRow({
   activeTimer,
   isMutating,
   onSelect,
-  onCompleteSubtask,
+  onToggleSubtaskCompletion,
   onStartTimer,
   onPauseTimer,
   onResumeTimer,
@@ -744,9 +772,14 @@ function SubtaskSummaryRow({
       <button
         className={`task-check-button ${subtask.status === "done" ? "is-done" : ""}`}
         type="button"
-        aria-label={`${subtask.title}を完了`}
-        disabled={isMutating || subtask.status === "done"}
-        onClick={() => void onCompleteSubtask(subtask)}
+        aria-label={
+          subtask.status === "done"
+            ? `${subtask.title}を未完了に戻す`
+            : `${subtask.title}を完了`
+        }
+        title={subtask.status === "done" ? "未完了に戻す" : "完了"}
+        disabled={isMutating}
+        onClick={() => void onToggleSubtaskCompletion(subtask)}
       >
         {subtask.status === "done" ? "✓" : ""}
       </button>

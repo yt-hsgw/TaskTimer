@@ -419,6 +419,34 @@ impl TaskTimerCommandRepository for SqliteDatabase {
         })
     }
 
+    fn reopen_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<SubtaskRecord> {
+        self.with_transaction(|transaction| {
+            let subtask = select_existing_subtask_by_id(transaction, &subtask_id)?;
+            if subtask.status == WorkStatus::Archived {
+                return Err("アーカイブ済みサブタスクは未完了に戻せません".to_string());
+            }
+            if subtask.status != WorkStatus::Done {
+                return Ok(subtask);
+            }
+
+            transaction
+                .execute(
+                    "
+                    UPDATE subtasks
+                    SET status = 'todo',
+                        completed_at = NULL,
+                        updated_at = ?1
+                    WHERE id = ?2
+                      AND deleted_at IS NULL
+                    ",
+                    params![now, subtask_id],
+                )
+                .map_err(|error| format!("サブタスクを未完了に戻せません: {error}"))?;
+
+            select_existing_subtask_by_id(transaction, &subtask_id)
+        })
+    }
+
     fn toggle_task_favorite(
         &self,
         task_id: String,
@@ -3658,6 +3686,35 @@ mod tests {
                 id: second_subtask.id,
             })
         );
+    }
+
+    #[test]
+    fn reopen_subtask_moves_done_subtask_back_to_active_progress() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let reopen_clock = FixedClock {
+            now: "2026-07-06T01:00:00Z",
+        };
+        let task = usecases::create_task(&database, &create_clock, draft("親タスク"))
+            .expect("create task");
+        let subtask =
+            usecases::create_subtask(&database, &create_clock, task.id.clone(), draft("戻す作業"))
+                .expect("create subtask");
+
+        usecases::complete_subtask(&database, &create_clock, subtask.id.clone())
+            .expect("complete subtask");
+        let reopened =
+            usecases::reopen_subtask(&database, &reopen_clock, subtask.id).expect("reopen subtask");
+        let rows = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("list task rows");
+
+        assert_eq!(reopened.status, WorkStatus::Todo);
+        assert_eq!(reopened.completed_at, None);
+        assert_eq!(rows[0].completed_subtask_count, 0);
+        assert_eq!(rows[0].subtask_total_count, 1);
     }
 
     #[test]

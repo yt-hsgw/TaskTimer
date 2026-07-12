@@ -156,6 +156,15 @@ pub fn complete_subtask(
     repository.complete_subtask(subtask_id, clock.now_utc_iso8601())
 }
 
+pub fn reopen_subtask(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    subtask_id: String,
+) -> RepositoryResult<SubtaskRecord> {
+    let subtask_id = validate_identifier(&subtask_id, "サブタスクID")?;
+    repository.reopen_subtask(subtask_id, clock.now_utc_iso8601())
+}
+
 pub fn toggle_task_favorite(
     repository: &impl TaskTimerCommandRepository,
     clock: &impl Clock,
