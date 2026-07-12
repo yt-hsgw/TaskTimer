@@ -84,6 +84,20 @@ pub struct RecurrenceRuleRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationRuleRecord {
+    pub id: String,
+    pub target: WorkTargetRef,
+    pub kind: NotificationKind,
+    pub notify_at: String,
+    pub enabled: bool,
+    pub registration_status: NotificationRegistrationStatus,
+    pub last_error: Option<String>,
+    pub deleted_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskListRecord {
     pub id: String,
     pub name: String,
@@ -106,6 +120,7 @@ pub struct TaskRecord {
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleRecord>,
+    pub notification_rules: Vec<NotificationRuleRecord>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -124,6 +139,7 @@ pub struct SubtaskRecord {
     pub due_date: Option<String>,
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleRecord>,
+    pub notification_rules: Vec<NotificationRuleRecord>,
     pub memo: String,
     pub sort_order: i64,
     pub completed_at: Option<String>,
@@ -265,6 +281,13 @@ pub trait NotificationCommandRepository {
         display_mode: NotificationDisplayMode,
         now: String,
     ) -> RepositoryResult<NotificationDisplayMode>;
+
+    fn set_notification_rule_enabled(
+        &self,
+        rule_id: String,
+        enabled: bool,
+        now: String,
+    ) -> RepositoryResult<NotificationRuleRecord>;
 
     fn list_due_notification_jobs(
         &self,

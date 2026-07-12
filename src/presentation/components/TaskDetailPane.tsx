@@ -4,7 +4,11 @@ import type {
   WorkItemDraft,
   WorkItemUpdateDraft,
 } from "../../application/usecases/contracts";
-import type { NotificationDisplayMode } from "../../domain/notification/types";
+import type {
+  NotificationDisplayMode,
+  NotificationKind,
+  NotificationRule,
+} from "../../domain/notification/types";
 import type { RecurrenceFrequency } from "../../domain/recurrence/types";
 import type { ActiveTimer } from "../../domain/timer/types";
 import type {
@@ -35,6 +39,10 @@ type TaskDetailPaneProps = {
   onStopTimer(): Promise<boolean>;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onCompleteSubtask(subtask: Subtask): Promise<boolean>;
+  onSetNotificationRuleEnabled(
+    ruleId: string,
+    enabled: boolean,
+  ): Promise<boolean>;
   onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
   onDeleteSubtask(subtask: Subtask): Promise<boolean>;
 };
@@ -85,6 +93,7 @@ export function TaskDetailPane({
   onStopTimer,
   onToggleTaskCompletion,
   onCompleteSubtask,
+  onSetNotificationRuleEnabled,
   onDeleteTask,
   onDeleteSubtask,
 }: TaskDetailPaneProps) {
@@ -418,6 +427,7 @@ export function TaskDetailPane({
               onResumeTimer={onResumeTimer}
               onStopTimer={onStopTimer}
               onCompleteSubtask={onCompleteSubtask}
+              onSetNotificationRuleEnabled={onSetNotificationRuleEnabled}
               onDeleteSubtask={onDeleteSubtask}
             />
           ))}
@@ -459,14 +469,21 @@ export function TaskDetailPane({
 
       <DetailDisclosure
         title="通知"
-        badge={displayModeLabels[displayMode]}
+        badge={formatNotificationSummary(task.notificationRules)}
         isOpen={openSections.notifications}
         onToggle={() => toggleSection("notifications")}
       >
-        <div className="notification-plan-grid">
-          <NotificationPlan label="開始日" date={task.plannedStartDate} />
-          <NotificationPlan label="終了日" date={task.dueDate} />
-        </div>
+        <p className="detail-section-description">
+          表示タイプ: {displayModeLabels[displayMode]}
+        </p>
+        <NotificationRuleToggles
+          label="親タスク"
+          plannedStartDate={task.plannedStartDate}
+          dueDate={task.dueDate}
+          rules={task.notificationRules}
+          isMutating={isMutating}
+          onSetNotificationRuleEnabled={onSetNotificationRuleEnabled}
+        />
       </DetailDisclosure>
 
       <div className="detail-danger-zone">
@@ -528,6 +545,10 @@ type SubtaskEditorProps = {
   onResumeTimer(): Promise<boolean>;
   onStopTimer(): Promise<boolean>;
   onCompleteSubtask(subtask: Subtask): Promise<boolean>;
+  onSetNotificationRuleEnabled(
+    ruleId: string,
+    enabled: boolean,
+  ): Promise<boolean>;
   onDeleteSubtask(subtask: Subtask): Promise<boolean>;
 };
 
@@ -541,6 +562,7 @@ function SubtaskEditor({
   onResumeTimer,
   onStopTimer,
   onCompleteSubtask,
+  onSetNotificationRuleEnabled,
   onDeleteSubtask,
 }: SubtaskEditorProps) {
   const [draft, setDraft] = useState(() => toDetailFormDraft(subtask));
@@ -641,6 +663,14 @@ function SubtaskEditor({
             />
           </label>
         </div>
+        <NotificationRuleToggles
+          label="サブタスク"
+          plannedStartDate={subtask.plannedStartDate}
+          dueDate={subtask.dueDate}
+          rules={subtask.notificationRules}
+          isMutating={isMutating}
+          onSetNotificationRuleEnabled={onSetNotificationRuleEnabled}
+        />
         <label>
           <span>目標時間（分）</span>
           <input
@@ -720,17 +750,91 @@ function SubtaskEditor({
   );
 }
 
-type NotificationPlanProps = {
+type NotificationRuleTogglesProps = {
   label: string;
-  date: string | null;
+  plannedStartDate: string | null;
+  dueDate: string | null;
+  rules: NotificationRule[];
+  isMutating: boolean;
+  onSetNotificationRuleEnabled(
+    ruleId: string,
+    enabled: boolean,
+  ): Promise<boolean>;
 };
 
-function NotificationPlan({ label, date }: NotificationPlanProps) {
+function NotificationRuleToggles({
+  label,
+  plannedStartDate,
+  dueDate,
+  rules,
+  isMutating,
+  onSetNotificationRuleEnabled,
+}: NotificationRuleTogglesProps) {
   return (
-    <div className={`notification-plan ${date ? "is-enabled" : ""}`}>
-      <span>{label}</span>
-      <strong>{date ? formatDateLabel(date) : "未設定"}</strong>
+    <div className="notification-rule-group" aria-label={`${label}の通知`}>
+      <NotificationRuleSwitch
+        label="開始日"
+        date={plannedStartDate}
+        rule={findNotificationRule(rules, "planned_start")}
+        isMutating={isMutating}
+        onSetNotificationRuleEnabled={onSetNotificationRuleEnabled}
+      />
+      <NotificationRuleSwitch
+        label="終了日"
+        date={dueDate}
+        rule={findNotificationRule(rules, "due")}
+        isMutating={isMutating}
+        onSetNotificationRuleEnabled={onSetNotificationRuleEnabled}
+      />
     </div>
+  );
+}
+
+type NotificationRuleSwitchProps = {
+  label: string;
+  date: string | null;
+  rule: NotificationRule | null;
+  isMutating: boolean;
+  onSetNotificationRuleEnabled(
+    ruleId: string,
+    enabled: boolean,
+  ): Promise<boolean>;
+};
+
+function NotificationRuleSwitch({
+  label,
+  date,
+  rule,
+  isMutating,
+  onSetNotificationRuleEnabled,
+}: NotificationRuleSwitchProps) {
+  const isAvailable = Boolean(date && rule);
+  const isEnabled = Boolean(rule?.enabled && isAvailable);
+  const statusLabel = !date ? "日付未設定" : isEnabled ? "ON" : "OFF";
+
+  return (
+    <label
+      className={`notification-switch ${isEnabled ? "is-enabled" : ""} ${
+        isAvailable ? "" : "is-unavailable"
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={isEnabled}
+        disabled={isMutating || !rule}
+        onChange={(event) => {
+          if (!rule) {
+            return;
+          }
+          void onSetNotificationRuleEnabled(rule.id, event.currentTarget.checked);
+        }}
+      />
+      <span className="notification-switch-main">
+        <strong>{label}</strong>
+        <span>{date ? formatDateLabel(date) : "未設定"}</span>
+      </span>
+      <span className="notification-switch-status">{statusLabel}</span>
+    </label>
   );
 }
 
@@ -889,6 +993,21 @@ function isActiveTarget(activeTimer: ActiveTimer | null, target: WorkTargetRef) 
   return (
     activeTimer?.target.type === target.type && activeTimer.target.id === target.id
   );
+}
+
+function findNotificationRule(
+  rules: NotificationRule[],
+  kind: NotificationKind,
+) {
+  return rules.find((rule) => rule.kind === kind && !rule.deletedAt) ?? null;
+}
+
+function formatNotificationSummary(rules: NotificationRule[]) {
+  if (rules.length === 0) {
+    return "0/0";
+  }
+  const enabledCount = rules.filter((rule) => rule.enabled).length;
+  return `${enabledCount}/${rules.length}`;
 }
 
 function formatTimerTarget(value: number | null) {

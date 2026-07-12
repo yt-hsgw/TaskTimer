@@ -246,6 +246,21 @@ pub fn update_notification_display_mode(
 }
 
 #[tauri::command]
+pub fn set_notification_rule_enabled(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::SetNotificationRuleEnabledRequestDto,
+) -> Result<super::dto::NotificationRuleDto, String> {
+    super::usecases::set_notification_rule_enabled(
+        database.inner(),
+        clock.inner(),
+        request.rule_id,
+        request.enabled,
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
 pub fn dispatch_due_notifications(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,

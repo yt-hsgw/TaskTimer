@@ -12,7 +12,10 @@ import type {
   WorkItemDraft,
 } from "../../application/usecases/contracts";
 import type { ActiveTimer, TimerSession } from "../../domain/timer/types";
-import type { NotificationDisplayMode } from "../../domain/notification/types";
+import type {
+  NotificationDisplayMode,
+  NotificationRule,
+} from "../../domain/notification/types";
 import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
 
 export const tauriTaskTimerGateway: TaskTimerGateway = {
@@ -60,6 +63,10 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   updateNotificationDisplayMode: (displayMode: NotificationDisplayMode) =>
     invoke<NotificationDisplayMode>("update_notification_display_mode", {
       request: { displayMode },
+    }),
+  setNotificationRuleEnabled: (ruleId: string, enabled: boolean) =>
+    invoke<NotificationRule>("set_notification_rule_enabled", {
+      request: { ruleId, enabled },
     }),
   dispatchDueNotifications: () =>
     invoke<NotificationDispatchSummary>("dispatch_due_notifications"),

@@ -483,6 +483,15 @@ export function App() {
     [runMutation],
   );
 
+  const handleSetNotificationRuleEnabled = useCallback(
+    (ruleId: string, enabled: boolean) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.setNotificationRuleEnabled(ruleId, enabled);
+        return selectedTaskId ?? undefined;
+      }),
+    [runMutation, selectedTaskId],
+  );
+
   const handleRetryNotifications = useCallback(
     () =>
       runMutation(async () => {
@@ -615,6 +624,7 @@ export function App() {
                   onStopTimer={handleStopTimer}
                   onToggleTaskCompletion={handleToggleTaskCompletion}
                   onCompleteSubtask={handleCompleteSubtask}
+                  onSetNotificationRuleEnabled={handleSetNotificationRuleEnabled}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
                 />
@@ -664,6 +674,7 @@ export function App() {
                   onStopTimer={handleStopTimer}
                   onToggleTaskCompletion={handleToggleTaskCompletion}
                   onCompleteSubtask={handleCompleteSubtask}
+                  onSetNotificationRuleEnabled={handleSetNotificationRuleEnabled}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
                 />
