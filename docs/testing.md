@@ -106,6 +106,8 @@ CIで保証しないもの:
 
 ## パフォーマンス確認
 
+大量データでの実測と改善分割は [Issue 028](issues/028-performance-large-dataset.md) / GitHub #72 で追跡する。
+
 最小データセット:
 
 - タスク5,000件。
