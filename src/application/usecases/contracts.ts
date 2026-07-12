@@ -7,6 +7,7 @@ export type WorkItemDraft = {
   title: string;
   plannedStartDate?: string | null;
   dueDate?: string | null;
+  dueTime?: string | null;
   memo?: string | null;
 };
 
@@ -69,6 +70,7 @@ export type TaskRow = {
   isFavorite: boolean;
   plannedStartDate: string | null;
   dueDate: string | null;
+  dueTime: string | null;
   timerTargetSeconds: number | null;
   sortOrder: number;
   completedAt: string | null;

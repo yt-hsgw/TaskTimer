@@ -27,6 +27,7 @@ export function App() {
   const [taskRows, setTaskRows] = useState<TaskRow[]>([]);
   const [taskLists, setTaskLists] = useState<TaskListItem[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedSubtaskId, setSelectedSubtaskId] = useState<string | null>(null);
   const [items, setItems] = useState<WeekCalendarItem[]>([]);
   const [activeTimer, setActiveTimer] = useState<ActiveTimer | null>(null);
   const [activeView, setActiveView] = useState<AppView>({
@@ -101,6 +102,16 @@ export function App() {
     }
     return visibleTasks.find((task) => task.id === selectedTaskId) ?? null;
   }, [selectedTaskId, visibleTasks]);
+
+  const selectedSubtask = useMemo(() => {
+    if (!selectedSubtaskId) {
+      return null;
+    }
+    return (
+      selectedTask?.subtasks.find((subtask) => subtask.id === selectedSubtaskId) ??
+      null
+    );
+  }, [selectedSubtaskId, selectedTask]);
 
   const loadSnapshot = useCallback(async (options?: LoadSnapshotOptions) => {
     const showLoading = options?.showLoading ?? true;
@@ -228,6 +239,7 @@ export function App() {
   useEffect(() => {
     if (activeView.kind === "settings") {
       setSelectedTaskId(null);
+      setSelectedSubtaskId(null);
       setSelectedCalendarTarget(null);
       return;
     }
@@ -235,6 +247,7 @@ export function App() {
     if (activeView.kind === "calendar") {
       if (selectedTaskId && !tasks.some((task) => task.id === selectedTaskId)) {
         setSelectedTaskId(null);
+        setSelectedSubtaskId(null);
         setSelectedCalendarTarget(null);
       }
       return;
@@ -245,9 +258,16 @@ export function App() {
       !visibleTaskRows.some((task) => task.id === selectedTaskId)
     ) {
       setSelectedTaskId(null);
+      setSelectedSubtaskId(null);
       setSelectedCalendarTarget(null);
     }
   }, [activeView.kind, selectedTaskId, tasks, visibleTaskRows]);
+
+  useEffect(() => {
+    if (selectedSubtaskId && !selectedSubtask) {
+      setSelectedSubtaskId(null);
+    }
+  }, [selectedSubtask, selectedSubtaskId]);
 
   const runMutation = useCallback(
     async (operation: () => Promise<string | void>) => {
@@ -505,15 +525,38 @@ export function App() {
     [runMutation],
   );
 
+  const clearDetailSelection = useCallback(() => {
+    setSelectedTaskId(null);
+    setSelectedSubtaskId(null);
+    setSelectedCalendarTarget(null);
+  }, []);
+
   const handleSelectView = useCallback((view: AppView) => {
     setActiveView(view);
-    if (view.kind !== "calendar") {
-      setSelectedCalendarTarget(null);
-    }
+    clearDetailSelection();
     if (window.matchMedia("(max-width: 767px)").matches) {
       setIsNavigationOpen(false);
     }
+  }, [clearDetailSelection]);
+
+  const handleSelectTask = useCallback((taskId: string) => {
+    setSelectedTaskId(taskId);
+    setSelectedSubtaskId(null);
+    setSelectedCalendarTarget(null);
   }, []);
+
+  const handleSelectSubtask = useCallback((taskId: string, subtaskId: string) => {
+    setSelectedTaskId(taskId);
+    setSelectedSubtaskId(subtaskId);
+    setSelectedCalendarTarget({ type: "subtask", id: subtaskId });
+  }, []);
+
+  const handleSelectParentTask = useCallback(() => {
+    setSelectedSubtaskId(null);
+    if (selectedTaskId) {
+      setSelectedCalendarTarget({ type: "task", id: selectedTaskId });
+    }
+  }, [selectedTaskId]);
 
   const handleSelectCalendarItem = useCallback(
     (item: WeekCalendarItem) => {
@@ -526,15 +569,40 @@ export function App() {
       }
       setErrorMessage(null);
       setSelectedTaskId(nextTaskId);
+      setSelectedSubtaskId(item.target.type === "subtask" ? item.target.id : null);
       setSelectedCalendarTarget(item.target);
     },
     [tasks],
   );
 
-  const closeDetailPane = useCallback(() => {
-    setSelectedTaskId(null);
-    setSelectedCalendarTarget(null);
-  }, []);
+  const handleChangeCalendarViewMode = useCallback(
+    (viewMode: CalendarViewMode) => {
+      setCalendarViewMode(viewMode);
+      clearDetailSelection();
+    },
+    [clearDetailSelection],
+  );
+
+  const handlePreviousCalendarRange = useCallback(() => {
+    setCalendarAnchorDate((current) =>
+      shiftCalendarAnchorDate(current, calendarViewMode, -1),
+    );
+    clearDetailSelection();
+  }, [calendarViewMode, clearDetailSelection]);
+
+  const handleNextCalendarRange = useCallback(() => {
+    setCalendarAnchorDate((current) =>
+      shiftCalendarAnchorDate(current, calendarViewMode, 1),
+    );
+    clearDetailSelection();
+  }, [calendarViewMode, clearDetailSelection]);
+
+  const handleTodayCalendarRange = useCallback(() => {
+    setCalendarAnchorDate(getTodayDateInputValue());
+    clearDetailSelection();
+  }, [clearDetailSelection]);
+
+  const closeDetailPane = clearDetailSelection;
 
   return (
     <main
@@ -606,7 +674,9 @@ export function App() {
                 isMutating={isMutating}
                 isCreatingTaskPending={isCreatingTaskPending}
                 pendingTaskActionIds={pendingTaskActionIds}
-                onSelectTask={setSelectedTaskId}
+                selectedSubtaskId={selectedSubtaskId}
+                onSelectTask={handleSelectTask}
+                onSelectSubtask={handleSelectSubtask}
                 onCreateTask={handleCreateTask}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
                 onToggleTaskFavorite={handleToggleTaskFavorite}
@@ -614,6 +684,7 @@ export function App() {
               {selectedTask ? (
                 <TaskDetailPane
                   task={selectedTask}
+                  selectedSubtaskId={selectedSubtaskId}
                   activeTimer={activeTimer}
                   displayMode={displayMode}
                   isMutating={isMutating}
@@ -621,6 +692,10 @@ export function App() {
                   onUpdateTask={handleUpdateTask}
                   onUpdateSubtask={handleUpdateSubtask}
                   onCreateSubtask={handleCreateSubtask}
+                  onSelectSubtask={(subtaskId) =>
+                    handleSelectSubtask(selectedTask.id, subtaskId)
+                  }
+                  onSelectParentTask={handleSelectParentTask}
                   onStartTimer={handleStartTimer}
                   onPauseTimer={handlePauseTimer}
                   onResumeTimer={handleResumeTimer}
@@ -646,23 +721,16 @@ export function App() {
                 items={items}
                 isLoading={isLoading}
                 selectedTarget={selectedCalendarTarget}
-                onChangeViewMode={setCalendarViewMode}
-                onPreviousRange={() =>
-                  setCalendarAnchorDate((current) =>
-                    shiftCalendarAnchorDate(current, calendarViewMode, -1),
-                  )
-                }
-                onNextRange={() =>
-                  setCalendarAnchorDate((current) =>
-                    shiftCalendarAnchorDate(current, calendarViewMode, 1),
-                  )
-                }
-                onToday={() => setCalendarAnchorDate(getTodayDateInputValue())}
+                onChangeViewMode={handleChangeCalendarViewMode}
+                onPreviousRange={handlePreviousCalendarRange}
+                onNextRange={handleNextCalendarRange}
+                onToday={handleTodayCalendarRange}
                 onSelectItem={handleSelectCalendarItem}
               />
               {selectedTask ? (
                 <TaskDetailPane
                   task={selectedTask}
+                  selectedSubtaskId={selectedSubtaskId}
                   activeTimer={activeTimer}
                   displayMode={displayMode}
                   isMutating={isMutating}
@@ -670,6 +738,10 @@ export function App() {
                   onUpdateTask={handleUpdateTask}
                   onUpdateSubtask={handleUpdateSubtask}
                   onCreateSubtask={handleCreateSubtask}
+                  onSelectSubtask={(subtaskId) =>
+                    handleSelectSubtask(selectedTask.id, subtaskId)
+                  }
+                  onSelectParentTask={handleSelectParentTask}
                   onStartTimer={handleStartTimer}
                   onPauseTimer={handlePauseTimer}
                   onResumeTimer={handleResumeTimer}

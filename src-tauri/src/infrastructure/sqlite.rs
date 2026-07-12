@@ -622,16 +622,17 @@ fn insert_task(
     let sort_order = next_task_sort_order(transaction, DEFAULT_TASK_LIST_ID)?;
     let planned_start_date = input.planned_start_date.clone();
     let due_date = input.due_date.clone();
+    let due_time = input.due_time.clone();
     let now = input.now.clone();
     transaction
         .execute(
             "
             INSERT INTO tasks (
               id, list_id, title, status, is_favorite,
-              planned_start_date, due_date, timer_target_seconds, memo,
+              planned_start_date, due_date, due_time, timer_target_seconds, memo,
               sort_order, created_at, updated_at
             )
-            VALUES (?1, ?2, ?3, 'todo', 0, ?4, ?5, NULL, ?6, ?7, ?8, ?8)
+            VALUES (?1, ?2, ?3, 'todo', 0, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?9)
             ",
             params![
                 id,
@@ -639,6 +640,7 @@ fn insert_task(
                 input.title,
                 input.planned_start_date,
                 input.due_date,
+                input.due_time,
                 input.memo,
                 sort_order,
                 input.now
@@ -653,6 +655,7 @@ fn insert_task(
         },
         planned_start_date.as_deref(),
         due_date.as_deref(),
+        due_time.as_deref(),
         &now,
     )?;
 
@@ -668,15 +671,16 @@ fn insert_subtask(
     let sort_order = next_subtask_sort_order(transaction, task_id)?;
     let planned_start_date = input.planned_start_date.clone();
     let due_date = input.due_date.clone();
+    let due_time = input.due_time.clone();
     let now = input.now.clone();
     transaction
         .execute(
             "
             INSERT INTO subtasks (
-              id, task_id, title, status, planned_start_date, due_date,
+              id, task_id, title, status, planned_start_date, due_date, due_time,
               timer_target_seconds, memo, sort_order, created_at, updated_at
             )
-            VALUES (?1, ?2, ?3, 'todo', ?4, ?5, NULL, ?6, ?7, ?8, ?8)
+            VALUES (?1, ?2, ?3, 'todo', ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?9)
             ",
             params![
                 id,
@@ -684,6 +688,7 @@ fn insert_subtask(
                 input.title,
                 input.planned_start_date,
                 input.due_date,
+                input.due_time,
                 input.memo,
                 sort_order,
                 input.now
@@ -698,6 +703,7 @@ fn insert_subtask(
         },
         planned_start_date.as_deref(),
         due_date.as_deref(),
+        due_time.as_deref(),
         &now,
     )?;
 
@@ -712,6 +718,7 @@ fn update_task_detail(
     ensure_task_exists(transaction, task_id)?;
     let planned_start_date = input.planned_start_date.clone();
     let due_date = input.due_date.clone();
+    let due_time = input.due_time.clone();
     let recurrence_rule = input.recurrence_rule.clone();
     let now = input.now.clone();
 
@@ -722,16 +729,18 @@ fn update_task_detail(
             SET title = ?1,
                 planned_start_date = ?2,
                 due_date = ?3,
-                timer_target_seconds = ?4,
-                memo = ?5,
-                updated_at = ?6
-            WHERE id = ?7
+                due_time = ?4,
+                timer_target_seconds = ?5,
+                memo = ?6,
+                updated_at = ?7
+            WHERE id = ?8
               AND deleted_at IS NULL
             ",
             params![
                 input.title,
                 input.planned_start_date,
                 input.due_date,
+                input.due_time,
                 input.timer_target_seconds,
                 input.memo,
                 input.now,
@@ -751,6 +760,7 @@ fn update_task_detail(
         },
         planned_start_date.as_deref(),
         due_date.as_deref(),
+        due_time.as_deref(),
         &now,
     )?;
     sync_recurrence_rule_for_target(
@@ -774,6 +784,7 @@ fn update_subtask_detail(
     ensure_subtask_exists(transaction, subtask_id)?;
     let planned_start_date = input.planned_start_date.clone();
     let due_date = input.due_date.clone();
+    let due_time = input.due_time.clone();
     let recurrence_rule = input.recurrence_rule.clone();
     let now = input.now.clone();
 
@@ -784,16 +795,18 @@ fn update_subtask_detail(
             SET title = ?1,
                 planned_start_date = ?2,
                 due_date = ?3,
-                timer_target_seconds = ?4,
-                memo = ?5,
-                updated_at = ?6
-            WHERE id = ?7
+                due_time = ?4,
+                timer_target_seconds = ?5,
+                memo = ?6,
+                updated_at = ?7
+            WHERE id = ?8
               AND deleted_at IS NULL
             ",
             params![
                 input.title,
                 input.planned_start_date,
                 input.due_date,
+                input.due_time,
                 input.timer_target_seconds,
                 input.memo,
                 input.now,
@@ -813,6 +826,7 @@ fn update_subtask_detail(
         },
         planned_start_date.as_deref(),
         due_date.as_deref(),
+        due_time.as_deref(),
         &now,
     )?;
     sync_recurrence_rule_for_target(
@@ -833,6 +847,7 @@ fn insert_notification_rules_for_target(
     target: &WorkTargetRef,
     planned_start_date: Option<&str>,
     due_date: Option<&str>,
+    due_time: Option<&str>,
     now: &str,
 ) -> RepositoryResult<()> {
     if let Some(date) = planned_start_date {
@@ -840,7 +855,7 @@ fn insert_notification_rules_for_target(
             transaction,
             target,
             NotificationKind::PlannedStart,
-            &notification_time_for_date(date),
+            &notification_time_for_date(date, None),
             now,
         )?;
     }
@@ -850,7 +865,7 @@ fn insert_notification_rules_for_target(
             transaction,
             target,
             NotificationKind::Due,
-            &notification_time_for_date(date),
+            &notification_time_for_date(date, due_time),
             now,
         )?;
     }
@@ -863,6 +878,7 @@ fn sync_notification_rules_for_target(
     target: &WorkTargetRef,
     planned_start_date: Option<&str>,
     due_date: Option<&str>,
+    due_time: Option<&str>,
     now: &str,
 ) -> RepositoryResult<()> {
     sync_notification_rule_for_kind(
@@ -870,9 +886,17 @@ fn sync_notification_rules_for_target(
         target,
         NotificationKind::PlannedStart,
         planned_start_date,
+        None,
         now,
     )?;
-    sync_notification_rule_for_kind(transaction, target, NotificationKind::Due, due_date, now)
+    sync_notification_rule_for_kind(
+        transaction,
+        target,
+        NotificationKind::Due,
+        due_date,
+        due_time,
+        now,
+    )
 }
 
 fn sync_notification_rule_for_kind(
@@ -880,13 +904,14 @@ fn sync_notification_rule_for_kind(
     target: &WorkTargetRef,
     kind: NotificationKind,
     date: Option<&str>,
+    time: Option<&str>,
     now: &str,
 ) -> RepositoryResult<()> {
     let existing = select_active_notification_rule_for_kind(transaction, target, &kind)?;
     let Some(date) = date else {
         return disable_notification_rules_for_kind(transaction, target, &kind, now);
     };
-    let notify_at = notification_time_for_date(date);
+    let notify_at = notification_time_for_date(date, time);
 
     if let Some(existing) = existing {
         disable_duplicate_notification_rules_for_kind(
@@ -1168,8 +1193,9 @@ fn insert_notification_rule(
         .map_err(|error| format!("通知ルールを作成できません: {error}"))
 }
 
-fn notification_time_for_date(date: &str) -> String {
-    format!("{date}T00:00:00Z")
+fn notification_time_for_date(date: &str, time: Option<&str>) -> String {
+    let time = time.unwrap_or("00:00");
+    format!("{date}T{time}:00Z")
 }
 
 fn select_due_notification_jobs(
@@ -1241,7 +1267,7 @@ fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec
         .prepare(
             "
             SELECT id, list_id, title, status, is_favorite,
-                   planned_start_date, due_date, timer_target_seconds, memo,
+                   planned_start_date, due_date, due_time, timer_target_seconds, memo,
                    sort_order, completed_at, deleted_at, created_at, updated_at,
                    recurrence_rule_id, recurrence_target_type, recurrence_target_id,
                    recurrence_frequency, recurrence_interval, recurrence_deleted_at,
@@ -1254,6 +1280,7 @@ fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec
                      tasks.is_favorite,
                      tasks.planned_start_date,
                      tasks.due_date,
+                     tasks.due_time,
                      tasks.timer_target_seconds,
                      tasks.memo,
                      tasks.sort_order,
@@ -1367,6 +1394,7 @@ fn select_task_rows(
                    tasks.is_favorite,
                    tasks.planned_start_date,
                    tasks.due_date,
+                   tasks.due_time,
                    tasks.timer_target_seconds,
                    tasks.sort_order,
                    tasks.completed_at,
@@ -1399,6 +1427,7 @@ fn select_task_rows(
                      tasks.is_favorite,
                      tasks.planned_start_date,
                      tasks.due_date,
+                     tasks.due_time,
                      tasks.timer_target_seconds,
                      tasks.sort_order,
                      tasks.completed_at,
@@ -1438,7 +1467,7 @@ fn select_subtasks_for_task_list(
             )
             SELECT subtasks.id, subtasks.task_id, subtasks.title, subtasks.status,
                    subtasks.planned_start_date, subtasks.due_date,
-                   subtasks.timer_target_seconds, subtasks.memo, subtasks.sort_order,
+                   subtasks.due_time, subtasks.timer_target_seconds, subtasks.memo, subtasks.sort_order,
                    subtasks.completed_at, subtasks.deleted_at, subtasks.created_at,
                    subtasks.updated_at,
                    recurrence_rules.id AS recurrence_rule_id,
@@ -1923,7 +1952,7 @@ fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<Task
         .query_row(
             "
             SELECT id, list_id, title, status, is_favorite,
-                   planned_start_date, due_date, timer_target_seconds, memo,
+                   planned_start_date, due_date, due_time, timer_target_seconds, memo,
                    sort_order, completed_at, deleted_at, created_at, updated_at,
                    recurrence_rule_id, recurrence_target_type, recurrence_target_id,
                    recurrence_frequency, recurrence_interval, recurrence_deleted_at,
@@ -1936,6 +1965,7 @@ fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<Task
                      tasks.is_favorite,
                      tasks.planned_start_date,
                      tasks.due_date,
+                     tasks.due_time,
                      tasks.timer_target_seconds,
                      tasks.memo,
                      tasks.sort_order,
@@ -1970,7 +2000,7 @@ fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryRe
         .query_row(
             "
             SELECT id, list_id, title, status, is_favorite,
-                   planned_start_date, due_date, timer_target_seconds, memo,
+                   planned_start_date, due_date, due_time, timer_target_seconds, memo,
                    sort_order, completed_at, deleted_at, created_at, updated_at,
                    recurrence_rule_id, recurrence_target_type, recurrence_target_id,
                    recurrence_frequency, recurrence_interval, recurrence_deleted_at,
@@ -1983,6 +2013,7 @@ fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryRe
                      tasks.is_favorite,
                      tasks.planned_start_date,
                      tasks.due_date,
+                     tasks.due_time,
                      tasks.timer_target_seconds,
                      tasks.memo,
                      tasks.sort_order,
@@ -2017,7 +2048,7 @@ fn select_subtask_by_id(connection: &Connection, id: &str) -> RepositoryResult<S
     connection
         .query_row(
             "
-            SELECT id, task_id, title, status, planned_start_date, due_date,
+            SELECT id, task_id, title, status, planned_start_date, due_date, due_time,
                    timer_target_seconds, memo, sort_order, completed_at, deleted_at,
                    created_at, updated_at,
                    recurrence_rule_id, recurrence_target_type, recurrence_target_id,
@@ -2030,6 +2061,7 @@ fn select_subtask_by_id(connection: &Connection, id: &str) -> RepositoryResult<S
                      subtasks.status,
                      subtasks.planned_start_date,
                      subtasks.due_date,
+                     subtasks.due_time,
                      subtasks.timer_target_seconds,
                      subtasks.memo,
                      subtasks.sort_order,
@@ -2066,7 +2098,7 @@ fn select_existing_subtask_by_id(
     connection
         .query_row(
             "
-            SELECT id, task_id, title, status, planned_start_date, due_date,
+            SELECT id, task_id, title, status, planned_start_date, due_date, due_time,
                    timer_target_seconds, memo, sort_order, completed_at, deleted_at,
                    created_at, updated_at,
                    recurrence_rule_id, recurrence_target_type, recurrence_target_id,
@@ -2079,6 +2111,7 @@ fn select_existing_subtask_by_id(
                      subtasks.status,
                      subtasks.planned_start_date,
                      subtasks.due_date,
+                     subtasks.due_time,
                      subtasks.timer_target_seconds,
                      subtasks.memo,
                      subtasks.sort_order,
@@ -2118,14 +2151,15 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
         is_favorite: row.get::<_, i64>(4)? != 0,
         planned_start_date: row.get(5)?,
         due_date: row.get(6)?,
-        timer_target_seconds: row.get(7)?,
-        recurrence_rule: map_optional_recurrence_rule(row, 14)?,
-        memo: row.get(8)?,
-        sort_order: row.get(9)?,
-        completed_at: row.get(10)?,
-        deleted_at: row.get(11)?,
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
+        due_time: row.get(7)?,
+        timer_target_seconds: row.get(8)?,
+        recurrence_rule: map_optional_recurrence_rule(row, 15)?,
+        memo: row.get(9)?,
+        sort_order: row.get(10)?,
+        completed_at: row.get(11)?,
+        deleted_at: row.get(12)?,
+        created_at: row.get(13)?,
+        updated_at: row.get(14)?,
     })
 }
 
@@ -2137,14 +2171,15 @@ fn map_subtask_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SubtaskRecord> {
         status: WorkStatus::from_db(&row.get::<_, String>(3)?).map_err(db_value_error)?,
         planned_start_date: row.get(4)?,
         due_date: row.get(5)?,
-        timer_target_seconds: row.get(6)?,
-        recurrence_rule: map_optional_recurrence_rule(row, 13)?,
-        memo: row.get(7)?,
-        sort_order: row.get(8)?,
-        completed_at: row.get(9)?,
-        deleted_at: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        due_time: row.get(6)?,
+        timer_target_seconds: row.get(7)?,
+        recurrence_rule: map_optional_recurrence_rule(row, 14)?,
+        memo: row.get(8)?,
+        sort_order: row.get(9)?,
+        completed_at: row.get(10)?,
+        deleted_at: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
     })
 }
 
@@ -2171,8 +2206,8 @@ fn map_optional_recurrence_rule(
 }
 
 fn map_task_read_model_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRowRecord> {
-    let active_target_type_text: Option<String> = row.get(14)?;
-    let active_target_id: Option<String> = row.get(15)?;
+    let active_target_type_text: Option<String> = row.get(15)?;
+    let active_target_id: Option<String> = row.get(16)?;
     let active_timer_target = match (active_target_type_text, active_target_id) {
         (Some(target_type_text), Some(target_id)) => Some(target_ref(
             WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?,
@@ -2189,13 +2224,14 @@ fn map_task_read_model_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRowR
         is_favorite: row.get::<_, i64>(4)? != 0,
         planned_start_date: row.get(5)?,
         due_date: row.get(6)?,
-        timer_target_seconds: row.get(7)?,
-        sort_order: row.get(8)?,
-        completed_at: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
-        subtask_total_count: row.get(12)?,
-        completed_subtask_count: row.get(13)?,
+        due_time: row.get(7)?,
+        timer_target_seconds: row.get(8)?,
+        sort_order: row.get(9)?,
+        completed_at: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+        subtask_total_count: row.get(13)?,
+        completed_subtask_count: row.get(14)?,
         active_timer_target,
     })
 }
@@ -2403,8 +2439,37 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
         .execute_batch(INITIAL_SCHEMA)
         .map_err(|error| format!("SQLite初期マイグレーションに失敗しました: {error}"))?;
     run_timer_recurrence_migration(connection)?;
+    run_due_time_migration(connection)?;
     run_ui_read_model_migration(connection)?;
     run_notification_preference_migration(connection)
+}
+
+fn run_due_time_migration(connection: &Connection) -> RepositoryResult<()> {
+    ensure_column(
+        connection,
+        "tasks",
+        "due_time",
+        "ALTER TABLE tasks ADD COLUMN due_time TEXT NULL CHECK (due_time IS NULL OR (length(due_time) = 5 AND substr(due_time, 3, 1) = ':' AND substr(due_time, 1, 2) BETWEEN '00' AND '23' AND substr(due_time, 4, 2) BETWEEN '00' AND '59'))",
+    )?;
+    ensure_column(
+        connection,
+        "subtasks",
+        "due_time",
+        "ALTER TABLE subtasks ADD COLUMN due_time TEXT NULL CHECK (due_time IS NULL OR (length(due_time) = 5 AND substr(due_time, 3, 1) = ':' AND substr(due_time, 1, 2) BETWEEN '00' AND '23' AND substr(due_time, 4, 2) BETWEEN '00' AND '59'))",
+    )?;
+    connection
+        .execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS tasks_due_time_idx
+            ON tasks (due_date, due_time)
+            WHERE deleted_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS subtasks_due_time_idx
+            ON subtasks (due_date, due_time)
+            WHERE deleted_at IS NULL;
+            ",
+        )
+        .map_err(|error| format!("期限時刻用インデックスを作成できません: {error}"))
 }
 
 fn run_notification_preference_migration(connection: &Connection) -> RepositoryResult<()> {
@@ -2667,7 +2732,7 @@ fn collect_task_calendar_items(
     let mut statement = connection
         .prepare(
             "
-            SELECT id, title, planned_start_date, due_date, status
+            SELECT id, title, planned_start_date, due_date, due_time, status
             FROM tasks
             WHERE deleted_at IS NULL
               AND (
@@ -2686,7 +2751,8 @@ fn collect_task_calendar_items(
                 title: row.get(1)?,
                 planned_start_date: row.get(2)?,
                 due_date: row.get(3)?,
-                status: WorkStatus::from_db(&row.get::<_, String>(4)?).map_err(db_value_error)?,
+                due_time: row.get(4)?,
+                status: WorkStatus::from_db(&row.get::<_, String>(5)?).map_err(db_value_error)?,
                 parent_title: None,
             })
         })
@@ -2714,6 +2780,7 @@ fn collect_subtask_calendar_items(
                    subtasks.title,
                    subtasks.planned_start_date,
                    subtasks.due_date,
+                   subtasks.due_time,
                    subtasks.status,
                    tasks.title AS parent_title
             FROM subtasks
@@ -2737,8 +2804,9 @@ fn collect_subtask_calendar_items(
                 title: row.get(1)?,
                 planned_start_date: row.get(2)?,
                 due_date: row.get(3)?,
-                status: WorkStatus::from_db(&row.get::<_, String>(4)?).map_err(db_value_error)?,
-                parent_title: row.get(5)?,
+                due_time: row.get(4)?,
+                status: WorkStatus::from_db(&row.get::<_, String>(5)?).map_err(db_value_error)?,
+                parent_title: row.get(6)?,
             })
         })
         .map_err(|error| format!("サブタスクカレンダーを取得できません: {error}"))?;
@@ -2824,6 +2892,7 @@ struct CalendarSourceRow {
     title: String,
     planned_start_date: Option<String>,
     due_date: Option<String>,
+    due_time: Option<String>,
     status: WorkStatus,
     parent_title: Option<String>,
 }
@@ -2850,7 +2919,7 @@ fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>
             title: row.title,
             parent_title: row.parent_title,
             date,
-            time: None,
+            time: row.due_time,
             marker: CalendarMarker::Due,
             status: row.status,
         });
@@ -2959,6 +3028,7 @@ mod tests {
             title: title.to_string(),
             planned_start_date: None,
             due_date: None,
+            due_time: None,
             memo: None,
         }
     }
@@ -3429,6 +3499,7 @@ mod tests {
                     title: "画面に表示".to_string(),
                     planned_start_date: Some("2026-07-06".to_string()),
                     due_date: Some("2026-07-07".to_string()),
+                    due_time: None,
                     memo: Some("Reactではテキストとして表示する".to_string()),
                 },
             )
@@ -3467,6 +3538,7 @@ mod tests {
                 title: "調査サブタスク".to_string(),
                 planned_start_date: Some("2026-07-20".to_string()),
                 due_date: Some("2026-07-21".to_string()),
+                due_time: Some("14:30".to_string()),
                 memo: None,
             },
         )
@@ -3478,6 +3550,7 @@ mod tests {
                 title: "範囲外".to_string(),
                 planned_start_date: Some("2026-10-01".to_string()),
                 due_date: None,
+                due_time: None,
                 memo: None,
             },
         )
@@ -3540,6 +3613,7 @@ mod tests {
                 title: "UI設計".to_string(),
                 planned_start_date: Some("2026-07-06".to_string()),
                 due_date: Some("2026-07-07".to_string()),
+                due_time: None,
                 memo: Some("Read Modelに含めない".to_string()),
             },
         )
@@ -3689,6 +3763,7 @@ mod tests {
                 title: "更新前".to_string(),
                 planned_start_date: Some("2026-07-06".to_string()),
                 due_date: Some("2026-07-07".to_string()),
+                due_time: None,
                 memo: Some("古いメモ".to_string()),
             },
         )
@@ -3702,6 +3777,7 @@ mod tests {
                 title: "更新後".to_string(),
                 planned_start_date: Some("2026-07-08".to_string()),
                 due_date: None,
+                due_time: None,
                 timer_target_seconds: Some(1_800),
                 recurrence_rule: None,
                 memo: Some("新しいメモ".to_string()),
@@ -3784,6 +3860,7 @@ mod tests {
                 title: "通知切替対象".to_string(),
                 planned_start_date: None,
                 due_date: Some("2026-07-06".to_string()),
+                due_time: None,
                 memo: None,
             },
         )
@@ -3851,6 +3928,7 @@ mod tests {
                 title: "繰り返し対象".to_string(),
                 planned_start_date: None,
                 due_date: Some("2026-07-10".to_string()),
+                due_time: None,
                 timer_target_seconds: Some(1_200),
                 recurrence_rule: Some(usecases::RecurrenceRuleDraft {
                     frequency: "weekly".to_string(),
@@ -3874,6 +3952,7 @@ mod tests {
                 title: "繰り返し対象".to_string(),
                 planned_start_date: None,
                 due_date: Some("2026-07-10".to_string()),
+                due_time: None,
                 timer_target_seconds: Some(1_200),
                 recurrence_rule: None,
                 memo: Some("繰り返し解除".to_string()),
@@ -3918,6 +3997,7 @@ mod tests {
                 title: "基準日なし".to_string(),
                 planned_start_date: None,
                 due_date: None,
+                due_time: None,
                 timer_target_seconds: None,
                 recurrence_rule: Some(usecases::RecurrenceRuleDraft {
                     frequency: "daily".to_string(),
@@ -3952,6 +4032,7 @@ mod tests {
                 title: "子タスク更新".to_string(),
                 planned_start_date: None,
                 due_date: Some("2026-07-09".to_string()),
+                due_time: Some("16:45".to_string()),
                 timer_target_seconds: Some(900),
                 recurrence_rule: None,
                 memo: Some("サブタスクメモ".to_string()),
@@ -3983,7 +4064,7 @@ mod tests {
         assert_eq!(updated.timer_target_seconds, Some(900));
         assert_eq!(
             due_rule,
-            ("2026-07-09T00:00:00Z".to_string(), "pending".to_string())
+            ("2026-07-09T16:45:00Z".to_string(), "pending".to_string())
         );
     }
 
@@ -4006,6 +4087,7 @@ mod tests {
                 title: "月次サブタスク".to_string(),
                 planned_start_date: Some("2026-07-09".to_string()),
                 due_date: None,
+                due_time: None,
                 timer_target_seconds: Some(600),
                 recurrence_rule: Some(usecases::RecurrenceRuleDraft {
                     frequency: "monthly".to_string(),
@@ -4039,6 +4121,7 @@ mod tests {
                 title: "目標時間".to_string(),
                 planned_start_date: None,
                 due_date: None,
+                due_time: None,
                 timer_target_seconds: Some(0),
                 recurrence_rule: None,
                 memo: None,
@@ -4286,6 +4369,7 @@ mod tests {
                 title: "秘密の顧客タスク".to_string(),
                 planned_start_date: Some("2026-07-06".to_string()),
                 due_date: Some("2026-07-07".to_string()),
+                due_time: None,
                 memo: Some("通知に出してはいけないメモ".to_string()),
             },
         )
@@ -4345,6 +4429,7 @@ mod tests {
                 title: "通知失敗確認".to_string(),
                 planned_start_date: None,
                 due_date: Some("2026-07-06".to_string()),
+                due_time: None,
                 memo: None,
             },
         )
@@ -4408,6 +4493,7 @@ mod tests {
                 title: "復帰時通知".to_string(),
                 planned_start_date: None,
                 due_date: Some("2026-07-06".to_string()),
+                due_time: None,
                 memo: None,
             },
         )

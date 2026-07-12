@@ -17,6 +17,14 @@ CREATE TABLE IF NOT EXISTS tasks (
   is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1)),
   planned_start_date TEXT NULL,
   due_date TEXT NULL,
+  due_time TEXT NULL CHECK (
+    due_time IS NULL OR (
+      length(due_time) = 5
+      AND substr(due_time, 3, 1) = ':'
+      AND substr(due_time, 1, 2) BETWEEN '00' AND '23'
+      AND substr(due_time, 4, 2) BETWEEN '00' AND '59'
+    )
+  ),
   timer_target_seconds INTEGER NULL CHECK (
     timer_target_seconds IS NULL OR timer_target_seconds >= 0
   ),
@@ -41,6 +49,14 @@ CREATE TABLE IF NOT EXISTS subtasks (
   status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
   planned_start_date TEXT NULL,
   due_date TEXT NULL,
+  due_time TEXT NULL CHECK (
+    due_time IS NULL OR (
+      length(due_time) = 5
+      AND substr(due_time, 3, 1) = ':'
+      AND substr(due_time, 1, 2) BETWEEN '00' AND '23'
+      AND substr(due_time, 4, 2) BETWEEN '00' AND '59'
+    )
+  ),
   timer_target_seconds INTEGER NULL CHECK (
     timer_target_seconds IS NULL OR timer_target_seconds >= 0
   ),
