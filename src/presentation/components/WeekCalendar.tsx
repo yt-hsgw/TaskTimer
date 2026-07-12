@@ -17,7 +17,7 @@ type WeekCalendarProps = {
 };
 
 const dayLabels = ["月", "火", "水", "木", "金", "土", "日"];
-const businessHours = Array.from({ length: 10 }, (_, index) => 9 + index);
+const businessHours = Array.from({ length: 15 }, (_, index) => 8 + index);
 const markerLabels: Record<WeekCalendarItem["marker"], string> = {
   planned_start: "開始予定",
   due: "期限",
@@ -46,32 +46,14 @@ export function WeekCalendar({
       ? [buildDay(anchorDate)]
       : buildWeekDays(getWeekStartDate(anchorDate));
   const monthDays = buildMonthDays(anchorDate);
-  const headingLabel =
-    viewMode === "month"
-      ? formatMonthHeading(anchorDate)
-      : formatRangeHeading(rangeDays);
+  const headingLabel = formatCalendarHeading(viewMode, anchorDate);
+  const weekBadge =
+    viewMode === "week" ? `第${getIsoWeekNumber(anchorDate)}週` : null;
 
   return (
     <section className="panel calendar-panel" aria-labelledby="calendar-title">
-      <div className="panel-heading">
-        <div>
-          <p className="eyebrow">{headingLabel}</p>
-          <h2 id="calendar-title">カレンダー</h2>
-        </div>
-        <div className="calendar-heading-controls">
-          <div className="calendar-view-switch" aria-label="カレンダー表示切替">
-            {(["week", "day", "month"] as const).map((mode) => (
-              <button
-                className={viewMode === mode ? "is-active" : undefined}
-                type="button"
-                key={mode}
-                aria-pressed={viewMode === mode}
-                onClick={() => onChangeViewMode(mode)}
-              >
-                {viewModeLabels[mode]}
-              </button>
-            ))}
-          </div>
+      <div className="calendar-toolbar">
+        <div className="calendar-toolbar-left">
           <button
             className="calendar-today-button"
             type="button"
@@ -79,7 +61,7 @@ export function WeekCalendar({
           >
             今日
           </button>
-          <div className="segmented-control" aria-label="カレンダー移動">
+          <div className="calendar-nav-buttons" aria-label="カレンダー移動">
             <button
               type="button"
               aria-label={`前の${viewModeLabels[viewMode]}`}
@@ -94,6 +76,26 @@ export function WeekCalendar({
             >
               ›
             </button>
+          </div>
+          <div className="calendar-title-group">
+            <h2 id="calendar-title">{headingLabel}</h2>
+            {weekBadge ? <span>{weekBadge}</span> : null}
+          </div>
+        </div>
+
+        <div className="calendar-heading-controls">
+          <div className="calendar-view-switch" aria-label="カレンダー表示切替">
+            {(["week", "day", "month"] as const).map((mode) => (
+              <button
+                className={viewMode === mode ? "is-active" : undefined}
+                type="button"
+                key={mode}
+                aria-pressed={viewMode === mode}
+                onClick={() => onChangeViewMode(mode)}
+              >
+                {viewModeLabels[mode]}
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -136,21 +138,26 @@ function TimeGridCalendar({
   viewMode: CalendarViewMode;
   onSelectItem(item: WeekCalendarItem): void;
 }) {
+  const currentTime = getCurrentTimeMarker(days);
+
   return (
     <div
       className={`calendar-time-grid ${
         viewMode === "day" ? "is-day-mode" : ""
       }`}
     >
-      <div className="calendar-time-label" aria-hidden="true" />
+      <div className="calendar-time-zone">{formatTimeZoneOffset(new Date())}</div>
       {days.map((day) => (
-        <div className="calendar-time-header" key={day.date}>
+        <div
+          className={`calendar-time-header ${isToday(day.date) ? "is-today" : ""}`}
+          key={day.date}
+        >
           <span>{day.label}</span>
           <strong>{day.dayOfMonth}</strong>
         </div>
       ))}
 
-      <div className="calendar-time-label">日付のみ</div>
+      <div className="calendar-time-label">終日</div>
       {days.map((day) => {
         const dateOnlyItems = items
           .filter((item) => item.date === day.date && !item.time)
@@ -158,10 +165,10 @@ function TimeGridCalendar({
         return (
           <div className="calendar-all-day-cell" key={`${day.date}:all-day`}>
             <CalendarCellItems
-              emptyLabel="予定なし"
               isLoading={isLoading}
               items={dateOnlyItems}
               selectedTarget={selectedTarget}
+              variant="all-day"
               onSelectItem={onSelectItem}
             />
           </div>
@@ -174,6 +181,7 @@ function TimeGridCalendar({
           days={days}
           items={items}
           key={hour}
+          currentTime={currentTime}
           isLoading={isLoading}
           selectedTarget={selectedTarget}
           onSelectItem={onSelectItem}
@@ -187,6 +195,7 @@ function TimeGridRow({
   hour,
   days,
   items,
+  currentTime,
   isLoading,
   selectedTarget,
   onSelectItem,
@@ -194,24 +203,38 @@ function TimeGridRow({
   hour: number;
   days: CalendarDay[];
   items: WeekCalendarItem[];
+  currentTime: CurrentTimeMarker | null;
   isLoading: boolean;
   selectedTarget: WorkTargetRef | null;
   onSelectItem(item: WeekCalendarItem): void;
 }) {
   return (
     <>
-      <div className="calendar-time-label">{hour}:00</div>
+      <div className="calendar-time-label">{formatHourLabel(hour)}</div>
       {days.map((day) => {
         const hourItems = items
           .filter((item) => item.date === day.date && getDisplayHour(item) === hour)
           .sort(sortCalendarItems);
+        const shouldShowCurrentTime =
+          currentTime?.date === day.date && currentTime.hour === hour;
         return (
-          <div className="calendar-time-cell" key={`${day.date}:${hour}`}>
+          <div
+            className={`calendar-time-cell ${
+              shouldShowCurrentTime ? "has-current-time" : ""
+            }`}
+            key={`${day.date}:${hour}`}
+          >
+            {shouldShowCurrentTime ? (
+              <div
+                className="calendar-current-time-line"
+                style={{ top: `${currentTime.offsetPercent}%` }}
+              />
+            ) : null}
             <CalendarCellItems
-              emptyLabel=""
               isLoading={isLoading}
               items={hourItems}
               selectedTarget={selectedTarget}
+              variant="timed"
               onSelectItem={onSelectItem}
             />
           </div>
@@ -222,16 +245,16 @@ function TimeGridRow({
 }
 
 function CalendarCellItems({
-  emptyLabel,
   isLoading,
   items,
   selectedTarget,
+  variant,
   onSelectItem,
 }: {
-  emptyLabel: string;
   isLoading: boolean;
   items: WeekCalendarItem[];
   selectedTarget: WorkTargetRef | null;
+  variant: "all-day" | "timed";
   onSelectItem(item: WeekCalendarItem): void;
 }) {
   if (isLoading) {
@@ -239,16 +262,17 @@ function CalendarCellItems({
   }
 
   if (items.length === 0) {
-    return emptyLabel ? <p className="calendar-empty">{emptyLabel}</p> : null;
+    return null;
   }
 
   return (
-    <div className="calendar-items">
+    <div className={`calendar-items is-${variant}`}>
       {items.map((item) => (
         <CalendarItemButton
           item={item}
           key={item.id}
           selectedTarget={selectedTarget}
+          variant={variant}
           onSelectItem={onSelectItem}
         />
       ))}
@@ -294,7 +318,7 @@ function MonthCalendar({
             <div
               className={`calendar-month-day ${
                 isOutsideMonth ? "is-outside-month" : ""
-              }`}
+              } ${isToday(day.date) ? "is-today" : ""}`}
               key={day.date}
             >
               <div className="calendar-month-day-heading">
@@ -306,10 +330,10 @@ function MonthCalendar({
                 <div className="calendar-month-day-items">
                   {visibleItems.map((item) => (
                     <CalendarItemButton
-                      compact
                       item={item}
                       key={item.id}
                       selectedTarget={selectedTarget}
+                      variant="month"
                       onSelectItem={onSelectItem}
                     />
                   ))}
@@ -328,13 +352,13 @@ function MonthCalendar({
 
 function CalendarItemButton({
   item,
-  compact = false,
   selectedTarget,
+  variant,
   onSelectItem,
 }: {
   item: WeekCalendarItem;
-  compact?: boolean;
   selectedTarget: WorkTargetRef | null;
+  variant: "all-day" | "timed" | "month";
   onSelectItem(item: WeekCalendarItem): void;
 }) {
   const isSelected = isSameTarget(item.target, selectedTarget);
@@ -345,11 +369,11 @@ function CalendarItemButton({
 
   return (
     <button
-      className={`calendar-item marker-${item.marker} ${
+      className={`calendar-item marker-${item.marker} is-${variant} ${
         item.target.type === "subtask" ? "is-subtask" : ""
       } ${item.status === "done" ? "is-done" : ""} ${
         isSelected ? "is-selected" : ""
-      } ${compact ? "is-compact" : ""}`}
+      }`}
       type="button"
       aria-pressed={isSelected}
       aria-label={`${relationLabel ? `${relationLabel}、` : ""}${item.title}の${markerText}を開く`}
@@ -359,7 +383,9 @@ function CalendarItemButton({
       {relationLabel ? (
         <small className="calendar-item-parent">{relationLabel}</small>
       ) : null}
-      <small>{markerText}</small>
+      {variant === "timed" || variant === "month" ? (
+        <small>{markerText}</small>
+      ) : null}
     </button>
   );
 }
@@ -376,6 +402,27 @@ function getDisplayHour(item: WeekCalendarItem) {
   }
 
   return Math.min(Math.max(hour, businessHours[0]), businessHours.at(-1) ?? hour);
+}
+
+function getCurrentTimeMarker(days: CalendarDay[]): CurrentTimeMarker | null {
+  const now = new Date();
+  const date = toDateInputValue(now);
+  if (!days.some((day) => day.date === date)) {
+    return null;
+  }
+
+  const hour = now.getHours();
+  const firstHour = businessHours[0];
+  const lastHour = businessHours.at(-1) ?? firstHour;
+  if (hour < firstHour || hour > lastHour) {
+    return null;
+  }
+
+  return {
+    date,
+    hour,
+    offsetPercent: (now.getMinutes() / 60) * 100,
+  };
 }
 
 function sortCalendarItems(first: WeekCalendarItem, second: WeekCalendarItem) {
@@ -406,6 +453,12 @@ type CalendarDay = {
   label: string;
   date: string;
   dayOfMonth: number;
+};
+
+type CurrentTimeMarker = {
+  date: string;
+  hour: number;
+  offsetPercent: number;
 };
 
 function buildDay(dateValue: string): CalendarDay {
@@ -473,21 +526,55 @@ function toDateInputValue(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function formatRangeHeading(days: CalendarDay[]) {
-  const firstDay = days[0];
-  const lastDay = days.at(-1);
-  if (!firstDay || !lastDay || firstDay.date === lastDay.date) {
-    return firstDay ? formatDateLabel(firstDay.date) : "";
+function formatCalendarHeading(viewMode: CalendarViewMode, anchorDate: string) {
+  const date = parseDateInputValue(anchorDate);
+  if (viewMode === "day") {
+    return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
   }
-  return `${formatDateLabel(firstDay.date)} - ${formatDateLabel(lastDay.date)}`;
-}
-
-function formatMonthHeading(value: string) {
-  const date = parseDateInputValue(value);
   return `${date.getFullYear()}年${date.getMonth() + 1}月`;
 }
 
-function formatDateLabel(value: string) {
-  const [, month, day] = value.split("-");
-  return `${Number(month)}/${Number(day)}`;
+function formatHourLabel(hour: number) {
+  if (hour < 12) {
+    return `午前${hour}時`;
+  }
+  if (hour === 12) {
+    return "午後12時";
+  }
+  return `午後${hour - 12}時`;
+}
+
+function formatTimeZoneOffset(date: Date) {
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteMinutes = Math.abs(offsetMinutes);
+  const absoluteHours = Math.floor(absoluteMinutes / 60);
+  const minutes = absoluteMinutes % 60;
+  if (minutes === 0) {
+    return `GMT${sign}${String(absoluteHours).padStart(2, "0")}`;
+  }
+  return `GMT${sign}${String(absoluteHours).padStart(2, "0")}:${String(
+    minutes,
+  ).padStart(2, "0")}`;
+}
+
+function isToday(value: string) {
+  return value === toDateInputValue(new Date());
+}
+
+function getIsoWeekNumber(value: string) {
+  const date = parseDateInputValue(value);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
+
+  const weekOne = new Date(date.getFullYear(), 0, 4);
+  return (
+    1 +
+    Math.round(
+      ((date.getTime() - weekOne.getTime()) / 86_400_000 -
+        3 +
+        ((weekOne.getDay() + 6) % 7)) /
+        7,
+    )
+  );
 }
