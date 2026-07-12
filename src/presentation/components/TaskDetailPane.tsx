@@ -116,10 +116,13 @@ export function TaskDetailPane({
     }),
     [detailItem.id, selectedSubtask],
   );
+  const isTaskDetail = !selectedSubtask;
+  const detailKey = `${selectedSubtask ? "subtask" : "task"}:${detailItem.id}`;
   const [draft, setDraft] = useState(() => toDetailFormDraft(detailItem));
   const [isCoreEditOpen, setIsCoreEditOpen] = useState(false);
   const [isDuePopoverOpen, setIsDuePopoverOpen] = useState(false);
   const [isSubtaskCreateOpen, setIsSubtaskCreateOpen] = useState(false);
+  const [isDeleteConfirming, setIsDeleteConfirming] = useState(false);
   const [customDueDraft, setCustomDueDraft] = useState({
     dueDate: detailItem.dueDate ?? getTodayDateInputValue(),
     dueTime: detailItem.dueTime ?? "",
@@ -133,15 +136,15 @@ export function TaskDetailPane({
   const [openSections, setOpenSections] = useState<
     Record<DetailSectionKey, boolean>
   >({
-    subtasks: !selectedSubtask,
+    subtasks: isTaskDetail,
     timer: false,
     notifications: false,
   });
-  const isTaskDetail = !selectedSubtask;
   const completedSubtaskCount = useMemo(
     () => task.subtasks.filter((subtask) => subtask.status === "done").length,
     [task.subtasks],
   );
+  const dueChipLabel = formatDueChipLabel(detailItem.dueDate, detailItem.dueTime);
 
   useEffect(() => {
     setDraft(toDetailFormDraft(detailItem));
@@ -149,15 +152,19 @@ export function TaskDetailPane({
       dueDate: detailItem.dueDate ?? getTodayDateInputValue(),
       dueTime: detailItem.dueTime ?? "",
     });
+  }, [detailItem]);
+
+  useEffect(() => {
     setIsCoreEditOpen(false);
     setIsDuePopoverOpen(false);
     setIsSubtaskCreateOpen(false);
+    setIsDeleteConfirming(false);
     setOpenSections({
-      subtasks: !selectedSubtask,
+      subtasks: isTaskDetail,
       timer: false,
       notifications: false,
     });
-  }, [detailItem, selectedSubtask]);
+  }, [detailKey, isTaskDetail]);
 
   useEffect(() => {
     setSubtaskDraft({
@@ -233,6 +240,19 @@ export function TaskDetailPane({
     }));
   }
 
+  function handleDeleteClick() {
+    if (!isDeleteConfirming) {
+      setIsDeleteConfirming(true);
+      return;
+    }
+
+    if (selectedSubtask) {
+      void onDeleteSubtask(selectedSubtask);
+      return;
+    }
+    void onDeleteTask(task);
+  }
+
   const isActive = isActiveTarget(activeTimer, detailTarget);
 
   return (
@@ -306,34 +326,53 @@ export function TaskDetailPane({
         </div>
       </section>
 
-      <div className="detail-quick-actions" aria-label="期限クイック設定">
-        <button
-          className="due-chip-button"
-          type="button"
-          disabled={isMutating}
-          onClick={() => void applyDue(getTodayDateInputValue(), null)}
-        >
-          今日
-        </button>
-        <button
-          className="due-chip-button"
-          type="button"
-          disabled={isMutating}
-          onClick={() => void applyDue(getTomorrowDateInputValue(), null)}
-        >
-          明日
-        </button>
-        <div className="due-popover-anchor">
-          <button
-            className="due-chip-button"
-            type="button"
-            disabled={isMutating}
-            aria-expanded={isDuePopoverOpen}
-            onClick={() => setIsDuePopoverOpen((current) => !current)}
-          >
-            ◷ 時間設定
-          </button>
-          {isDuePopoverOpen ? (
+      <div className="detail-due-area" aria-label="期限クイック設定">
+        <div className="detail-quick-actions">
+          {detailItem.dueDate ? (
+            <span className="due-selected-chip">
+              {dueChipLabel}
+              <button
+                type="button"
+                aria-label="期限を削除"
+                title="期限を削除"
+                disabled={isMutating}
+                onClick={() => void applyDue(null, null)}
+              >
+                ×
+              </button>
+            </span>
+          ) : (
+            <>
+              <button
+                className="due-chip-button"
+                type="button"
+                disabled={isMutating}
+                onClick={() => void applyDue(getTodayDateInputValue(), null)}
+              >
+                今日
+              </button>
+              <button
+                className="due-chip-button"
+                type="button"
+                disabled={isMutating}
+                onClick={() => void applyDue(getTomorrowDateInputValue(), null)}
+              >
+                明日
+              </button>
+              <button
+                className="due-chip-button"
+                type="button"
+                disabled={isMutating}
+                aria-expanded={isDuePopoverOpen}
+                onClick={() => setIsDuePopoverOpen((current) => !current)}
+              >
+                ◷ 時間設定
+              </button>
+            </>
+          )}
+        </div>
+        {isDuePopoverOpen && !detailItem.dueDate ? (
+          <div className="due-popover-anchor">
             <form
               className="due-popover"
               onSubmit={(event) => {
@@ -385,24 +424,12 @@ export function TaskDetailPane({
                 </button>
               </div>
             </form>
-          ) : null}
-        </div>
-        {detailItem.dueDate ? (
-          <button
-            className="due-clear-button"
-            type="button"
-            aria-label="期限を削除"
-            title="期限を削除"
-            disabled={isMutating}
-            onClick={() => void applyDue(null, null)}
-          >
-            ×
-          </button>
+          </div>
         ) : null}
       </div>
 
       <DetailDisclosure
-        title="基本情報"
+        title={selectedSubtask ? "サブタスクを編集" : "タスクを編集"}
         badge={isCoreEditOpen ? "編集中" : "参照"}
         isOpen={isCoreEditOpen}
         onToggle={() => setIsCoreEditOpen((current) => !current)}
@@ -698,14 +725,20 @@ export function TaskDetailPane({
           className="danger-button"
           type="button"
           disabled={isMutating}
-          onClick={() =>
-            selectedSubtask
-              ? void onDeleteSubtask(selectedSubtask)
-              : void onDeleteTask(task)
-          }
+          onClick={handleDeleteClick}
         >
-          削除
+          {isDeleteConfirming ? "もう一度押して削除" : "削除"}
         </button>
+        {isDeleteConfirming ? (
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={isMutating}
+            onClick={() => setIsDeleteConfirming(false)}
+          >
+            キャンセル
+          </button>
+        ) : null}
       </div>
     </aside>
   );
@@ -1010,6 +1043,17 @@ function formatDue(date: string | null, time: string | null) {
     return "期限なし";
   }
   return `${formatDateLabel(date)}${time ? ` ${time}` : ""}`;
+}
+
+function formatDueChipLabel(date: string | null, time: string | null) {
+  if (!date) {
+    return "期限なし";
+  }
+  const today = getTodayDateInputValue();
+  const tomorrow = getTomorrowDateInputValue();
+  const label =
+    date === today ? "今日" : date === tomorrow ? "明日" : formatDateLabel(date);
+  return time ? `${label} ${time}` : label;
 }
 
 function formatDateLabel(value: string) {

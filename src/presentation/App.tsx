@@ -470,14 +470,6 @@ export function App() {
 
   const handleDeleteTask = useCallback(
     (task: TaskWithSubtasks) => {
-      if (
-        !window.confirm(
-          "このタスクを削除します。サブタスク、タイマー履歴、通知ルールもソフト削除されます。",
-        )
-      ) {
-        return Promise.resolve(false);
-      }
-
       return runMutation(async () => {
         await tauriTaskTimerGateway.deleteTask(task.id);
       }).then((deleted) => {
@@ -494,14 +486,6 @@ export function App() {
 
   const handleDeleteSubtask = useCallback(
     (subtask: Subtask) => {
-      if (
-        !window.confirm(
-          "このサブタスクを削除します。タイマー履歴と通知ルールもソフト削除されます。",
-        )
-      ) {
-        return Promise.resolve(false);
-      }
-
       return runMutation(async () => {
         await tauriTaskTimerGateway.deleteSubtask(subtask.id);
         return subtask.taskId;

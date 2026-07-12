@@ -535,6 +535,11 @@ button {
   overflow-wrap: anywhere;
 }
 
+.detail-due-area {
+  display: grid;
+  gap: 8px;
+}
+
 .detail-quick-actions {
   align-items: center;
   display: flex;
@@ -543,7 +548,7 @@ button {
 }
 
 .due-chip-button,
-.due-clear-button {
+.due-selected-chip {
   align-items: center;
   background: #f8fafb;
   border: 1px solid #cfd8df;
@@ -559,20 +564,33 @@ button {
 }
 
 .due-chip-button:hover,
-.due-clear-button:hover {
+.due-selected-chip button:hover {
   background: #eef4f8;
 }
 
-.due-clear-button {
+.due-selected-chip {
+  background: #eef4f1;
+  border-color: #c9d9d2;
+  color: var(--green);
+  padding-right: 4px;
+}
+
+.due-selected-chip button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
   color: var(--muted);
-  font-size: 15px;
+  display: inline-flex;
+  font-size: 14px;
+  height: 22px;
   justify-content: center;
-  min-width: 28px;
+  min-width: 22px;
   padding: 0;
 }
 
 .due-popover-anchor {
-  position: relative;
+  min-width: 0;
 }
 
 .due-popover {
@@ -582,12 +600,10 @@ button {
   box-shadow: 0 16px 38px rgb(20 30 36 / 18%);
   display: grid;
   gap: 10px;
-  min-width: 260px;
+  max-width: 100%;
+  min-width: 0;
   padding: 12px;
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  z-index: 5;
+  width: 100%;
 }
 
 .due-popover label {
@@ -657,6 +673,16 @@ button {
   min-width: 0;
   padding: 8px 10px;
   width: 100%;
+}
+
+.detail-form input[type="number"] {
+  appearance: textfield;
+}
+
+.detail-form input[type="number"]::-webkit-inner-spin-button,
+.detail-form input[type="number"]::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
 }
 
 .detail-form textarea {
