@@ -12,7 +12,7 @@ import type { NotificationDisplayMode } from "../domain/notification/types";
 import type { ActiveTimer, TimerSession } from "../domain/timer/types";
 import type { Subtask, WorkTargetRef } from "../domain/task/types";
 import { tauriTaskTimerGateway } from "../infrastructure/tauri/gateway";
-import { WeekCalendar } from "./components/WeekCalendar";
+import { WeekCalendar, type CalendarViewMode } from "./components/WeekCalendar";
 import { TaskPanel } from "./components/TaskPanel";
 import { TaskDetailPane } from "./components/TaskDetailPane";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -40,7 +40,11 @@ export function App() {
     useState<NotificationDisplayMode>("title_only");
   const [notificationSummary, setNotificationSummary] =
     useState<NotificationDispatchSummary | null>(null);
-  const [weekStartDate, setWeekStartDate] = useState(getCurrentWeekStartDate);
+  const [calendarViewMode, setCalendarViewMode] =
+    useState<CalendarViewMode>("week");
+  const [calendarAnchorDate, setCalendarAnchorDate] = useState(
+    getTodayDateInputValue,
+  );
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
   const [isCreatingTaskPending, setIsCreatingTaskPending] = useState(false);
@@ -64,6 +68,11 @@ export function App() {
     }
     return taskLists.find((list) => list.id === activeView.listId) ?? null;
   }, [activeView, taskLists]);
+
+  const calendarRange = useMemo(
+    () => getCalendarQueryRange(calendarViewMode, calendarAnchorDate),
+    [calendarAnchorDate, calendarViewMode],
+  );
 
   const visibleTasks = useMemo(() => {
     if (activeView.kind === "favorites") {
@@ -115,7 +124,10 @@ export function App() {
           tauriTaskTimerGateway.listTasks(),
           tauriTaskTimerGateway.listTaskRows(listId),
           tauriTaskTimerGateway.listTaskLists(),
-          tauriTaskTimerGateway.listWeekCalendarItems(weekStartDate),
+          tauriTaskTimerGateway.listCalendarItems(
+            calendarRange.startDate,
+            calendarRange.endDate,
+          ),
           tauriTaskTimerGateway.getActiveTimer(),
           tauriTaskTimerGateway.getNotificationDisplayMode(),
         ]);
@@ -136,7 +148,7 @@ export function App() {
         setIsLoading(false);
       }
     }
-  }, [activeView, weekStartDate]);
+  }, [activeView, calendarRange.endDate, calendarRange.startDate]);
 
   useEffect(() => {
     void loadSnapshot({ showLoading: true });
@@ -193,6 +205,21 @@ export function App() {
       setActiveView({ kind: "list", listId: taskLists[0].id });
     }
   }, [activeView, taskLists]);
+
+  useEffect(() => {
+    if (
+      activeView.kind !== "calendar" ||
+      !selectedCalendarTarget ||
+      isLoading
+    ) {
+      return;
+    }
+
+    if (!items.some((item) => isSameTarget(item.target, selectedCalendarTarget))) {
+      setSelectedTaskId(null);
+      setSelectedCalendarTarget(null);
+    }
+  }, [activeView.kind, isLoading, items, selectedCalendarTarget]);
 
   useEffect(() => {
     if (activeView.kind === "settings") {
@@ -602,16 +629,23 @@ export function App() {
               }`}
             >
               <WeekCalendar
-                weekStartDate={weekStartDate}
+                viewMode={calendarViewMode}
+                anchorDate={calendarAnchorDate}
                 items={items}
                 isLoading={isLoading}
                 selectedTarget={selectedCalendarTarget}
-                onPreviousWeek={() =>
-                  setWeekStartDate((current) => shiftDate(current, -7))
+                onChangeViewMode={setCalendarViewMode}
+                onPreviousRange={() =>
+                  setCalendarAnchorDate((current) =>
+                    shiftCalendarAnchorDate(current, calendarViewMode, -1),
+                  )
                 }
-                onNextWeek={() =>
-                  setWeekStartDate((current) => shiftDate(current, 7))
+                onNextRange={() =>
+                  setCalendarAnchorDate((current) =>
+                    shiftCalendarAnchorDate(current, calendarViewMode, 1),
+                  )
                 }
+                onToday={() => setCalendarAnchorDate(getTodayDateInputValue())}
                 onSelectItem={handleSelectCalendarItem}
               />
               {selectedTask ? (
@@ -652,11 +686,80 @@ export function App() {
   );
 }
 
-function getCurrentWeekStartDate() {
-  const today = new Date();
-  const mondayBasedDay = (today.getDay() + 6) % 7;
-  today.setDate(today.getDate() - mondayBasedDay);
-  return toDateInputValue(today);
+function getTodayDateInputValue() {
+  return toDateInputValue(new Date());
+}
+
+function getCalendarQueryRange(
+  viewMode: CalendarViewMode,
+  anchorDate: string,
+) {
+  const anchor = parseDateInputValue(anchorDate);
+  if (viewMode === "day") {
+    return {
+      startDate: toDateInputValue(anchor),
+      endDate: toDateInputValue(anchor),
+    };
+  }
+
+  if (viewMode === "month") {
+    const firstDay = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+    const lastDay = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+    return {
+      startDate: toDateInputValue(getMondayOfWeek(firstDay)),
+      endDate: toDateInputValue(getSundayOfWeek(lastDay)),
+    };
+  }
+
+  const weekStart = getMondayOfWeek(anchor);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+  return {
+    startDate: toDateInputValue(weekStart),
+    endDate: toDateInputValue(weekEnd),
+  };
+}
+
+function shiftCalendarAnchorDate(
+  value: string,
+  viewMode: CalendarViewMode,
+  direction: -1 | 1,
+) {
+  if (viewMode === "day") {
+    return shiftDate(value, direction);
+  }
+
+  if (viewMode === "month") {
+    const date = parseDateInputValue(value);
+    date.setDate(1);
+    date.setMonth(date.getMonth() + direction);
+    return toDateInputValue(date);
+  }
+
+  return shiftDate(value, 7 * direction);
+}
+
+function getMondayOfWeek(value: Date) {
+  const date = new Date(value);
+  const mondayBasedDay = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - mondayBasedDay);
+  return date;
+}
+
+function getSundayOfWeek(value: Date) {
+  const date = new Date(value);
+  const mondayBasedDay = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() + (6 - mondayBasedDay));
+  return date;
+}
+
+function isSameTarget(
+  target: WorkTargetRef,
+  selectedTarget: WorkTargetRef | null,
+) {
+  return (
+    selectedTarget?.type === target.type && selectedTarget.id === target.id
+  );
 }
 
 function shiftDate(value: string, days: number) {

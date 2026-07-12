@@ -27,7 +27,9 @@ pub struct WeekCalendarItem {
     pub id: String,
     pub target: WorkTargetRef,
     pub title: String,
+    pub parent_title: Option<String>,
     pub date: String,
+    pub time: Option<String>,
     pub marker: CalendarMarker,
     pub status: WorkStatus,
 }
@@ -176,6 +178,12 @@ pub struct NotificationDispatchSummary {
 pub type RepositoryResult<T> = Result<T, String>;
 
 pub trait CalendarRepository {
+    fn list_calendar_items(
+        &self,
+        start_date: &str,
+        end_date: &str,
+    ) -> RepositoryResult<Vec<WeekCalendarItem>>;
+
     fn list_week_calendar_items(
         &self,
         week_start_date: &str,

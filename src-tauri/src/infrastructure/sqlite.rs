@@ -106,12 +106,20 @@ impl SqliteDatabase {
 }
 
 impl CalendarRepository for SqliteDatabase {
-    fn list_week_calendar_items(
+    fn list_calendar_items(
         &self,
-        week_start_date: &str,
+        start_date: &str,
+        end_date: &str,
     ) -> RepositoryResult<Vec<WeekCalendarItem>> {
-        let start = parse_date(week_start_date)?;
-        let end = start + Duration::days(6);
+        let start = parse_date(start_date, "開始日")?;
+        let end = parse_date(end_date, "終了日")?;
+        if end < start {
+            return Err("カレンダー終了日は開始日以降にしてください".to_string());
+        }
+        if (end - start).whole_days() > 93 {
+            return Err("カレンダー取得範囲は93日以内にしてください".to_string());
+        }
+
         let start_text = format_date(start)?;
         let end_text = format_date(end)?;
 
@@ -119,10 +127,27 @@ impl CalendarRepository for SqliteDatabase {
             let mut items = Vec::new();
             collect_task_calendar_items(connection, &start_text, &end_text, &mut items)?;
             collect_subtask_calendar_items(connection, &start_text, &end_text, &mut items)?;
-            collect_active_timer_calendar_item(connection, &mut items)?;
-            items.sort_by(|a, b| a.date.cmp(&b.date).then_with(|| a.title.cmp(&b.title)));
+            collect_active_timer_calendar_item(connection, &start_text, &end_text, &mut items)?;
+            items.sort_by(|a, b| {
+                a.date
+                    .cmp(&b.date)
+                    .then_with(|| a.time.cmp(&b.time))
+                    .then_with(|| a.title.cmp(&b.title))
+            });
             Ok(items)
         })
+    }
+
+    fn list_week_calendar_items(
+        &self,
+        week_start_date: &str,
+    ) -> RepositoryResult<Vec<WeekCalendarItem>> {
+        let start = parse_date(week_start_date, "週開始日")?;
+        let end = start + Duration::days(6);
+        let start_text = format_date(start)?;
+        let end_text = format_date(end)?;
+
+        self.list_calendar_items(&start_text, &end_text)
     }
 }
 
@@ -2600,6 +2625,7 @@ fn collect_task_calendar_items(
                 planned_start_date: row.get(2)?,
                 due_date: row.get(3)?,
                 status: WorkStatus::from_db(&row.get::<_, String>(4)?).map_err(db_value_error)?,
+                parent_title: None,
             })
         })
         .map_err(|error| format!("タスクカレンダーを取得できません: {error}"))?;
@@ -2622,12 +2648,20 @@ fn collect_subtask_calendar_items(
     let mut statement = connection
         .prepare(
             "
-            SELECT id, title, planned_start_date, due_date, status
+            SELECT subtasks.id,
+                   subtasks.title,
+                   subtasks.planned_start_date,
+                   subtasks.due_date,
+                   subtasks.status,
+                   tasks.title AS parent_title
             FROM subtasks
-            WHERE deleted_at IS NULL
+            INNER JOIN tasks
+              ON tasks.id = subtasks.task_id
+             AND tasks.deleted_at IS NULL
+            WHERE subtasks.deleted_at IS NULL
               AND (
-                planned_start_date BETWEEN ?1 AND ?2
-                OR due_date BETWEEN ?1 AND ?2
+                subtasks.planned_start_date BETWEEN ?1 AND ?2
+                OR subtasks.due_date BETWEEN ?1 AND ?2
               )
             ",
         )
@@ -2642,6 +2676,7 @@ fn collect_subtask_calendar_items(
                 planned_start_date: row.get(2)?,
                 due_date: row.get(3)?,
                 status: WorkStatus::from_db(&row.get::<_, String>(4)?).map_err(db_value_error)?,
+                parent_title: row.get(5)?,
             })
         })
         .map_err(|error| format!("サブタスクカレンダーを取得できません: {error}"))?;
@@ -2657,6 +2692,8 @@ fn collect_subtask_calendar_items(
 
 fn collect_active_timer_calendar_item(
     connection: &Connection,
+    start_date: &str,
+    end_date: &str,
     items: &mut Vec<WeekCalendarItem>,
 ) -> RepositoryResult<()> {
     let active = connection
@@ -2665,23 +2702,28 @@ fn collect_active_timer_calendar_item(
             SELECT timer_sessions.target_type,
                    timer_sessions.target_id,
                    timer_sessions.started_at,
-                   COALESCE(tasks.title, subtasks.title) AS title,
-                   COALESCE(tasks.status, subtasks.status) AS status
+                   COALESCE(task_targets.title, subtask_targets.title) AS title,
+                   COALESCE(task_targets.status, subtask_targets.status) AS status,
+                   parent_tasks.title AS parent_title
             FROM timer_sessions
-            LEFT JOIN tasks
+            LEFT JOIN tasks AS task_targets
               ON timer_sessions.target_type = 'task'
-             AND timer_sessions.target_id = tasks.id
-             AND tasks.deleted_at IS NULL
-            LEFT JOIN subtasks
+             AND timer_sessions.target_id = task_targets.id
+             AND task_targets.deleted_at IS NULL
+            LEFT JOIN subtasks AS subtask_targets
               ON timer_sessions.target_type = 'subtask'
-             AND timer_sessions.target_id = subtasks.id
-             AND subtasks.deleted_at IS NULL
+             AND timer_sessions.target_id = subtask_targets.id
+             AND subtask_targets.deleted_at IS NULL
+            LEFT JOIN tasks AS parent_tasks
+              ON subtask_targets.task_id = parent_tasks.id
+             AND parent_tasks.deleted_at IS NULL
             WHERE timer_sessions.stopped_at IS NULL
               AND timer_sessions.deleted_at IS NULL
-              AND COALESCE(tasks.id, subtasks.id) IS NOT NULL
+              AND COALESCE(task_targets.id, subtask_targets.id) IS NOT NULL
+              AND substr(timer_sessions.started_at, 1, 10) BETWEEN ?1 AND ?2
             LIMIT 1
             ",
-            [],
+            params![start_date, end_date],
             |row| {
                 let target_type_text: String = row.get(0)?;
                 let target_type =
@@ -2696,7 +2738,9 @@ fn collect_active_timer_calendar_item(
                     ),
                     target: target_ref(target_type, row.get(1)?),
                     title: row.get(3)?,
+                    parent_title: row.get(5)?,
                     date,
+                    time: extract_iso_time(&started_at),
                     marker: CalendarMarker::ActiveTimer,
                     status: WorkStatus::from_db(&row.get::<_, String>(4)?)
                         .map_err(db_value_error)?,
@@ -2719,6 +2763,7 @@ struct CalendarSourceRow {
     planned_start_date: Option<String>,
     due_date: Option<String>,
     status: WorkStatus,
+    parent_title: Option<String>,
 }
 
 fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>) {
@@ -2728,7 +2773,9 @@ fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>
             id: format!("{target_type_text}:{}:planned_start", row.id),
             target: target_ref(row.target_type.clone(), row.id.clone()),
             title: row.title.clone(),
+            parent_title: row.parent_title.clone(),
             date,
+            time: None,
             marker: CalendarMarker::PlannedStart,
             status: row.status.clone(),
         });
@@ -2739,15 +2786,22 @@ fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>
             id: format!("{target_type_text}:{}:due", row.id),
             target: target_ref(row.target_type, row.id),
             title: row.title,
+            parent_title: row.parent_title,
             date,
+            time: None,
             marker: CalendarMarker::Due,
             status: row.status,
         });
     }
 }
 
-fn parse_date(value: &str) -> RepositoryResult<Date> {
-    Date::parse(value, DATE_FORMAT).map_err(|error| format!("週開始日の形式が不正です: {error}"))
+fn extract_iso_time(value: &str) -> Option<String> {
+    value.get(11..16).map(ToString::to_string)
+}
+
+fn parse_date(value: &str, field_name: &str) -> RepositoryResult<Date> {
+    Date::parse(value, DATE_FORMAT)
+        .map_err(|error| format!("{field_name}の形式が不正です: {error}"))
 }
 
 fn format_date(value: Date) -> RepositoryResult<String> {
@@ -3325,6 +3379,82 @@ mod tests {
         assert_eq!(tasks[0].subtasks[0].title, "画面に表示");
 
         fs::remove_dir_all(data_dir).expect("cleanup");
+    }
+
+    #[test]
+    fn list_calendar_items_returns_range_parent_title_and_active_timer_time() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T09:00:00Z",
+        };
+        let timer_clock = FixedClock {
+            now: "2026-07-20T10:15:00Z",
+        };
+        let parent =
+            usecases::create_task(&database, &create_clock, draft("親タスク")).expect("task");
+        let subtask = usecases::create_subtask(
+            &database,
+            &create_clock,
+            parent.id,
+            usecases::WorkItemDraft {
+                title: "調査サブタスク".to_string(),
+                planned_start_date: Some("2026-07-20".to_string()),
+                due_date: Some("2026-07-21".to_string()),
+                memo: None,
+            },
+        )
+        .expect("subtask");
+        usecases::create_task(
+            &database,
+            &create_clock,
+            usecases::WorkItemDraft {
+                title: "範囲外".to_string(),
+                planned_start_date: Some("2026-10-01".to_string()),
+                due_date: None,
+                memo: None,
+            },
+        )
+        .expect("out of range task");
+
+        usecases::start_timer(
+            &database,
+            &timer_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Subtask,
+                id: subtask.id.clone(),
+            },
+        )
+        .expect("start subtask timer");
+
+        let items = database
+            .list_calendar_items("2026-07-01", "2026-07-31")
+            .expect("calendar items");
+        let planned_subtask = items
+            .iter()
+            .find(|item| item.id == format!("subtask:{}:planned_start", subtask.id))
+            .expect("planned subtask item");
+        let active_timer = items
+            .iter()
+            .find(|item| item.marker == CalendarMarker::ActiveTimer)
+            .expect("active timer item");
+
+        assert_eq!(planned_subtask.title, "調査サブタスク");
+        assert_eq!(planned_subtask.parent_title.as_deref(), Some("親タスク"));
+        assert_eq!(planned_subtask.time, None);
+        assert_eq!(active_timer.target.target_type, WorkTargetType::Subtask);
+        assert_eq!(active_timer.parent_title.as_deref(), Some("親タスク"));
+        assert_eq!(active_timer.date, "2026-07-20");
+        assert_eq!(active_timer.time.as_deref(), Some("10:15"));
+        assert!(!items.iter().any(|item| item.title == "範囲外"));
+
+        assert!(database
+            .list_calendar_items("2026-07-31", "2026-07-01")
+            .expect_err("reversed range")
+            .contains("終了日は開始日以降"));
+        assert!(database
+            .list_calendar_items("2026-01-01", "2026-05-01")
+            .expect_err("too wide range")
+            .contains("93日以内"));
     }
 
     #[test]
