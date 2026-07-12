@@ -220,6 +220,26 @@ button {
   min-width: 38px;
 }
 
+.nav-panel-icon {
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  display: inline-block;
+  height: 13px;
+  position: relative;
+  width: 13px;
+}
+
+.nav-panel-icon::before {
+  background: currentColor;
+  bottom: 2px;
+  content: "";
+  left: 4px;
+  opacity: 0.75;
+  position: absolute;
+  top: 2px;
+  width: 1px;
+}
+
 .nav-item {
   background: transparent;
   color: var(--ink);
@@ -479,6 +499,7 @@ button {
 }
 
 .task-board {
+  align-content: start;
   border-bottom: 1px solid var(--line);
   display: grid;
   flex: 1 1 auto;

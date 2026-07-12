@@ -43,7 +43,7 @@ export function LeftNavigation({
           aria-expanded={isOpen}
           onClick={onToggle}
         >
-          ☰
+          <span className="nav-panel-icon" aria-hidden="true" />
         </button>
       </div>
 
