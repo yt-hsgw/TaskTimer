@@ -1,5 +1,8 @@
 import type { RecurrenceRule } from "../recurrence/types";
 
+export const DEFAULT_TASK_LIST_ID = "default";
+export const DEFAULT_TASK_LIST_NAME = "タスク";
+
 export type WorkStatus = "todo" | "in_progress" | "done" | "archived";
 export type WorkTargetType = "task" | "subtask";
 

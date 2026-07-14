@@ -31,15 +31,16 @@ use crate::{
             NotificationRegistrationStatus,
         },
         recurrence::RecurrenceFrequency,
-        task::{assert_completable, assert_timer_startable, WorkStatus},
+        task::{
+            assert_completable, assert_timer_startable, WorkStatus, DEFAULT_TASK_LIST_ID,
+            DEFAULT_TASK_LIST_NAME,
+        },
         timer::{WorkTargetRef, WorkTargetType},
     },
 };
 
 pub const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql");
 
-const DEFAULT_TASK_LIST_ID: &str = "default";
-const DEFAULT_TASK_LIST_NAME: &str = "タスク";
 const DATE_FORMAT: &[time::format_description::FormatItem<'_>] =
     format_description!("[year]-[month]-[day]");
 

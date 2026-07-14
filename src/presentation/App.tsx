@@ -11,7 +11,11 @@ import type {
 } from "../application/usecases/contracts";
 import type { NotificationDisplayMode } from "../domain/notification/types";
 import type { ActiveTimer, TimerSession } from "../domain/timer/types";
-import type { Subtask, WorkTargetRef } from "../domain/task/types";
+import {
+  DEFAULT_TASK_LIST_ID,
+  type Subtask,
+  type WorkTargetRef,
+} from "../domain/task/types";
 import { tauriTaskTimerGateway } from "../infrastructure/tauri/gateway";
 import { WeekCalendar, type CalendarViewMode } from "./components/WeekCalendar";
 import { TaskPanel } from "./components/TaskPanel";
@@ -33,7 +37,7 @@ export function App() {
   const [activeTimer, setActiveTimer] = useState<ActiveTimer | null>(null);
   const [activeView, setActiveView] = useState<AppView>({
     kind: "list",
-    listId: "default",
+    listId: DEFAULT_TASK_LIST_ID,
   });
   const [selectedCalendarTarget, setSelectedCalendarTarget] =
     useState<WorkTargetRef | null>(null);
@@ -377,7 +381,8 @@ export function App() {
       runCreateTaskMutation(async () => {
         await tauriTaskTimerGateway.createTask({
           ...input,
-          listId: activeView.kind === "list" ? activeView.listId : "default",
+          listId:
+            activeView.kind === "list" ? activeView.listId : DEFAULT_TASK_LIST_ID,
         });
       }),
     [activeView, runCreateTaskMutation],
@@ -406,7 +411,7 @@ export function App() {
       runMutation(async () => {
         await tauriTaskTimerGateway.deleteTaskList(listId);
         if (activeView.kind === "list" && activeView.listId === listId) {
-          setActiveView({ kind: "list", listId: "default" });
+          setActiveView({ kind: "list", listId: DEFAULT_TASK_LIST_ID });
           clearDetailSelection();
         }
       }),

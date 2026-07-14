@@ -147,6 +147,8 @@ Issue #68 では、右詳細ペインの編集対象を期限日/期限時刻中
 
 Issue #54 では、`TaskList` をタスク分類の境界として扱う。`CreateTaskList`、`UpdateTaskList`、`DeleteTaskList` はApplication Use Caseとして入力検証とトランザクション境界を持つ。カスタムリスト削除時は、同一トランザクション内で所属タスクを初期リストへ移動し、タイマー履歴や通知ルールは削除しない。
 
+既定タスクリストのIDと名称はDomainの不変値として扱う。Applicationは既定値補完に使い、Infrastructureは初期データ投入と削除時の移動先に使う。Presentationで同じ意味を扱う場合も、UI固有の文字列ではなくDomain定数を参照する。
+
 ## Read Model
 
 UI/UX改修では、タスク一覧と詳細で必要な情報量が増えるため、Presentationが全データを走査しないように読み取り専用DTOを分ける。
