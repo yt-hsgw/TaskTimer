@@ -59,6 +59,7 @@ TaskTimer-backup-YYYYMMDD-HHMMSS/
   "format": "tasktimer-sqlite-backup",
   "formatVersion": 1,
   "appVersion": "0.1.0",
+  "schemaVersion": 1,
   "createdAt": "2026-07-15T00:00:00+09:00",
   "platform": "windows",
   "databaseFile": "tasktimer.sqlite3",
@@ -145,7 +146,34 @@ sequenceDiagram
 4. 現DBを退避した後、検証済みDBへ入れ替える。
 5. 失敗時は現DBまたは退避DBを保持し、復元途中のDBを正にしない。
 
-DB書き込み中の単純ファイルコピーは避ける。アプリ内実装ではSQLite backup API相当の一貫したスナップショットを使う。
+DB書き込み中の単純ファイルコピーは避ける。アプリ内実装では `VACUUM INTO` によるSQLiteの一貫したスナップショットを使う。
+
+## 実装境界
+
+SQLiteバックアップ/復元Use Caseは、設定画面UIから独立したApplication境界として実装する。
+
+```mermaid
+flowchart LR
+  UI["Settings UI (後続Issue)"] --> CMD["Tauri command"]
+  CMD --> UC["Application Use Case"]
+  UC --> REPO["SqliteBackupRepository"]
+  REPO --> DB["SQLite"]
+  REPO --> FS["Local File System"]
+```
+
+Tauri command:
+
+- `create_sqlite_backup({ destinationDir })`
+- `restore_sqlite_backup({ backupDir })`
+
+Repository/Infrastructureの責務:
+
+- バックアップ作成前に現DBで `PRAGMA integrity_check` を実行する。
+- `VACUUM INTO` で `tasktimer.sqlite3` のスナップショットを作る。
+- 作成後のバックアップDBを読み取り専用で開き、整合性と必須テーブルを確認する。
+- `backup-manifest.json` に `formatVersion`、`appVersion`、`schemaVersion`、`createdAt`、`platform` を記録する。
+- 復元時はmanifest、DB整合性、必須テーブル、既存マイグレーション適用可否を一時DBで確認してから入れ替える。
+- 復元失敗時は既存DBまたは退避DBを正として保持する。
 
 ## UI方針
 

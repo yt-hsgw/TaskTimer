@@ -322,3 +322,23 @@ pub fn dispatch_due_notifications(
     )
     .map(Into::into)
 }
+
+#[tauri::command]
+pub fn create_sqlite_backup(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::CreateSqliteBackupRequestDto,
+) -> Result<super::dto::SqliteBackupDto, String> {
+    super::usecases::create_sqlite_backup(database.inner(), clock.inner(), request.into())
+        .map(Into::into)
+}
+
+#[tauri::command]
+pub fn restore_sqlite_backup(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::RestoreSqliteBackupRequestDto,
+) -> Result<super::dto::SqliteRestoreDto, String> {
+    super::usecases::restore_sqlite_backup(database.inner(), clock.inner(), request.into())
+        .map(Into::into)
+}

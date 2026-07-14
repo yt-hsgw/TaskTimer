@@ -210,7 +210,51 @@ pub struct NotificationDeliveryAttemptRecord {
     pub attempt_count: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqliteBackupCreate {
+    pub destination_dir: String,
+    pub now: String,
+    pub app_version: String,
+    pub platform: String,
+    pub schema_version: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqliteBackupRestore {
+    pub backup_dir: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqliteBackupManifestRecord {
+    pub format: String,
+    pub format_version: i64,
+    pub app_version: String,
+    pub schema_version: i64,
+    pub created_at: String,
+    pub platform: String,
+    pub database_file: String,
+    pub integrity_check: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqliteBackupRecord {
+    pub backup_dir: String,
+    pub database_file: String,
+    pub manifest_file: String,
+    pub manifest: SqliteBackupManifestRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqliteRestoreRecord {
+    pub backup_dir: String,
+    pub restored_at: String,
+    pub previous_database_file: String,
+    pub manifest: SqliteBackupManifestRecord,
+}
+
 pub type RepositoryResult<T> = Result<T, String>;
+pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 1;
 
 pub trait CalendarRepository {
     fn list_calendar_items(
@@ -344,6 +388,18 @@ pub trait NotificationCommandRepository {
         error: &str,
         now: &str,
     ) -> RepositoryResult<()>;
+}
+
+pub trait SqliteBackupRepository {
+    fn create_sqlite_backup(
+        &self,
+        input: SqliteBackupCreate,
+    ) -> RepositoryResult<SqliteBackupRecord>;
+
+    fn restore_sqlite_backup(
+        &self,
+        input: SqliteBackupRestore,
+    ) -> RepositoryResult<SqliteRestoreRecord>;
 }
 
 pub fn target_ref(target_type: WorkTargetType, id: String) -> WorkTargetRef {

@@ -8,7 +8,8 @@ use std::{
     time::Duration as StdDuration,
 };
 
-use rusqlite::{params, Connection, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use time::{
     format_description::well_known::Rfc3339, macros::format_description, Date, Duration,
@@ -21,9 +22,12 @@ use crate::{
         target_ref, ActiveTimer, CalendarMarker, CalendarRepository, NotificationCommandRepository,
         NotificationDeliveryAttemptRecord, NotificationHistoryRepository, NotificationJob,
         NotificationPreferenceRepository, RecurrenceRuleInput, RecurrenceRuleRecord,
-        RepositoryResult, SubtaskRecord, TaskListCommandRepository, TaskListCreate, TaskListRecord,
-        TaskListUpdate, TaskReadRepository, TaskRecord, TaskRowRecord, TaskTimerCommandRepository,
+        RepositoryResult, SqliteBackupCreate, SqliteBackupManifestRecord, SqliteBackupRecord,
+        SqliteBackupRepository, SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord,
+        TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate,
+        TaskReadRepository, TaskRecord, TaskRowRecord, TaskTimerCommandRepository,
         TaskWithSubtasksRecord, TimerRepository, WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
+        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
     domain::{
         notification::{
@@ -43,10 +47,54 @@ pub const INITIAL_SCHEMA: &str = include_str!("../../migrations/0001_initial.sql
 
 const DATE_FORMAT: &[time::format_description::FormatItem<'_>] =
     format_description!("[year]-[month]-[day]");
+const BACKUP_FORMAT: &str = "tasktimer-sqlite-backup";
+const BACKUP_FORMAT_VERSION: i64 = 1;
+const BACKUP_DATABASE_FILE: &str = "tasktimer.sqlite3";
+const BACKUP_MANIFEST_FILE: &str = "backup-manifest.json";
+const REQUIRED_RESTORE_TABLES: &[&str] = &[
+    "task_lists",
+    "tasks",
+    "subtasks",
+    "timer_sessions",
+    "timer_pauses",
+    "notification_rules",
+    "notification_delivery_attempts",
+    "notification_preferences",
+    "ui_preferences",
+    "recurrence_rules",
+];
 
 pub struct SqliteDatabase {
     path: PathBuf,
     connection: Mutex<Connection>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupManifestFile {
+    format: String,
+    format_version: i64,
+    app_version: String,
+    schema_version: i64,
+    created_at: String,
+    platform: String,
+    database_file: String,
+    integrity_check: String,
+}
+
+impl BackupManifestFile {
+    fn to_record(&self) -> SqliteBackupManifestRecord {
+        SqliteBackupManifestRecord {
+            format: self.format.clone(),
+            format_version: self.format_version,
+            app_version: self.app_version.clone(),
+            schema_version: self.schema_version,
+            created_at: self.created_at.clone(),
+            platform: self.platform.clone(),
+            database_file: self.database_file.clone(),
+            integrity_check: self.integrity_check.clone(),
+        }
+    }
 }
 
 impl SqliteDatabase {
@@ -193,6 +241,132 @@ impl TaskReadRepository for SqliteDatabase {
         let list_id = normalize_optional_list_id(list_id);
 
         self.with_connection(|connection| select_task_rows(connection, list_id.as_deref(), limit))
+    }
+}
+
+impl SqliteBackupRepository for SqliteDatabase {
+    fn create_sqlite_backup(
+        &self,
+        input: SqliteBackupCreate,
+    ) -> RepositoryResult<SqliteBackupRecord> {
+        let destination_dir = PathBuf::from(input.destination_dir);
+        let package_dir =
+            destination_dir.join(format!("TaskTimer-backup-{}", backup_label(&input.now)));
+        let backup_database_path = package_dir.join(BACKUP_DATABASE_FILE);
+        let manifest_path = package_dir.join(BACKUP_MANIFEST_FILE);
+
+        if package_dir.exists() {
+            return Err("同名のバックアップフォルダが既に存在します".to_string());
+        }
+        fs::create_dir_all(&package_dir)
+            .map_err(|error| format!("バックアップフォルダを作成できません: {error}"))?;
+
+        if let Err(error) = self.with_connection(|connection| {
+            verify_integrity_check(connection)?;
+            create_sqlite_snapshot(connection, &backup_database_path)
+        }) {
+            let _ = fs::remove_dir_all(&package_dir);
+            return Err(error);
+        }
+
+        if let Err(error) = validate_readonly_backup_database(&backup_database_path) {
+            let _ = fs::remove_dir_all(&package_dir);
+            return Err(error);
+        }
+
+        let manifest = BackupManifestFile {
+            format: BACKUP_FORMAT.to_string(),
+            format_version: BACKUP_FORMAT_VERSION,
+            app_version: input.app_version,
+            schema_version: input.schema_version,
+            created_at: input.now,
+            platform: input.platform,
+            database_file: BACKUP_DATABASE_FILE.to_string(),
+            integrity_check: "ok".to_string(),
+        };
+        if let Err(error) = write_backup_manifest(&manifest_path, &manifest) {
+            let _ = fs::remove_dir_all(&package_dir);
+            return Err(error);
+        }
+
+        Ok(SqliteBackupRecord {
+            backup_dir: package_dir.to_string_lossy().to_string(),
+            database_file: backup_database_path.to_string_lossy().to_string(),
+            manifest_file: manifest_path.to_string_lossy().to_string(),
+            manifest: manifest.to_record(),
+        })
+    }
+
+    fn restore_sqlite_backup(
+        &self,
+        input: SqliteBackupRestore,
+    ) -> RepositoryResult<SqliteRestoreRecord> {
+        let backup_dir = PathBuf::from(input.backup_dir);
+        let manifest = read_backup_manifest(&backup_dir)?;
+        validate_backup_manifest(&manifest)?;
+
+        let backup_database_path = backup_dir.join(BACKUP_DATABASE_FILE);
+        validate_readonly_backup_database(&backup_database_path)?;
+
+        let data_dir = self
+            .path
+            .parent()
+            .ok_or_else(|| "アプリデータディレクトリを解決できません".to_string())?;
+        let label = backup_label(&input.now);
+        let restore_candidate_path = data_dir.join(format!("tasktimer-restore-{label}.sqlite3"));
+        let previous_database_path =
+            data_dir.join(format!("tasktimer-before-restore-{label}.sqlite3"));
+
+        if restore_candidate_path.exists() || previous_database_path.exists() {
+            return Err("復元用の一時ファイルが既に存在します".to_string());
+        }
+
+        fs::copy(&backup_database_path, &restore_candidate_path)
+            .map_err(|error| format!("バックアップDBを一時領域へコピーできません: {error}"))?;
+
+        if let Err(error) = validate_restore_candidate_database(&restore_candidate_path) {
+            let _ = fs::remove_file(&restore_candidate_path);
+            return Err(error);
+        }
+
+        let mut connection = self
+            .connection
+            .lock()
+            .map_err(|_| "SQLite接続ロックの取得に失敗しました".to_string())?;
+        let placeholder = Connection::open_in_memory()
+            .map_err(|error| format!("SQLite退避用接続を開けません: {error}"))?;
+        let active_connection = std::mem::replace(&mut *connection, placeholder);
+        drop(active_connection);
+
+        if let Err(error) =
+            replace_database_file(&self.path, &restore_candidate_path, &previous_database_path)
+        {
+            let _ = fs::remove_file(&restore_candidate_path);
+            *connection = open_live_database(&self.path).map_err(|reopen_error| {
+                format!("{error}; 現在のDBの再接続にも失敗しました: {reopen_error}")
+            })?;
+            return Err(error);
+        }
+
+        match open_live_database(&self.path) {
+            Ok(reopened) => {
+                *connection = reopened;
+            }
+            Err(error) => {
+                restore_previous_database_file(&self.path, &previous_database_path);
+                *connection = open_live_database(&self.path).map_err(|reopen_error| {
+                    format!("{error}; 退避DBの再接続にも失敗しました: {reopen_error}")
+                })?;
+                return Err(error);
+            }
+        }
+
+        Ok(SqliteRestoreRecord {
+            backup_dir: backup_dir.to_string_lossy().to_string(),
+            restored_at: input.now,
+            previous_database_file: previous_database_path.to_string_lossy().to_string(),
+            manifest: manifest.to_record(),
+        })
     }
 }
 
@@ -3193,6 +3367,172 @@ fn seed_default_preferences(connection: &Connection) -> RepositoryResult<()> {
         .map_err(|error| format!("通知表示設定の初期化に失敗しました: {error}"))
 }
 
+fn backup_label(now: &str) -> String {
+    let digits: String = now
+        .chars()
+        .filter(|character| character.is_ascii_digit())
+        .collect();
+    if digits.len() >= 14 {
+        return format!("{}-{}", &digits[0..8], &digits[8..14]);
+    }
+
+    let fallback: String = now
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .take(32)
+        .collect();
+    if fallback.is_empty() {
+        Uuid::new_v4().to_string()
+    } else {
+        fallback
+    }
+}
+
+fn create_sqlite_snapshot(connection: &Connection, target_path: &Path) -> RepositoryResult<()> {
+    let target = target_path.to_string_lossy().to_string();
+    connection
+        .execute("VACUUM INTO ?1", params![target])
+        .map(|_| ())
+        .map_err(|error| format!("SQLiteバックアップを作成できません: {error}"))
+}
+
+fn write_backup_manifest(path: &Path, manifest: &BackupManifestFile) -> RepositoryResult<()> {
+    let content = serde_json::to_string_pretty(manifest)
+        .map_err(|error| format!("バックアップmanifestを生成できません: {error}"))?;
+    fs::write(path, content)
+        .map_err(|error| format!("バックアップmanifestを書き込めません: {error}"))
+}
+
+fn read_backup_manifest(backup_dir: &Path) -> RepositoryResult<BackupManifestFile> {
+    let path = backup_dir.join(BACKUP_MANIFEST_FILE);
+    if !path.is_file() {
+        return Err("バックアップmanifestが見つかりません".to_string());
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|error| format!("バックアップmanifestを読めません: {error}"))?;
+    serde_json::from_str(&content)
+        .map_err(|error| format!("バックアップmanifestの形式が不正です: {error}"))
+}
+
+fn validate_backup_manifest(manifest: &BackupManifestFile) -> RepositoryResult<()> {
+    if manifest.format != BACKUP_FORMAT {
+        return Err("バックアップ形式がTaskTimer SQLiteバックアップではありません".to_string());
+    }
+    if manifest.format_version != BACKUP_FORMAT_VERSION {
+        return Err("バックアップ形式バージョンに対応していません".to_string());
+    }
+    if manifest.schema_version > CURRENT_SQLITE_BACKUP_SCHEMA_VERSION {
+        return Err(
+            "新しいTaskTimerで作成されたバックアップの可能性があるため復元できません".to_string(),
+        );
+    }
+    if manifest.database_file != BACKUP_DATABASE_FILE {
+        return Err("バックアップDBファイル名が不正です".to_string());
+    }
+    if manifest.integrity_check != "ok" {
+        return Err("バックアップ作成時の整合性確認がokではありません".to_string());
+    }
+    OffsetDateTime::parse(&manifest.created_at, &Rfc3339)
+        .map_err(|error| format!("バックアップ作成日時の形式が不正です: {error}"))?;
+    Ok(())
+}
+
+fn validate_readonly_backup_database(path: &Path) -> RepositoryResult<()> {
+    if !path.is_file() {
+        return Err("バックアップDBが見つかりません".to_string());
+    }
+    let connection = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| format!("バックアップDBを開けません: {error}"))?;
+    configure_connection(&connection)?;
+    verify_integrity_check(&connection)?;
+    ensure_required_restore_tables(&connection)
+}
+
+fn validate_restore_candidate_database(path: &Path) -> RepositoryResult<()> {
+    let connection =
+        Connection::open(path).map_err(|error| format!("復元候補DBを開けません: {error}"))?;
+    configure_connection(&connection)?;
+    run_initial_migration(&connection)?;
+    seed_default_preferences(&connection)?;
+    verify_integrity_check(&connection)?;
+    ensure_required_restore_tables(&connection)
+}
+
+fn verify_integrity_check(connection: &Connection) -> RepositoryResult<()> {
+    let result: String = connection
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .map_err(|error| format!("SQLite整合性確認を実行できません: {error}"))?;
+    if result == "ok" {
+        Ok(())
+    } else {
+        Err("SQLite整合性確認に失敗しました".to_string())
+    }
+}
+
+fn ensure_required_restore_tables(connection: &Connection) -> RepositoryResult<()> {
+    for table_name in REQUIRED_RESTORE_TABLES {
+        let exists: Option<String> = connection
+            .query_row(
+                "
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = ?1
+                ",
+                params![table_name],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| format!("必須テーブル一覧を確認できません: {error}"))?;
+        if exists.is_none() {
+            return Err(format!(
+                "バックアップDBに必須テーブル {table_name} がありません"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn open_live_database(path: &Path) -> RepositoryResult<Connection> {
+    let connection = Connection::open(path)
+        .map_err(|error| format!("SQLiteデータベースを開けません: {error}"))?;
+    configure_connection(&connection)?;
+    run_initial_migration(&connection)?;
+    seed_default_preferences(&connection)?;
+    Ok(connection)
+}
+
+fn replace_database_file(
+    current_path: &Path,
+    candidate_path: &Path,
+    previous_path: &Path,
+) -> RepositoryResult<()> {
+    if previous_path.exists() {
+        return Err("復元前DBの退避先が既に存在します".to_string());
+    }
+
+    if current_path.exists() {
+        fs::rename(current_path, previous_path)
+            .map_err(|error| format!("現在のDBを退避できません: {error}"))?;
+    }
+
+    if let Err(error) = fs::rename(candidate_path, current_path) {
+        if previous_path.exists() {
+            let _ = fs::rename(previous_path, current_path);
+        }
+        return Err(format!("検証済みDBへ入れ替えできません: {error}"));
+    }
+
+    Ok(())
+}
+
+fn restore_previous_database_file(current_path: &Path, previous_path: &Path) {
+    if previous_path.exists() {
+        let _ = fs::remove_file(current_path);
+        let _ = fs::rename(previous_path, current_path);
+    }
+}
+
 fn collect_task_calendar_items(
     connection: &Connection,
     start_date: &str,
@@ -3508,6 +3848,10 @@ mod tests {
             due_time: None,
             memo: None,
         }
+    }
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("{prefix}-{}", Uuid::new_v4()))
     }
 
     fn insert_notification_rule(
@@ -4050,6 +4394,246 @@ mod tests {
         assert_eq!(tasks[0].subtasks[0].title, "画面に表示");
 
         fs::remove_dir_all(data_dir).expect("cleanup");
+    }
+
+    #[test]
+    fn create_sqlite_backup_writes_manifest_and_consistent_database() {
+        let data_dir = temp_dir("tasktimer-backup-db");
+        let backup_root = temp_dir("tasktimer-backup-root");
+        let database = SqliteDatabase::open_in_dir(data_dir.clone()).expect("open database");
+        let clock = FixedClock {
+            now: "2026-07-15T00:00:00Z",
+        };
+        let task = usecases::create_task(&database, &clock, draft("バックアップ対象"))
+            .expect("create task");
+
+        let backup = usecases::create_sqlite_backup(
+            &database,
+            &clock,
+            usecases::SqliteBackupCreateDraft {
+                destination_dir: backup_root.to_string_lossy().to_string(),
+            },
+        )
+        .expect("create backup");
+
+        assert!(PathBuf::from(&backup.database_file).is_file());
+        assert!(PathBuf::from(&backup.manifest_file).is_file());
+        assert_eq!(backup.manifest.format, BACKUP_FORMAT);
+        assert_eq!(backup.manifest.format_version, BACKUP_FORMAT_VERSION);
+        assert_eq!(
+            backup.manifest.schema_version,
+            CURRENT_SQLITE_BACKUP_SCHEMA_VERSION
+        );
+        assert_eq!(backup.manifest.database_file, BACKUP_DATABASE_FILE);
+        assert_eq!(backup.manifest.integrity_check, "ok");
+
+        let copied = Connection::open(PathBuf::from(&backup.database_file)).expect("open backup");
+        verify_integrity_check(&copied).expect("backup integrity");
+        ensure_required_restore_tables(&copied).expect("backup tables");
+        let copied_title: String = copied
+            .query_row(
+                "SELECT title FROM tasks WHERE id = ?1",
+                params![task.id.as_str()],
+                |row| row.get(0),
+            )
+            .expect("backup task");
+        assert_eq!(copied_title, "バックアップ対象");
+
+        fs::remove_dir_all(data_dir).expect("cleanup data");
+        fs::remove_dir_all(backup_root).expect("cleanup backup");
+    }
+
+    #[test]
+    fn restore_sqlite_backup_replaces_database_and_keeps_previous_copy() {
+        let data_dir = temp_dir("tasktimer-restore-db");
+        let backup_root = temp_dir("tasktimer-restore-root");
+        let database = SqliteDatabase::open_in_dir(data_dir.clone()).expect("open database");
+        let backup_clock = FixedClock {
+            now: "2026-07-15T00:00:00Z",
+        };
+        let restore_clock = FixedClock {
+            now: "2026-07-15T00:01:00Z",
+        };
+        usecases::create_task(&database, &backup_clock, draft("復元で残る"))
+            .expect("create original task");
+        let backup = usecases::create_sqlite_backup(
+            &database,
+            &backup_clock,
+            usecases::SqliteBackupCreateDraft {
+                destination_dir: backup_root.to_string_lossy().to_string(),
+            },
+        )
+        .expect("create backup");
+        usecases::create_task(&database, &backup_clock, draft("復元で消える"))
+            .expect("create later task");
+
+        let restored = usecases::restore_sqlite_backup(
+            &database,
+            &restore_clock,
+            usecases::SqliteBackupRestoreDraft {
+                backup_dir: backup.backup_dir.clone(),
+            },
+        )
+        .expect("restore backup");
+
+        assert!(PathBuf::from(&restored.previous_database_file).is_file());
+        let tasks = database
+            .list_tasks_with_subtasks(200)
+            .expect("list restored tasks");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].task.title, "復元で残る");
+
+        fs::remove_dir_all(data_dir).expect("cleanup data");
+        fs::remove_dir_all(backup_root).expect("cleanup backup");
+    }
+
+    #[test]
+    fn restore_sqlite_backup_rejects_corrupted_database_and_keeps_current_database() {
+        let data_dir = temp_dir("tasktimer-corrupt-db");
+        let backup_root = temp_dir("tasktimer-corrupt-root");
+        let backup_dir = backup_root.join("TaskTimer-backup-corrupt");
+        fs::create_dir_all(&backup_dir).expect("backup dir");
+        let database = SqliteDatabase::open_in_dir(data_dir.clone()).expect("open database");
+        let clock = FixedClock {
+            now: "2026-07-15T00:00:00Z",
+        };
+        usecases::create_task(&database, &clock, draft("既存DB")).expect("create current task");
+
+        fs::write(
+            backup_dir.join(BACKUP_MANIFEST_FILE),
+            serde_json::json!({
+                "format": BACKUP_FORMAT,
+                "formatVersion": BACKUP_FORMAT_VERSION,
+                "appVersion": env!("CARGO_PKG_VERSION"),
+                "schemaVersion": CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+                "createdAt": "2026-07-15T00:00:00Z",
+                "platform": "test",
+                "databaseFile": BACKUP_DATABASE_FILE,
+                "integrityCheck": "ok"
+            })
+            .to_string(),
+        )
+        .expect("write manifest");
+        fs::write(backup_dir.join(BACKUP_DATABASE_FILE), b"not sqlite").expect("write corrupt db");
+
+        let result = usecases::restore_sqlite_backup(
+            &database,
+            &clock,
+            usecases::SqliteBackupRestoreDraft {
+                backup_dir: backup_dir.to_string_lossy().to_string(),
+            },
+        );
+
+        assert!(result.expect_err("corrupt backup").contains("SQLite"));
+        let tasks = database
+            .list_tasks_with_subtasks(200)
+            .expect("list current tasks");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].task.title, "既存DB");
+
+        fs::remove_dir_all(data_dir).expect("cleanup data");
+        fs::remove_dir_all(backup_root).expect("cleanup backup");
+    }
+
+    #[test]
+    fn restore_sqlite_backup_rejects_future_schema_version() {
+        let data_dir = temp_dir("tasktimer-future-schema-db");
+        let backup_root = temp_dir("tasktimer-future-schema-root");
+        let database = SqliteDatabase::open_in_dir(data_dir.clone()).expect("open database");
+        let backup_clock = FixedClock {
+            now: "2026-07-15T00:00:00Z",
+        };
+        usecases::create_task(&database, &backup_clock, draft("既存タスク"))
+            .expect("create original task");
+        let backup = usecases::create_sqlite_backup(
+            &database,
+            &backup_clock,
+            usecases::SqliteBackupCreateDraft {
+                destination_dir: backup_root.to_string_lossy().to_string(),
+            },
+        )
+        .expect("create backup");
+        let manifest_path = PathBuf::from(&backup.manifest_file);
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&manifest_path).expect("read manifest"))
+                .expect("manifest json");
+        manifest["schemaVersion"] = serde_json::json!(CURRENT_SQLITE_BACKUP_SCHEMA_VERSION + 1);
+        fs::write(&manifest_path, manifest.to_string()).expect("write future manifest");
+        usecases::create_task(&database, &backup_clock, draft("現在だけのタスク"))
+            .expect("create current task");
+
+        let result = usecases::restore_sqlite_backup(
+            &database,
+            &backup_clock,
+            usecases::SqliteBackupRestoreDraft {
+                backup_dir: backup.backup_dir,
+            },
+        );
+
+        assert!(result
+            .expect_err("future schema")
+            .contains("新しいTaskTimer"));
+        let tasks = database
+            .list_tasks_with_subtasks(200)
+            .expect("list current tasks");
+        assert_eq!(tasks.len(), 2);
+
+        fs::remove_dir_all(data_dir).expect("cleanup data");
+        fs::remove_dir_all(backup_root).expect("cleanup backup");
+    }
+
+    #[test]
+    fn create_sqlite_backup_uses_committed_snapshot_during_external_write() {
+        let data_dir = temp_dir("tasktimer-write-backup-db");
+        let backup_root = temp_dir("tasktimer-write-backup-root");
+        let database = SqliteDatabase::open_in_dir(data_dir.clone()).expect("open database");
+        let clock = FixedClock {
+            now: "2026-07-15T00:00:00Z",
+        };
+        usecases::create_task(&database, &clock, draft("コミット済み"))
+            .expect("create committed task");
+
+        let external = Connection::open(database.path()).expect("external connection");
+        configure_connection(&external).expect("configure external");
+        external
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("begin external write");
+        external
+            .execute(
+                "
+                INSERT INTO tasks (
+                  id, list_id, title, status, memo, sort_order, created_at, updated_at
+                )
+                VALUES ('uncommitted-task', ?1, '未コミット', 'todo', '', 0, ?2, ?2)
+                ",
+                params![DEFAULT_TASK_LIST_ID, clock.now],
+            )
+            .expect("insert uncommitted task");
+
+        let backup = usecases::create_sqlite_backup(
+            &database,
+            &clock,
+            usecases::SqliteBackupCreateDraft {
+                destination_dir: backup_root.to_string_lossy().to_string(),
+            },
+        )
+        .expect("create backup during write");
+        external
+            .execute_batch("ROLLBACK")
+            .expect("rollback external write");
+
+        let copied = Connection::open(PathBuf::from(&backup.database_file)).expect("open backup");
+        let titles: Vec<String> = copied
+            .prepare("SELECT title FROM tasks ORDER BY title")
+            .expect("prepare titles")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("query titles")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect titles");
+        assert_eq!(titles, vec!["コミット済み".to_string()]);
+
+        fs::remove_dir_all(data_dir).expect("cleanup data");
+        fs::remove_dir_all(backup_root).expect("cleanup backup");
     }
 
     #[test]

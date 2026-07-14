@@ -3,6 +3,8 @@ import type {
   CreateSubtaskDraft,
   NotificationDeliveryAttempt,
   NotificationDispatchSummary,
+  SqliteBackupResult,
+  SqliteRestoreResult,
   TaskTimerGateway,
   TaskListItem,
   TaskRow,
@@ -80,4 +82,12 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<NotificationDispatchSummary>("dispatch_due_notifications"),
   listNotificationFailureHistory: () =>
     invoke<NotificationDeliveryAttempt[]>("list_notification_failure_history"),
+  createSqliteBackup: (destinationDir: string) =>
+    invoke<SqliteBackupResult>("create_sqlite_backup", {
+      request: { destinationDir },
+    }),
+  restoreSqliteBackup: (backupDir: string) =>
+    invoke<SqliteRestoreResult>("restore_sqlite_backup", {
+      request: { backupDir },
+    }),
 };
