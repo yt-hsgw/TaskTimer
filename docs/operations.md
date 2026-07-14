@@ -29,6 +29,7 @@ GitHubをアプリ実行時データの保存先には使わない。
 
 - 秘密情報。
 - ローカルSQLiteデータベース。
+- SQLiteバックアップ、JSONエクスポート、CSVエクスポート。
 - タスク名、メモ本文、通知本文などの実データ。
 - 個人環境の絶対パス。
 - 署名用証明書、秘密鍵、APIキー。
@@ -78,6 +79,18 @@ Dependency advisory workflowの制約:
 - アプリ実行時の通信やTauri権限は追加しない。
 - Issueコメントの自動投稿は行わない。
 - 修正可能になった場合はworkflowを失敗させ、依存更新PR作成を促す。
+
+## ローカルデータ保護
+
+TaskTimerの完全復元用バックアップはSQLiteバックアップを正とする。JSON/CSVエクスポートは閲覧、監査、他ツール移行の補助形式であり、完全復元用には使わない。
+
+運用ルール:
+
+- バックアップ/エクスポートファイルは個人データとして扱う。
+- Issue、PR、Discussions、Release artifactへ添付しない。
+- GitHubでの不具合調査では、実DBではなく再現手順または合成データを使う。
+- バックアップ/復元/エクスポートの設計は [ローカルデータのバックアップとエクスポート方針](data-backup-export.md) と [ADR 0006](adr/0006-local-backup-export-policy.md) に従う。
+- アプリ内実装では、DB書き込み中の単純ファイルコピーを避け、一貫したスナップショットを作る。
 
 `リリースビルド` ワークフローは、`app-v*` タグまたは手動実行でWindows向けartifactをビルドし、Draft Releaseへ添付する。macOS artifactは手動実行で `include_macos` を有効にした場合だけ作成する。
 

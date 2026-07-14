@@ -37,6 +37,9 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [029 ローカルデータのバックアップとエクスポート方針を設計する](029-data-backup-export.md) / GitHub #73
 - [030 通知失敗履歴と再試行結果を表示する](030-notification-failure-history.md) / GitHub #53
 - [031 カスタムリスト管理を追加する](031-custom-list-management.md) / GitHub #54
+- [032 JSON/CSVエクスポートUse Caseを実装する](032-json-csv-export-usecase.md) / GitHub #87
+- [033 SQLiteバックアップ/復元Use Caseを実装する](033-sqlite-backup-restore-usecase.md) / GitHub #88
+- [034 バックアップ/復元/エクスポートUIを追加する](034-data-management-settings-ui.md) / GitHub #89
 
 ## 運用
 
