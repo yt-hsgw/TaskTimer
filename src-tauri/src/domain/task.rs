@@ -7,6 +7,7 @@ const DATE_FORMAT: &[time::format_description::FormatItem<'_>] =
 const TIME_FORMAT: &[time::format_description::FormatItem<'_>] =
     format_description!("[hour]:[minute]");
 const MEMO_MAX_CHARS: usize = 10_000;
+const TASK_LIST_NAME_MAX_CHARS: usize = 80;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkStatus {
@@ -110,6 +111,19 @@ pub fn validate_memo(value: Option<&str>) -> Result<String, String> {
         return Err(format!("メモは{MEMO_MAX_CHARS}文字以内で入力してください"));
     }
     Ok(memo.to_string())
+}
+
+pub fn validate_task_list_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("リスト名は必須です".to_string());
+    }
+    if trimmed.chars().count() > TASK_LIST_NAME_MAX_CHARS {
+        return Err(format!(
+            "リスト名は{TASK_LIST_NAME_MAX_CHARS}文字以内で入力してください"
+        ));
+    }
+    Ok(trimmed.to_string())
 }
 
 pub fn assert_timer_startable(status: &WorkStatus) -> Result<(), String> {

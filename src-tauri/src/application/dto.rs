@@ -11,7 +11,7 @@ use super::{
         RecurrenceRuleRecord, SubtaskRecord, TaskListRecord, TaskRecord, TaskRowRecord,
         TaskWithSubtasksRecord, WeekCalendarItem,
     },
-    usecases::{RecurrenceRuleDraft, WorkItemDraft, WorkItemUpdateDraft},
+    usecases::{RecurrenceRuleDraft, TaskListDraft, WorkItemDraft, WorkItemUpdateDraft},
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -24,6 +24,7 @@ pub struct WorkTargetRefDto {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTaskRequestDto {
+    pub list_id: Option<String>,
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
@@ -44,8 +45,28 @@ pub struct CreateSubtaskRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateTaskListRequestDto {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTaskListRequestDto {
+    pub list_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteTaskListRequestDto {
+    pub list_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateTaskRequestDto {
     pub task_id: String,
+    pub list_id: Option<String>,
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
@@ -318,6 +339,7 @@ impl TryFrom<WorkTargetRefDto> for WorkTargetRef {
 impl From<CreateTaskRequestDto> for WorkItemDraft {
     fn from(value: CreateTaskRequestDto) -> Self {
         Self {
+            list_id: value.list_id,
             title: value.title,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
@@ -330,6 +352,7 @@ impl From<CreateTaskRequestDto> for WorkItemDraft {
 impl From<CreateSubtaskRequestDto> for WorkItemDraft {
     fn from(value: CreateSubtaskRequestDto) -> Self {
         Self {
+            list_id: None,
             title: value.title,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
@@ -342,6 +365,7 @@ impl From<CreateSubtaskRequestDto> for WorkItemDraft {
 impl From<UpdateTaskRequestDto> for WorkItemUpdateDraft {
     fn from(value: UpdateTaskRequestDto) -> Self {
         Self {
+            list_id: value.list_id,
             title: value.title,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
@@ -356,6 +380,7 @@ impl From<UpdateTaskRequestDto> for WorkItemUpdateDraft {
 impl From<UpdateSubtaskRequestDto> for WorkItemUpdateDraft {
     fn from(value: UpdateSubtaskRequestDto) -> Self {
         Self {
+            list_id: None,
             title: value.title,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
@@ -364,6 +389,18 @@ impl From<UpdateSubtaskRequestDto> for WorkItemUpdateDraft {
             recurrence_rule: value.recurrence_rule.map(Into::into),
             memo: value.memo,
         }
+    }
+}
+
+impl From<CreateTaskListRequestDto> for TaskListDraft {
+    fn from(value: CreateTaskListRequestDto) -> Self {
+        Self { name: value.name }
+    }
+}
+
+impl From<UpdateTaskListRequestDto> for TaskListDraft {
+    fn from(value: UpdateTaskListRequestDto) -> Self {
+        Self { name: value.name }
     }
 }
 

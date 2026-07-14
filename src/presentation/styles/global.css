@@ -196,6 +196,16 @@ button {
   gap: 4px;
 }
 
+.nav-section-heading {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  font-weight: 800;
+  justify-content: space-between;
+  padding: 2px 4px 4px;
+}
+
 .nav-footer {
   border-top: 1px solid var(--line);
   display: grid;
@@ -218,6 +228,24 @@ button {
   border-color: var(--line);
   color: var(--ink);
   min-width: 38px;
+}
+
+.nav-mini-button {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--green);
+  display: inline-flex;
+  font-weight: 800;
+  height: 28px;
+  justify-content: center;
+  min-width: 28px;
+}
+
+.nav-mini-button:hover {
+  background: #edf3f1;
+  border-color: #bcd4ca;
 }
 
 .nav-panel-icon {
@@ -280,6 +308,62 @@ button {
 .nav-item-count {
   color: var(--muted);
   font-size: 12px;
+}
+
+.nav-list-row {
+  min-width: 0;
+  position: relative;
+}
+
+.nav-list-row .nav-item {
+  padding-right: 66px;
+}
+
+.nav-list-actions {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  position: absolute;
+  right: 5px;
+  top: 5px;
+}
+
+.nav-list-actions .nav-mini-button {
+  height: 28px;
+  min-width: 28px;
+}
+
+.nav-list-form {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-width: 0;
+}
+
+.nav-list-form input {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  min-height: 34px;
+  min-width: 0;
+  padding: 7px 9px;
+}
+
+.nav-list-form button {
+  background: #edf3f1;
+  border: 1px solid #c9d9d2;
+  border-radius: 6px;
+  color: var(--green);
+  font-weight: 800;
+  min-height: 34px;
+  padding: 0 8px;
+}
+
+.nav-list-form button:disabled,
+.nav-mini-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .nav-backdrop {

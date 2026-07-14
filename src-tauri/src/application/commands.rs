@@ -116,6 +116,36 @@ pub fn create_task(
 }
 
 #[tauri::command]
+pub fn create_task_list(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::CreateTaskListRequestDto,
+) -> Result<super::dto::TaskListDto, String> {
+    super::usecases::create_task_list(database.inner(), clock.inner(), request.into())
+        .map(Into::into)
+}
+
+#[tauri::command]
+pub fn update_task_list(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::UpdateTaskListRequestDto,
+) -> Result<super::dto::TaskListDto, String> {
+    let list_id = request.list_id.clone();
+    super::usecases::update_task_list(database.inner(), clock.inner(), list_id, request.into())
+        .map(Into::into)
+}
+
+#[tauri::command]
+pub fn delete_task_list(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::DeleteTaskListRequestDto,
+) -> Result<(), String> {
+    super::usecases::delete_task_list(database.inner(), clock.inner(), request.list_id)
+}
+
+#[tauri::command]
 pub fn create_subtask(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,
