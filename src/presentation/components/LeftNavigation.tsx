@@ -133,7 +133,12 @@ export function LeftNavigation({
             </form>
           ) : null}
           {taskLists.map((list) => (
-            <div className="nav-list-row" key={list.id}>
+            <div
+              className={`nav-list-row ${
+                isOpen && list.id !== "default" ? "has-actions" : ""
+              }`}
+              key={list.id}
+            >
               {editingListId === list.id ? (
                 <form
                   className="nav-list-form"

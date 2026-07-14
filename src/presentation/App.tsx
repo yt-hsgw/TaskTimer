@@ -593,13 +593,19 @@ export function App() {
     [runMutation],
   );
 
-  const handleSelectView = useCallback((view: AppView) => {
-    setActiveView(view);
-    clearDetailSelection();
-    if (window.matchMedia("(max-width: 767px)").matches) {
-      setIsNavigationOpen(false);
-    }
-  }, [clearDetailSelection]);
+  const handleSelectView = useCallback(
+    (view: AppView) => {
+      if (isSameAppView(activeView, view)) {
+        return;
+      }
+      setActiveView(view);
+      clearDetailSelection();
+      if (window.matchMedia("(max-width: 767px)").matches) {
+        setIsNavigationOpen(false);
+      }
+    },
+    [activeView, clearDetailSelection],
+  );
 
   const handleSelectTask = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
@@ -930,6 +936,16 @@ function getSundayOfWeek(value: Date) {
   const mondayBasedDay = (date.getDay() + 6) % 7;
   date.setDate(date.getDate() + (6 - mondayBasedDay));
   return date;
+}
+
+function isSameAppView(current: AppView, next: AppView) {
+  if (current.kind !== next.kind) {
+    return false;
+  }
+  if (current.kind === "list" && next.kind === "list") {
+    return current.listId === next.listId;
+  }
+  return true;
 }
 
 function isSameTarget(

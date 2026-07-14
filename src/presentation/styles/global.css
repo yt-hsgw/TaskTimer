@@ -316,11 +316,12 @@ button {
   position: relative;
 }
 
-.nav-list-row .nav-item {
+.nav-list-row.has-actions .nav-item {
   padding-right: 66px;
 }
 
-.is-nav-collapsed .nav-list-row .nav-item {
+.is-nav-collapsed .nav-list-row .nav-item,
+.is-nav-collapsed .nav-list-row.has-actions .nav-item {
   padding-right: 0;
 }
 
