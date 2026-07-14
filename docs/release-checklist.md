@@ -148,6 +148,7 @@ macOS artifactを配布する場合だけ確認する。
 - タスク名、サブタスク名、メモ本文、通知本文をログに出していない。
 - メモ本文をHTMLとして描画していない。
 - 秘密情報、DBファイル、個人データをRelease artifactやIssue/PRに添付していない。
+- SQLiteバックアップ、JSONエクスポート、CSVエクスポートをRelease artifactやIssue/PRに添付していない。
 - Apple証明書、Apple ID、App用パスワード、Team IDをログやGitHub本文へ出していない。
 - Windows署名用の証明書、秘密鍵、証明書パスワード、Azure認証情報をログやGitHub本文へ出していない。
 - Git履歴の著者情報を公開してよいか確認済みである。

@@ -71,6 +71,7 @@ Draft Release公開前に問題が見つかった場合は、Releaseを公開せ
 - 通常のCIは `contents: read` のみを維持する。
 - アプリ本体にはリモート通信、分析、クラッシュアップロード、自動更新の権限を追加しない。
 - IssueやDiscussionsには秘密情報、Apple証明書、Apple認証情報、個人データ、SQLite DB、ログを投稿しない。
+- バックアップ/エクスポートファイルはSQLite DBと同じく個人データとして扱い、Issue、PR、Discussions、Release artifactへ添付しない。
 
 ## 受け入れ条件
 
@@ -87,6 +88,7 @@ Draft Release公開前に問題が見つかった場合は、Releaseを公開せ
 ## セキュリティ観点
 
 - ユーザーのタスク名、メモ本文、通知本文、DBをIssueやReleaseへ添付しない。
+- SQLiteバックアップ、JSONエクスポート、CSVエクスポートをIssueやReleaseへ添付しない。
 - macOS署名・公証Secretsをリポジトリ、Issue、PR、Release notesに書かない。
 - Windows未署名artifactによるSmartScreenまたは組織ポリシーの警告を既知制限として扱う。
 - Windowsコード署名を導入する場合も、証明書、秘密鍵、証明書パスワード、Azure認証情報をリポジトリ、Issue、PR、Release notes、Actionsログへ書かない。
