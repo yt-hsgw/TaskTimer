@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import type { TaskListItem } from "../../application/usecases/contracts";
+import { DEFAULT_TASK_LIST_ID } from "../../domain/task/types";
 
 export type AppView =
   | { kind: "list"; listId: string }
@@ -135,7 +136,7 @@ export function LeftNavigation({
           {taskLists.map((list) => (
             <div
               className={`nav-list-row ${
-                isOpen && list.id !== "default" ? "has-actions" : ""
+                isOpen && list.id !== DEFAULT_TASK_LIST_ID ? "has-actions" : ""
               }`}
               key={list.id}
             >
@@ -180,7 +181,7 @@ export function LeftNavigation({
                     }
                     onClick={() => onSelectView({ kind: "list", listId: list.id })}
                   />
-                  {isOpen && list.id !== "default" ? (
+                  {isOpen && list.id !== DEFAULT_TASK_LIST_ID ? (
                     <div className="nav-list-actions">
                       <button
                         className="nav-mini-button"
@@ -219,7 +220,9 @@ export function LeftNavigation({
               count={0}
               isOpen={isOpen}
               isActive={activeView.kind === "list"}
-              onClick={() => onSelectView({ kind: "list", listId: "default" })}
+              onClick={() =>
+                onSelectView({ kind: "list", listId: DEFAULT_TASK_LIST_ID })
+              }
             />
           ) : null}
         </div>

@@ -9,6 +9,9 @@ const TIME_FORMAT: &[time::format_description::FormatItem<'_>] =
 const MEMO_MAX_CHARS: usize = 10_000;
 const TASK_LIST_NAME_MAX_CHARS: usize = 80;
 
+pub const DEFAULT_TASK_LIST_ID: &str = "default";
+pub const DEFAULT_TASK_LIST_NAME: &str = "タスク";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkStatus {
     Todo,
