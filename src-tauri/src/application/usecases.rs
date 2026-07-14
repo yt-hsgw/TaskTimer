@@ -13,7 +13,8 @@ use super::{
     clock::Clock,
     notification::{LocalNotificationGateway, LocalNotificationMessage},
     repositories::{
-        ActiveTimer, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
+        ActiveTimer, DataExportCreate, DataExportRecord, DataExportRepository,
+        NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationDispatchSummary, NotificationHistoryRepository,
         NotificationPreferenceRepository, RecurrenceRuleInput, RepositoryResult,
         SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore,
@@ -70,6 +71,11 @@ pub struct SqliteBackupCreateDraft {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SqliteBackupRestoreDraft {
     pub backup_dir: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataExportCreateDraft {
+    pub destination_dir: String,
 }
 
 pub fn create_task(
@@ -345,6 +351,32 @@ pub fn restore_sqlite_backup(
     repository.restore_sqlite_backup(SqliteBackupRestore {
         backup_dir: validate_local_path(&draft.backup_dir, "バックアップフォルダ")?,
         now: clock.now_utc_iso8601(),
+    })
+}
+
+pub fn create_json_export(
+    repository: &impl DataExportRepository,
+    clock: &impl Clock,
+    draft: DataExportCreateDraft,
+) -> RepositoryResult<DataExportRecord> {
+    repository.create_json_export(DataExportCreate {
+        destination_dir: validate_local_path(&draft.destination_dir, "エクスポート保存先")?,
+        now: clock.now_utc_iso8601(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        platform: std::env::consts::OS.to_string(),
+    })
+}
+
+pub fn create_csv_export(
+    repository: &impl DataExportRepository,
+    clock: &impl Clock,
+    draft: DataExportCreateDraft,
+) -> RepositoryResult<DataExportRecord> {
+    repository.create_csv_export(DataExportCreate {
+        destination_dir: validate_local_path(&draft.destination_dir, "エクスポート保存先")?,
+        now: clock.now_utc_iso8601(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        platform: std::env::consts::OS.to_string(),
     })
 }
 

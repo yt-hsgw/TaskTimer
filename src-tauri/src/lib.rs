@@ -3,11 +3,12 @@ mod domain;
 mod infrastructure;
 
 use application::commands::{
-    complete_subtask, complete_task, create_sqlite_backup, create_subtask, create_task,
-    create_task_list, delete_subtask, delete_task, delete_task_list, dispatch_due_notifications,
-    get_active_timer, get_notification_display_mode, get_notifications_enabled, health_check,
-    list_calendar_items, list_notification_failure_history, list_task_lists, list_task_rows,
-    list_tasks, list_week_calendar_items, pause_active_timer, reopen_subtask, reopen_task,
+    complete_subtask, complete_task, create_csv_export, create_json_export, create_sqlite_backup,
+    create_subtask, create_task, create_task_list, delete_subtask, delete_task, delete_task_list,
+    dispatch_due_notifications, get_active_timer, get_notification_display_mode,
+    get_notifications_enabled, health_check, list_calendar_items,
+    list_notification_failure_history, list_task_lists, list_task_rows, list_tasks,
+    list_week_calendar_items, pause_active_timer, reopen_subtask, reopen_task,
     restore_sqlite_backup, resume_active_timer, start_timer, stop_active_timer,
     toggle_task_favorite, update_notification_display_mode, update_notifications_enabled,
     update_subtask, update_task, update_task_list,
@@ -61,7 +62,9 @@ pub fn run() {
             update_notifications_enabled,
             dispatch_due_notifications,
             create_sqlite_backup,
-            restore_sqlite_backup
+            restore_sqlite_backup,
+            create_json_export,
+            create_csv_export
         ])
         .run(tauri::generate_context!())
         .expect("TaskTimerの起動に失敗しました");

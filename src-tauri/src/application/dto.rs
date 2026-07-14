@@ -7,14 +7,14 @@ use crate::domain::{
 
 use super::{
     repositories::{
-        ActiveTimer, NotificationDeliveryAttemptRecord, NotificationDispatchSummary,
-        RecurrenceRuleRecord, SqliteBackupManifestRecord, SqliteBackupRecord, SqliteRestoreRecord,
-        SubtaskRecord, TaskListRecord, TaskRecord, TaskRowRecord, TaskWithSubtasksRecord,
-        WeekCalendarItem,
+        ActiveTimer, DataExportManifestRecord, DataExportRecord, NotificationDeliveryAttemptRecord,
+        NotificationDispatchSummary, RecurrenceRuleRecord, SqliteBackupManifestRecord,
+        SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord, TaskListRecord, TaskRecord,
+        TaskRowRecord, TaskWithSubtasksRecord, WeekCalendarItem,
     },
     usecases::{
-        RecurrenceRuleDraft, SqliteBackupCreateDraft, SqliteBackupRestoreDraft, TaskListDraft,
-        WorkItemDraft, WorkItemUpdateDraft,
+        DataExportCreateDraft, RecurrenceRuleDraft, SqliteBackupCreateDraft,
+        SqliteBackupRestoreDraft, TaskListDraft, WorkItemDraft, WorkItemUpdateDraft,
     },
 };
 
@@ -172,6 +172,12 @@ pub struct CreateSqliteBackupRequestDto {
 #[serde(rename_all = "camelCase")]
 pub struct RestoreSqliteBackupRequestDto {
     pub backup_dir: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDataExportRequestDto {
+    pub destination_dir: String,
 }
 
 #[derive(Serialize)]
@@ -364,6 +370,26 @@ pub struct SqliteRestoreDto {
     pub manifest: SqliteBackupManifestDto,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataExportManifestDto {
+    pub format: String,
+    pub format_version: i64,
+    pub app_version: String,
+    pub created_at: String,
+    pub platform: String,
+    pub compatibility: String,
+    pub contains_personal_data: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataExportDto {
+    pub export_path: String,
+    pub files: Vec<String>,
+    pub manifest: DataExportManifestDto,
+}
+
 impl TryFrom<UpdateNotificationDisplayModeRequestDto> for NotificationDisplayMode {
     type Error = String;
 
@@ -472,6 +498,14 @@ impl From<RestoreSqliteBackupRequestDto> for SqliteBackupRestoreDraft {
     fn from(value: RestoreSqliteBackupRequestDto) -> Self {
         Self {
             backup_dir: value.backup_dir,
+        }
+    }
+}
+
+impl From<CreateDataExportRequestDto> for DataExportCreateDraft {
+    fn from(value: CreateDataExportRequestDto) -> Self {
+        Self {
+            destination_dir: value.destination_dir,
         }
     }
 }
@@ -705,6 +739,30 @@ impl From<SqliteRestoreRecord> for SqliteRestoreDto {
             backup_dir: value.backup_dir,
             restored_at: value.restored_at,
             previous_database_file: value.previous_database_file,
+            manifest: value.manifest.into(),
+        }
+    }
+}
+
+impl From<DataExportManifestRecord> for DataExportManifestDto {
+    fn from(value: DataExportManifestRecord) -> Self {
+        Self {
+            format: value.format,
+            format_version: value.format_version,
+            app_version: value.app_version,
+            created_at: value.created_at,
+            platform: value.platform,
+            compatibility: value.compatibility,
+            contains_personal_data: value.contains_personal_data,
+        }
+    }
+}
+
+impl From<DataExportRecord> for DataExportDto {
+    fn from(value: DataExportRecord) -> Self {
+        Self {
+            export_path: value.export_path,
+            files: value.files,
             manifest: value.manifest.into(),
         }
     }

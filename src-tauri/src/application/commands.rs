@@ -342,3 +342,23 @@ pub fn restore_sqlite_backup(
     super::usecases::restore_sqlite_backup(database.inner(), clock.inner(), request.into())
         .map(Into::into)
 }
+
+#[tauri::command]
+pub fn create_json_export(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::CreateDataExportRequestDto,
+) -> Result<super::dto::DataExportDto, String> {
+    super::usecases::create_json_export(database.inner(), clock.inner(), request.into())
+        .map(Into::into)
+}
+
+#[tauri::command]
+pub fn create_csv_export(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::CreateDataExportRequestDto,
+) -> Result<super::dto::DataExportDto, String> {
+    super::usecases::create_csv_export(database.inner(), clock.inner(), request.into())
+        .map(Into::into)
+}

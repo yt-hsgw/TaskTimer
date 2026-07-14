@@ -253,6 +253,32 @@ pub struct SqliteRestoreRecord {
     pub manifest: SqliteBackupManifestRecord,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataExportCreate {
+    pub destination_dir: String,
+    pub now: String,
+    pub app_version: String,
+    pub platform: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataExportManifestRecord {
+    pub format: String,
+    pub format_version: i64,
+    pub app_version: String,
+    pub created_at: String,
+    pub platform: String,
+    pub compatibility: String,
+    pub contains_personal_data: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataExportRecord {
+    pub export_path: String,
+    pub files: Vec<String>,
+    pub manifest: DataExportManifestRecord,
+}
+
 pub type RepositoryResult<T> = Result<T, String>;
 pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 1;
 
@@ -400,6 +426,12 @@ pub trait SqliteBackupRepository {
         &self,
         input: SqliteBackupRestore,
     ) -> RepositoryResult<SqliteRestoreRecord>;
+}
+
+pub trait DataExportRepository {
+    fn create_json_export(&self, input: DataExportCreate) -> RepositoryResult<DataExportRecord>;
+
+    fn create_csv_export(&self, input: DataExportCreate) -> RepositoryResult<DataExportRecord>;
 }
 
 pub fn target_ref(target_type: WorkTargetType, id: String) -> WorkTargetRef {

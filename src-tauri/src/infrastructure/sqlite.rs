@@ -19,15 +19,16 @@ use uuid::Uuid;
 
 use crate::{
     application::repositories::{
-        target_ref, ActiveTimer, CalendarMarker, CalendarRepository, NotificationCommandRepository,
-        NotificationDeliveryAttemptRecord, NotificationHistoryRepository, NotificationJob,
-        NotificationPreferenceRepository, RecurrenceRuleInput, RecurrenceRuleRecord,
-        RepositoryResult, SqliteBackupCreate, SqliteBackupManifestRecord, SqliteBackupRecord,
-        SqliteBackupRepository, SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord,
-        TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate,
-        TaskReadRepository, TaskRecord, TaskRowRecord, TaskTimerCommandRepository,
-        TaskWithSubtasksRecord, TimerRepository, WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
-        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        target_ref, ActiveTimer, CalendarMarker, CalendarRepository, DataExportCreate,
+        DataExportManifestRecord, DataExportRecord, DataExportRepository,
+        NotificationCommandRepository, NotificationDeliveryAttemptRecord,
+        NotificationHistoryRepository, NotificationJob, NotificationPreferenceRepository,
+        RecurrenceRuleInput, RecurrenceRuleRecord, RepositoryResult, SqliteBackupCreate,
+        SqliteBackupManifestRecord, SqliteBackupRecord, SqliteBackupRepository,
+        SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TaskListCommandRepository,
+        TaskListCreate, TaskListRecord, TaskListUpdate, TaskReadRepository, TaskRecord,
+        TaskRowRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
+        WeekCalendarItem, WorkItemCreate, WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
     domain::{
         notification::{
@@ -51,6 +52,11 @@ const BACKUP_FORMAT: &str = "tasktimer-sqlite-backup";
 const BACKUP_FORMAT_VERSION: i64 = 1;
 const BACKUP_DATABASE_FILE: &str = "tasktimer.sqlite3";
 const BACKUP_MANIFEST_FILE: &str = "backup-manifest.json";
+const JSON_EXPORT_FORMAT: &str = "tasktimer-json-export";
+const CSV_EXPORT_FORMAT: &str = "tasktimer-csv-export";
+const DATA_EXPORT_FORMAT_VERSION: i64 = 1;
+const DATA_EXPORT_COMPATIBILITY: &str = "viewing-and-migration-aid-not-restore";
+const CSV_EXPORT_MANIFEST_FILE: &str = "export-manifest.json";
 const REQUIRED_RESTORE_TABLES: &[&str] = &[
     "task_lists",
     "tasks",
@@ -95,6 +101,144 @@ impl BackupManifestFile {
             integrity_check: self.integrity_check.clone(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportManifestFile {
+    format: String,
+    format_version: i64,
+    app_version: String,
+    created_at: String,
+    platform: String,
+    compatibility: String,
+    contains_personal_data: bool,
+}
+
+impl ExportManifestFile {
+    fn to_record(&self) -> DataExportManifestRecord {
+        DataExportManifestRecord {
+            format: self.format.clone(),
+            format_version: self.format_version,
+            app_version: self.app_version.clone(),
+            created_at: self.created_at.clone(),
+            platform: self.platform.clone(),
+            compatibility: self.compatibility.clone(),
+            contains_personal_data: self.contains_personal_data,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct JsonExportFile {
+    manifest: ExportManifestFile,
+    task_lists: Vec<ExportTaskListRow>,
+    tasks: Vec<ExportTaskRow>,
+    subtasks: Vec<ExportSubtaskRow>,
+    timer_sessions: Vec<ExportTimerSessionRow>,
+    timer_pauses: Vec<ExportTimerPauseRow>,
+    notification_rules: Vec<ExportNotificationRuleRow>,
+    recurrence_rules: Vec<ExportRecurrenceRuleRow>,
+}
+
+#[derive(Debug, Clone)]
+struct ExportDataset {
+    task_lists: Vec<ExportTaskListRow>,
+    tasks: Vec<ExportTaskRow>,
+    subtasks: Vec<ExportSubtaskRow>,
+    timer_sessions: Vec<ExportTimerSessionRow>,
+    timer_pauses: Vec<ExportTimerPauseRow>,
+    notification_rules: Vec<ExportNotificationRuleRow>,
+    recurrence_rules: Vec<ExportRecurrenceRuleRow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportTaskListRow {
+    id: String,
+    name: String,
+    sort_order: i64,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportTaskRow {
+    id: String,
+    list_id: String,
+    title: String,
+    status: String,
+    is_favorite: bool,
+    planned_start_date: Option<String>,
+    due_date: Option<String>,
+    due_time: Option<String>,
+    timer_target_seconds: Option<i64>,
+    memo: String,
+    sort_order: i64,
+    completed_at: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportSubtaskRow {
+    id: String,
+    task_id: String,
+    title: String,
+    status: String,
+    planned_start_date: Option<String>,
+    due_date: Option<String>,
+    due_time: Option<String>,
+    timer_target_seconds: Option<i64>,
+    memo: String,
+    sort_order: i64,
+    completed_at: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportTimerSessionRow {
+    id: String,
+    target_type: String,
+    target_id: String,
+    started_at: String,
+    stopped_at: Option<String>,
+    elapsed_seconds: Option<i64>,
+    created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportTimerPauseRow {
+    id: String,
+    timer_session_id: String,
+    paused_at: String,
+    resumed_at: Option<String>,
+    created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportNotificationRuleRow {
+    id: String,
+    target_type: String,
+    target_id: String,
+    kind: String,
+    notify_at: String,
+    enabled: bool,
+    registration_status: String,
+    last_error: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportRecurrenceRuleRow {
+    id: String,
+    target_type: String,
+    target_id: String,
+    frequency: String,
+    interval: i64,
+    created_at: String,
+    updated_at: String,
 }
 
 impl SqliteDatabase {
@@ -249,7 +393,7 @@ impl SqliteBackupRepository for SqliteDatabase {
         &self,
         input: SqliteBackupCreate,
     ) -> RepositoryResult<SqliteBackupRecord> {
-        let destination_dir = PathBuf::from(input.destination_dir);
+        let destination_dir = PathBuf::from(&input.destination_dir);
         let package_dir =
             destination_dir.join(format!("TaskTimer-backup-{}", backup_label(&input.now)));
         let backup_database_path = package_dir.join(BACKUP_DATABASE_FILE);
@@ -365,6 +509,74 @@ impl SqliteBackupRepository for SqliteDatabase {
             backup_dir: backup_dir.to_string_lossy().to_string(),
             restored_at: input.now,
             previous_database_file: previous_database_path.to_string_lossy().to_string(),
+            manifest: manifest.to_record(),
+        })
+    }
+}
+
+impl DataExportRepository for SqliteDatabase {
+    fn create_json_export(&self, input: DataExportCreate) -> RepositoryResult<DataExportRecord> {
+        let destination_dir = PathBuf::from(&input.destination_dir);
+        fs::create_dir_all(&destination_dir)
+            .map_err(|error| format!("エクスポート保存先を作成できません: {error}"))?;
+        let export_path = destination_dir.join(format!(
+            "TaskTimer-export-{}.json",
+            backup_label(&input.now)
+        ));
+        if export_path.exists() {
+            return Err("同名のJSONエクスポートファイルが既に存在します".to_string());
+        }
+
+        let manifest = create_export_manifest(JSON_EXPORT_FORMAT, &input);
+        let dataset = self.with_transaction(|transaction| select_export_dataset(transaction))?;
+        let export_file = JsonExportFile {
+            manifest: manifest.clone(),
+            task_lists: dataset.task_lists,
+            tasks: dataset.tasks,
+            subtasks: dataset.subtasks,
+            timer_sessions: dataset.timer_sessions,
+            timer_pauses: dataset.timer_pauses,
+            notification_rules: dataset.notification_rules,
+            recurrence_rules: dataset.recurrence_rules,
+        };
+        if let Err(error) = write_json_export_file(&export_path, &export_file) {
+            let _ = fs::remove_file(&export_path);
+            return Err(error);
+        }
+
+        Ok(DataExportRecord {
+            export_path: export_path.to_string_lossy().to_string(),
+            files: vec![export_path.to_string_lossy().to_string()],
+            manifest: manifest.to_record(),
+        })
+    }
+
+    fn create_csv_export(&self, input: DataExportCreate) -> RepositoryResult<DataExportRecord> {
+        let destination_dir = PathBuf::from(&input.destination_dir);
+        let export_dir =
+            destination_dir.join(format!("TaskTimer-export-{}-csv", backup_label(&input.now)));
+        if export_dir.exists() {
+            return Err("同名のCSVエクスポートフォルダが既に存在します".to_string());
+        }
+        fs::create_dir_all(&export_dir)
+            .map_err(|error| format!("CSVエクスポートフォルダを作成できません: {error}"))?;
+
+        let manifest = create_export_manifest(CSV_EXPORT_FORMAT, &input);
+        let dataset = self.with_transaction(|transaction| select_export_dataset(transaction))?;
+        let result = write_csv_export_files(&export_dir, &manifest, dataset);
+        if let Err(error) = result {
+            let _ = fs::remove_dir_all(&export_dir);
+            return Err(error);
+        }
+
+        let files = csv_export_file_names()
+            .into_iter()
+            .map(|name| export_dir.join(name).to_string_lossy().to_string())
+            .collect();
+
+        Ok(DataExportRecord {
+            export_path: export_dir.to_string_lossy().to_string(),
+            files,
             manifest: manifest.to_record(),
         })
     }
@@ -3533,6 +3745,548 @@ fn restore_previous_database_file(current_path: &Path, previous_path: &Path) {
     }
 }
 
+fn create_export_manifest(format: &str, input: &DataExportCreate) -> ExportManifestFile {
+    ExportManifestFile {
+        format: format.to_string(),
+        format_version: DATA_EXPORT_FORMAT_VERSION,
+        app_version: input.app_version.clone(),
+        created_at: input.now.clone(),
+        platform: input.platform.clone(),
+        compatibility: DATA_EXPORT_COMPATIBILITY.to_string(),
+        contains_personal_data: true,
+    }
+}
+
+fn write_json_export_file(path: &Path, export: &JsonExportFile) -> RepositoryResult<()> {
+    let content = serde_json::to_string_pretty(export)
+        .map_err(|error| format!("JSONエクスポートを生成できません: {error}"))?;
+    fs::write(path, content).map_err(|error| format!("JSONエクスポートを書き込めません: {error}"))
+}
+
+fn write_csv_export_files(
+    export_dir: &Path,
+    manifest: &ExportManifestFile,
+    dataset: ExportDataset,
+) -> RepositoryResult<()> {
+    write_export_manifest_file(&export_dir.join(CSV_EXPORT_MANIFEST_FILE), manifest)?;
+    write_csv_file(
+        &export_dir.join("task_lists.csv"),
+        &["id", "name", "sort_order", "created_at", "updated_at"],
+        dataset
+            .task_lists
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.name.clone(),
+                    row.sort_order.to_string(),
+                    row.created_at.clone(),
+                    row.updated_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
+        &export_dir.join("tasks.csv"),
+        &[
+            "id",
+            "list_id",
+            "title",
+            "status",
+            "is_favorite",
+            "planned_start_date",
+            "due_date",
+            "due_time",
+            "timer_target_seconds",
+            "memo",
+            "sort_order",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        ],
+        dataset
+            .tasks
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.list_id.clone(),
+                    row.title.clone(),
+                    row.status.clone(),
+                    row.is_favorite.to_string(),
+                    option_text(&row.planned_start_date),
+                    option_text(&row.due_date),
+                    option_text(&row.due_time),
+                    option_i64_text(row.timer_target_seconds),
+                    row.memo.clone(),
+                    row.sort_order.to_string(),
+                    option_text(&row.completed_at),
+                    row.created_at.clone(),
+                    row.updated_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
+        &export_dir.join("subtasks.csv"),
+        &[
+            "id",
+            "task_id",
+            "title",
+            "status",
+            "planned_start_date",
+            "due_date",
+            "due_time",
+            "timer_target_seconds",
+            "memo",
+            "sort_order",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        ],
+        dataset
+            .subtasks
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.task_id.clone(),
+                    row.title.clone(),
+                    row.status.clone(),
+                    option_text(&row.planned_start_date),
+                    option_text(&row.due_date),
+                    option_text(&row.due_time),
+                    option_i64_text(row.timer_target_seconds),
+                    row.memo.clone(),
+                    row.sort_order.to_string(),
+                    option_text(&row.completed_at),
+                    row.created_at.clone(),
+                    row.updated_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
+        &export_dir.join("timer_sessions.csv"),
+        &[
+            "id",
+            "target_type",
+            "target_id",
+            "started_at",
+            "stopped_at",
+            "elapsed_seconds",
+            "created_at",
+        ],
+        dataset
+            .timer_sessions
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.target_type.clone(),
+                    row.target_id.clone(),
+                    row.started_at.clone(),
+                    option_text(&row.stopped_at),
+                    option_i64_text(row.elapsed_seconds),
+                    row.created_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
+        &export_dir.join("timer_pauses.csv"),
+        &[
+            "id",
+            "timer_session_id",
+            "paused_at",
+            "resumed_at",
+            "created_at",
+        ],
+        dataset
+            .timer_pauses
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.timer_session_id.clone(),
+                    row.paused_at.clone(),
+                    option_text(&row.resumed_at),
+                    row.created_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
+        &export_dir.join("notification_rules.csv"),
+        &[
+            "id",
+            "target_type",
+            "target_id",
+            "kind",
+            "notify_at",
+            "enabled",
+            "registration_status",
+            "last_error",
+            "created_at",
+            "updated_at",
+        ],
+        dataset
+            .notification_rules
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.target_type.clone(),
+                    row.target_id.clone(),
+                    row.kind.clone(),
+                    row.notify_at.clone(),
+                    row.enabled.to_string(),
+                    row.registration_status.clone(),
+                    option_text(&row.last_error),
+                    row.created_at.clone(),
+                    row.updated_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
+        &export_dir.join("recurrence_rules.csv"),
+        &[
+            "id",
+            "target_type",
+            "target_id",
+            "frequency",
+            "interval",
+            "created_at",
+            "updated_at",
+        ],
+        dataset
+            .recurrence_rules
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.target_type.clone(),
+                    row.target_id.clone(),
+                    row.frequency.clone(),
+                    row.interval.to_string(),
+                    row.created_at.clone(),
+                    row.updated_at.clone(),
+                ]
+            })
+            .collect(),
+    )
+}
+
+fn write_export_manifest_file(path: &Path, manifest: &ExportManifestFile) -> RepositoryResult<()> {
+    let content = serde_json::to_string_pretty(manifest)
+        .map_err(|error| format!("エクスポートmanifestを生成できません: {error}"))?;
+    fs::write(path, content)
+        .map_err(|error| format!("エクスポートmanifestを書き込めません: {error}"))
+}
+
+fn csv_export_file_names() -> Vec<&'static str> {
+    vec![
+        CSV_EXPORT_MANIFEST_FILE,
+        "task_lists.csv",
+        "tasks.csv",
+        "subtasks.csv",
+        "timer_sessions.csv",
+        "timer_pauses.csv",
+        "notification_rules.csv",
+        "recurrence_rules.csv",
+    ]
+}
+
+fn write_csv_file(path: &Path, headers: &[&str], rows: Vec<Vec<String>>) -> RepositoryResult<()> {
+    let mut content = String::new();
+    content.push_str(
+        &headers
+            .iter()
+            .map(|value| csv_cell(value))
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    content.push('\n');
+
+    for row in rows {
+        content.push_str(
+            &row.iter()
+                .map(|value| csv_cell(value))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        content.push('\n');
+    }
+
+    fs::write(path, content).map_err(|error| format!("CSVエクスポートを書き込めません: {error}"))
+}
+
+fn csv_cell(value: &str) -> String {
+    let safe_value = neutralize_csv_formula(value);
+    if safe_value.contains(',')
+        || safe_value.contains('"')
+        || safe_value.contains('\n')
+        || safe_value.contains('\r')
+    {
+        format!("\"{}\"", safe_value.replace('"', "\"\""))
+    } else {
+        safe_value
+    }
+}
+
+fn neutralize_csv_formula(value: &str) -> String {
+    match value.chars().next() {
+        Some('=') | Some('+') | Some('-') | Some('@') | Some('\t') | Some('\r') => {
+            format!("'{value}")
+        }
+        _ => value.to_string(),
+    }
+}
+
+fn option_text(value: &Option<String>) -> String {
+    value.clone().unwrap_or_default()
+}
+
+fn option_i64_text(value: Option<i64>) -> String {
+    value.map(|number| number.to_string()).unwrap_or_default()
+}
+
+fn select_export_dataset(connection: &Connection) -> RepositoryResult<ExportDataset> {
+    Ok(ExportDataset {
+        task_lists: select_export_task_lists(connection)?,
+        tasks: select_export_tasks(connection)?,
+        subtasks: select_export_subtasks(connection)?,
+        timer_sessions: select_export_timer_sessions(connection)?,
+        timer_pauses: select_export_timer_pauses(connection)?,
+        notification_rules: select_export_notification_rules(connection)?,
+        recurrence_rules: select_export_recurrence_rules(connection)?,
+    })
+}
+
+fn select_export_task_lists(connection: &Connection) -> RepositoryResult<Vec<ExportTaskListRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, name, sort_order, created_at, updated_at
+            FROM task_lists
+            WHERE deleted_at IS NULL
+            ORDER BY sort_order, created_at, id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用リスト取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportTaskListRow {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                sort_order: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用リストを取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用リストを読めません")
+}
+
+fn select_export_tasks(connection: &Connection) -> RepositoryResult<Vec<ExportTaskRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, list_id, title, status, is_favorite, planned_start_date,
+                   due_date, due_time, timer_target_seconds, memo, sort_order,
+                   completed_at, created_at, updated_at
+            FROM tasks
+            WHERE deleted_at IS NULL
+            ORDER BY sort_order, created_at, id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用タスク取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportTaskRow {
+                id: row.get(0)?,
+                list_id: row.get(1)?,
+                title: row.get(2)?,
+                status: row.get(3)?,
+                is_favorite: row.get::<_, i64>(4)? != 0,
+                planned_start_date: row.get(5)?,
+                due_date: row.get(6)?,
+                due_time: row.get(7)?,
+                timer_target_seconds: row.get(8)?,
+                memo: row.get(9)?,
+                sort_order: row.get(10)?,
+                completed_at: row.get(11)?,
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用タスクを取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用タスクを読めません")
+}
+
+fn select_export_subtasks(connection: &Connection) -> RepositoryResult<Vec<ExportSubtaskRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, task_id, title, status, planned_start_date, due_date,
+                   due_time, timer_target_seconds, memo, sort_order,
+                   completed_at, created_at, updated_at
+            FROM subtasks
+            WHERE deleted_at IS NULL
+            ORDER BY task_id, sort_order, created_at, id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用サブタスク取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportSubtaskRow {
+                id: row.get(0)?,
+                task_id: row.get(1)?,
+                title: row.get(2)?,
+                status: row.get(3)?,
+                planned_start_date: row.get(4)?,
+                due_date: row.get(5)?,
+                due_time: row.get(6)?,
+                timer_target_seconds: row.get(7)?,
+                memo: row.get(8)?,
+                sort_order: row.get(9)?,
+                completed_at: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用サブタスクを取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用サブタスクを読めません")
+}
+
+fn select_export_timer_sessions(
+    connection: &Connection,
+) -> RepositoryResult<Vec<ExportTimerSessionRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, target_type, target_id, started_at, stopped_at,
+                   elapsed_seconds, created_at
+            FROM timer_sessions
+            WHERE deleted_at IS NULL
+            ORDER BY started_at, created_at, id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用タイマー履歴取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportTimerSessionRow {
+                id: row.get(0)?,
+                target_type: row.get(1)?,
+                target_id: row.get(2)?,
+                started_at: row.get(3)?,
+                stopped_at: row.get(4)?,
+                elapsed_seconds: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用タイマー履歴を取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用タイマー履歴を読めません")
+}
+
+fn select_export_timer_pauses(
+    connection: &Connection,
+) -> RepositoryResult<Vec<ExportTimerPauseRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, timer_session_id, paused_at, resumed_at, created_at
+            FROM timer_pauses
+            WHERE deleted_at IS NULL
+            ORDER BY paused_at, created_at, id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用一時停止履歴取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportTimerPauseRow {
+                id: row.get(0)?,
+                timer_session_id: row.get(1)?,
+                paused_at: row.get(2)?,
+                resumed_at: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用一時停止履歴を取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用一時停止履歴を読めません")
+}
+
+fn select_export_notification_rules(
+    connection: &Connection,
+) -> RepositoryResult<Vec<ExportNotificationRuleRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, target_type, target_id, kind, notify_at, enabled,
+                   registration_status, last_error, created_at, updated_at
+            FROM notification_rules
+            WHERE deleted_at IS NULL
+            ORDER BY notify_at, created_at, id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用通知ルール取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportNotificationRuleRow {
+                id: row.get(0)?,
+                target_type: row.get(1)?,
+                target_id: row.get(2)?,
+                kind: row.get(3)?,
+                notify_at: row.get(4)?,
+                enabled: row.get::<_, i64>(5)? != 0,
+                registration_status: row.get(6)?,
+                last_error: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用通知ルールを取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用通知ルールを読めません")
+}
+
+fn select_export_recurrence_rules(
+    connection: &Connection,
+) -> RepositoryResult<Vec<ExportRecurrenceRuleRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, target_type, target_id, frequency, interval, created_at, updated_at
+            FROM recurrence_rules
+            WHERE deleted_at IS NULL
+            ORDER BY created_at, id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用繰り返し設定取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportRecurrenceRuleRow {
+                id: row.get(0)?,
+                target_type: row.get(1)?,
+                target_id: row.get(2)?,
+                frequency: row.get(3)?,
+                interval: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用繰り返し設定を取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用繰り返し設定を読めません")
+}
+
+fn collect_export_rows<T>(
+    rows: impl Iterator<Item = rusqlite::Result<T>>,
+    error_message: &str,
+) -> RepositoryResult<Vec<T>> {
+    rows.map(|row| row.map_err(|error| format!("{error_message}: {error}")))
+        .collect()
+}
+
 fn collect_task_calendar_items(
     connection: &Connection,
     start_date: &str,
@@ -4634,6 +5388,138 @@ mod tests {
 
         fs::remove_dir_all(data_dir).expect("cleanup data");
         fs::remove_dir_all(backup_root).expect("cleanup backup");
+    }
+
+    #[test]
+    fn create_json_export_writes_manifest_and_exact_user_values() {
+        let data_dir = temp_dir("tasktimer-json-export-db");
+        let export_root = temp_dir("tasktimer-json-export-root");
+        let database = SqliteDatabase::open_in_dir(data_dir.clone()).expect("open database");
+        let clock = FixedClock {
+            now: "2026-07-15T00:00:00Z",
+        };
+        let task = usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "=SUM(1,2)".to_string(),
+                planned_start_date: Some("2026-07-15".to_string()),
+                due_date: Some("2026-07-16".to_string()),
+                due_time: Some("09:30".to_string()),
+                memo: Some("1行目,2行目\n\"引用\"".to_string()),
+            },
+        )
+        .expect("create task");
+        usecases::create_subtask(
+            &database,
+            &clock,
+            task.id,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "サブタスク".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-16".to_string()),
+                due_time: None,
+                memo: Some("JSONでは値を変えない".to_string()),
+            },
+        )
+        .expect("create subtask");
+
+        let export = usecases::create_json_export(
+            &database,
+            &clock,
+            usecases::DataExportCreateDraft {
+                destination_dir: export_root.to_string_lossy().to_string(),
+            },
+        )
+        .expect("create json export");
+
+        assert!(export
+            .export_path
+            .ends_with("TaskTimer-export-20260715-000000.json"));
+        assert_eq!(export.manifest.format, JSON_EXPORT_FORMAT);
+        assert_eq!(export.manifest.compatibility, DATA_EXPORT_COMPATIBILITY);
+        assert!(export.manifest.contains_personal_data);
+
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&export.export_path).expect("read json"))
+                .expect("parse json");
+        assert_eq!(json["manifest"]["format"], JSON_EXPORT_FORMAT);
+        assert_eq!(json["manifest"]["containsPersonalData"], true);
+        assert_eq!(json["tasks"][0]["title"], "=SUM(1,2)");
+        assert_eq!(json["tasks"][0]["memo"], "1行目,2行目\n\"引用\"");
+        assert_eq!(json["subtasks"][0]["title"], "サブタスク");
+
+        fs::remove_dir_all(data_dir).expect("cleanup data");
+        fs::remove_dir_all(export_root).expect("cleanup export");
+    }
+
+    #[test]
+    fn create_csv_export_escapes_memo_and_neutralizes_formula_cells() {
+        let data_dir = temp_dir("tasktimer-csv-export-db");
+        let export_root = temp_dir("tasktimer-csv-export-root");
+        let database = SqliteDatabase::open_in_dir(data_dir.clone()).expect("open database");
+        let start_clock = FixedClock {
+            now: "2026-07-15T00:00:00Z",
+        };
+        let stop_clock = FixedClock {
+            now: "2026-07-15T00:10:00Z",
+        };
+        let task = usecases::create_task(
+            &database,
+            &start_clock,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "=SUM(1,2)".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-15".to_string()),
+                due_time: Some("10:00".to_string()),
+                memo: Some("カンマ, 改行\n\"引用符\"".to_string()),
+            },
+        )
+        .expect("create task");
+        usecases::start_timer(
+            &database,
+            &start_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start timer");
+        usecases::stop_active_timer(&database, &stop_clock).expect("stop timer");
+
+        let export = usecases::create_csv_export(
+            &database,
+            &start_clock,
+            usecases::DataExportCreateDraft {
+                destination_dir: export_root.to_string_lossy().to_string(),
+            },
+        )
+        .expect("create csv export");
+
+        assert!(export
+            .export_path
+            .ends_with("TaskTimer-export-20260715-000000-csv"));
+        assert_eq!(export.manifest.format, CSV_EXPORT_FORMAT);
+        assert!(PathBuf::from(&export.export_path)
+            .join(CSV_EXPORT_MANIFEST_FILE)
+            .is_file());
+        assert!(export.files.iter().any(|path| path.ends_with("tasks.csv")));
+        assert!(export
+            .files
+            .iter()
+            .any(|path| path.ends_with("timer_sessions.csv")));
+
+        let tasks_csv = fs::read_to_string(PathBuf::from(&export.export_path).join("tasks.csv"))
+            .expect("read tasks csv");
+        assert!(tasks_csv.starts_with("id,list_id,title,status,is_favorite"));
+        assert!(tasks_csv.contains("\"'=SUM(1,2)\""));
+        assert!(tasks_csv.contains("\"カンマ, 改行\n\"\"引用符\"\"\""));
+
+        fs::remove_dir_all(data_dir).expect("cleanup data");
+        fs::remove_dir_all(export_root).expect("cleanup export");
     }
 
     #[test]

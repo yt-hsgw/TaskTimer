@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   CreateSubtaskDraft,
+  DataExportResult,
   NotificationDeliveryAttempt,
   NotificationDispatchSummary,
   SqliteBackupResult,
@@ -89,5 +90,13 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   restoreSqliteBackup: (backupDir: string) =>
     invoke<SqliteRestoreResult>("restore_sqlite_backup", {
       request: { backupDir },
+    }),
+  createJsonExport: (destinationDir: string) =>
+    invoke<DataExportResult>("create_json_export", {
+      request: { destinationDir },
+    }),
+  createCsvExport: (destinationDir: string) =>
+    invoke<DataExportResult>("create_csv_export", {
+      request: { destinationDir },
     }),
 };
