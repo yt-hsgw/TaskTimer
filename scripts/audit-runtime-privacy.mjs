@@ -11,6 +11,11 @@ const runtimeSourceTargets = [
   { dir: "src-tauri/src", extensions: new Set([".rs"]) },
 ];
 
+const runtimeSourceExclusions = new Set([
+  // 開発・検証用CLI。Tauriアプリ本体には組み込まれず、合成データ生成結果だけを標準出力へ表示する。
+  "src-tauri/src/bin/seed_large_dataset.rs",
+]);
+
 const jsForbiddenPatterns = [
   {
     id: "runtime-network-api",
@@ -83,6 +88,9 @@ for (const target of runtimeSourceTargets) {
   const absoluteDir = join(repoRoot, target.dir);
   for (const filePath of walkFiles(absoluteDir)) {
     if (!target.extensions.has(extname(filePath))) {
+      continue;
+    }
+    if (runtimeSourceExclusions.has(relative(repoRoot, filePath))) {
       continue;
     }
     checkedFiles += 1;

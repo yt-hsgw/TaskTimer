@@ -19,6 +19,7 @@
     "check:glib-advisory": "node scripts/check-glib-advisory.mjs",
     "check:macos-signing": "node scripts/check-macos-signing-preflight.mjs",
     "check:release-target": "node scripts/check-release-target.mjs",
+    "perf:seed": "cargo run --manifest-path src-tauri/Cargo.toml --bin seed_large_dataset --",
     "preview": "vite preview",
     "screenshots:readme": "node scripts/capture-readme-screenshots.mjs",
     "tauri": "tauri",
