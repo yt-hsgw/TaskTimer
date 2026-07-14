@@ -4,6 +4,7 @@ use crate::domain::{
     task::{
         validate_date_range, validate_due_time_requires_due_date, validate_memo,
         validate_optional_date, validate_optional_time, validate_task_list_name, validate_title,
+        DEFAULT_TASK_LIST_ID,
     },
     timer::WorkTargetRef,
 };
@@ -364,7 +365,7 @@ fn validate_create_list_id(value: Option<&str>) -> RepositoryResult<String> {
         Some(raw_value) if !raw_value.trim().is_empty() => {
             validate_identifier(raw_value, "リストID")
         }
-        _ => Ok("default".to_string()),
+        _ => Ok(DEFAULT_TASK_LIST_ID.to_string()),
     }
 }
 
