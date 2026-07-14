@@ -51,6 +51,7 @@ pub struct ActiveTimer {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItemCreate {
+    pub list_id: String,
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
@@ -61,6 +62,7 @@ pub struct WorkItemCreate {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItemUpdate {
+    pub list_id: Option<String>,
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
@@ -75,6 +77,18 @@ pub struct WorkItemUpdate {
 pub struct RecurrenceRuleInput {
     pub frequency: RecurrenceFrequency,
     pub interval: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskListCreate {
+    pub name: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskListUpdate {
+    pub name: String,
+    pub now: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -276,6 +290,18 @@ pub trait TaskTimerCommandRepository {
     fn delete_task(&self, task_id: String, now: String) -> RepositoryResult<()>;
 
     fn delete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<()>;
+}
+
+pub trait TaskListCommandRepository {
+    fn create_task_list(&self, input: TaskListCreate) -> RepositoryResult<TaskListRecord>;
+
+    fn update_task_list(
+        &self,
+        list_id: String,
+        input: TaskListUpdate,
+    ) -> RepositoryResult<TaskListRecord>;
+
+    fn delete_task_list(&self, list_id: String, now: String) -> RepositoryResult<()>;
 }
 
 pub trait NotificationPreferenceRepository {

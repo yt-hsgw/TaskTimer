@@ -299,6 +299,12 @@ export function App() {
     }
   }, [selectedSubtask, selectedSubtaskId]);
 
+  const clearDetailSelection = useCallback(() => {
+    setSelectedTaskId(null);
+    setSelectedSubtaskId(null);
+    setSelectedCalendarTarget(null);
+  }, []);
+
   const runMutation = useCallback(
     async (operation: () => Promise<string | void>) => {
       setIsMutating(true);
@@ -369,9 +375,42 @@ export function App() {
   const handleCreateTask = useCallback(
     (input: WorkItemDraft) =>
       runCreateTaskMutation(async () => {
-        await tauriTaskTimerGateway.createTask(input);
+        await tauriTaskTimerGateway.createTask({
+          ...input,
+          listId: activeView.kind === "list" ? activeView.listId : "default",
+        });
       }),
-    [runCreateTaskMutation],
+    [activeView, runCreateTaskMutation],
+  );
+
+  const handleCreateTaskList = useCallback(
+    (name: string) =>
+      runMutation(async () => {
+        const list = await tauriTaskTimerGateway.createTaskList({ name });
+        setActiveView({ kind: "list", listId: list.id });
+        clearDetailSelection();
+      }),
+    [clearDetailSelection, runMutation],
+  );
+
+  const handleRenameTaskList = useCallback(
+    (listId: string, name: string) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.updateTaskList(listId, { name });
+      }),
+    [runMutation],
+  );
+
+  const handleDeleteTaskList = useCallback(
+    (listId: string) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.deleteTaskList(listId);
+        if (activeView.kind === "list" && activeView.listId === listId) {
+          setActiveView({ kind: "list", listId: "default" });
+          clearDetailSelection();
+        }
+      }),
+    [activeView, clearDetailSelection, runMutation],
   );
 
   const handleCreateSubtask = useCallback(
@@ -554,19 +593,19 @@ export function App() {
     [runMutation],
   );
 
-  const clearDetailSelection = useCallback(() => {
-    setSelectedTaskId(null);
-    setSelectedSubtaskId(null);
-    setSelectedCalendarTarget(null);
-  }, []);
-
-  const handleSelectView = useCallback((view: AppView) => {
-    setActiveView(view);
-    clearDetailSelection();
-    if (window.matchMedia("(max-width: 767px)").matches) {
-      setIsNavigationOpen(false);
-    }
-  }, [clearDetailSelection]);
+  const handleSelectView = useCallback(
+    (view: AppView) => {
+      if (isSameAppView(activeView, view)) {
+        return;
+      }
+      setActiveView(view);
+      clearDetailSelection();
+      if (window.matchMedia("(max-width: 767px)").matches) {
+        setIsNavigationOpen(false);
+      }
+    },
+    [activeView, clearDetailSelection],
+  );
 
   const handleSelectTask = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
@@ -673,7 +712,11 @@ export function App() {
           todayCount={todayCount}
           isOpen={isNavigationOpen}
           taskLists={taskLists}
+          isMutating={isMutating}
           onSelectView={handleSelectView}
+          onCreateTaskList={handleCreateTaskList}
+          onRenameTaskList={handleRenameTaskList}
+          onDeleteTaskList={handleDeleteTaskList}
           onToggle={() => setIsNavigationOpen((current) => !current)}
         />
 
@@ -722,6 +765,7 @@ export function App() {
                   task={selectedTask}
                   selectedSubtaskId={selectedSubtaskId}
                   activeTimer={activeTimer}
+                  taskLists={taskLists}
                   displayMode={displayMode}
                   isMutating={isMutating}
                   onClose={closeDetailPane}
@@ -768,6 +812,7 @@ export function App() {
                   task={selectedTask}
                   selectedSubtaskId={selectedSubtaskId}
                   activeTimer={activeTimer}
+                  taskLists={taskLists}
                   displayMode={displayMode}
                   isMutating={isMutating}
                   onClose={closeDetailPane}
@@ -891,6 +936,16 @@ function getSundayOfWeek(value: Date) {
   const mondayBasedDay = (date.getDay() + 6) % 7;
   date.setDate(date.getDate() + (6 - mondayBasedDay));
   return date;
+}
+
+function isSameAppView(current: AppView, next: AppView) {
+  if (current.kind !== next.kind) {
+    return false;
+  }
+  if (current.kind === "list" && next.kind === "list") {
+    return current.listId === next.listId;
+  }
+  return true;
 }
 
 function isSameTarget(

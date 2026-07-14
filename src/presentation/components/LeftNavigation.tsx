@@ -1,3 +1,4 @@
+import { FormEvent, useState } from "react";
 import type { TaskListItem } from "../../application/usecases/contracts";
 
 export type AppView =
@@ -13,7 +14,11 @@ type LeftNavigationProps = {
   todayCount: number;
   isOpen: boolean;
   taskLists: TaskListItem[];
+  isMutating: boolean;
   onSelectView(view: AppView): void;
+  onCreateTaskList(name: string): Promise<boolean>;
+  onRenameTaskList(listId: string, name: string): Promise<boolean>;
+  onDeleteTaskList(listId: string): Promise<boolean>;
   onToggle(): void;
 };
 
@@ -23,9 +28,54 @@ export function LeftNavigation({
   todayCount,
   isOpen,
   taskLists,
+  isMutating,
   onSelectView,
+  onCreateTaskList,
+  onRenameTaskList,
+  onDeleteTaskList,
   onToggle,
 }: LeftNavigationProps) {
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [newListName, setNewListName] = useState("");
+  const [editingListId, setEditingListId] = useState<string | null>(null);
+  const [editingListName, setEditingListName] = useState("");
+
+  const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = newListName.trim();
+    if (!name) {
+      return;
+    }
+    const created = await onCreateTaskList(name);
+    if (created) {
+      setNewListName("");
+      setIsCreateOpen(false);
+    }
+  };
+
+  const handleRename = async (event: FormEvent<HTMLFormElement>, listId: string) => {
+    event.preventDefault();
+    const name = editingListName.trim();
+    if (!name) {
+      return;
+    }
+    const renamed = await onRenameTaskList(listId, name);
+    if (renamed) {
+      setEditingListId(null);
+      setEditingListName("");
+    }
+  };
+
+  const handleDelete = async (list: TaskListItem) => {
+    const shouldDelete = window.confirm(
+      `「${list.name}」を削除します。所属タスクは「タスク」へ移動します。`,
+    );
+    if (!shouldDelete) {
+      return;
+    }
+    await onDeleteTaskList(list.id);
+  };
+
   return (
     <aside className="left-navigation" aria-label="主要ナビゲーション">
       <div className="nav-header">
@@ -49,16 +99,118 @@ export function LeftNavigation({
 
       <nav className="nav-sections" aria-label="ビュー">
         <div className="nav-section">
+          {isOpen ? (
+            <div className="nav-section-heading">
+              <span>リスト</span>
+              <button
+                className="nav-mini-button"
+                type="button"
+                aria-label="リストを追加"
+                title="リストを追加"
+                disabled={isMutating}
+                onClick={() => {
+                  setEditingListId(null);
+                  setIsCreateOpen((current) => !current);
+                }}
+              >
+                +
+              </button>
+            </div>
+          ) : null}
+          {isOpen && isCreateOpen ? (
+            <form className="nav-list-form" onSubmit={handleCreate}>
+              <input
+                value={newListName}
+                onChange={(event) => setNewListName(event.target.value)}
+                placeholder="新しいリスト"
+                maxLength={80}
+                disabled={isMutating}
+                autoFocus
+              />
+              <button type="submit" disabled={isMutating || !newListName.trim()}>
+                追加
+              </button>
+            </form>
+          ) : null}
           {taskLists.map((list) => (
-            <NavButton
+            <div
+              className={`nav-list-row ${
+                isOpen && list.id !== "default" ? "has-actions" : ""
+              }`}
               key={list.id}
-              icon="□"
-              label={list.name}
-              count={list.activeTaskCount}
-              isOpen={isOpen}
-              isActive={activeView.kind === "list" && activeView.listId === list.id}
-              onClick={() => onSelectView({ kind: "list", listId: list.id })}
-            />
+            >
+              {editingListId === list.id ? (
+                <form
+                  className="nav-list-form"
+                  onSubmit={(event) => void handleRename(event, list.id)}
+                >
+                  <input
+                    value={editingListName}
+                    onChange={(event) => setEditingListName(event.target.value)}
+                    maxLength={80}
+                    disabled={isMutating}
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    disabled={isMutating || !editingListName.trim()}
+                  >
+                    保存
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isMutating}
+                    onClick={() => {
+                      setEditingListId(null);
+                      setEditingListName("");
+                    }}
+                  >
+                    ×
+                  </button>
+                </form>
+              ) : (
+                <>
+                  <NavButton
+                    icon="□"
+                    label={list.name}
+                    count={list.activeTaskCount}
+                    isOpen={isOpen}
+                    isActive={
+                      activeView.kind === "list" && activeView.listId === list.id
+                    }
+                    onClick={() => onSelectView({ kind: "list", listId: list.id })}
+                  />
+                  {isOpen && list.id !== "default" ? (
+                    <div className="nav-list-actions">
+                      <button
+                        className="nav-mini-button"
+                        type="button"
+                        aria-label={`${list.name}の名前を変更`}
+                        title="名前を変更"
+                        disabled={isMutating}
+                        onClick={() => {
+                          setIsCreateOpen(false);
+                          setEditingListId(list.id);
+                          setEditingListName(list.name);
+                        }}
+                      >
+                        ✎
+                      </button>
+                      <button
+                        className="nav-mini-button"
+                        type="button"
+                        aria-label={`${list.name}を削除`}
+                        title="削除"
+                        disabled={isMutating}
+                        onClick={() => void handleDelete(list)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
           ))}
           {taskLists.length === 0 ? (
             <NavButton

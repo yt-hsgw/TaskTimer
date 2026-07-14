@@ -4,6 +4,7 @@ import type { RecurrenceFrequency } from "../../domain/recurrence/types";
 import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
 
 export type WorkItemDraft = {
+  listId?: string | null;
   title: string;
   plannedStartDate?: string | null;
   dueDate?: string | null;
@@ -19,6 +20,10 @@ export type WorkItemUpdateDraft = WorkItemDraft & {
 export type RecurrenceRuleDraft = {
   frequency: RecurrenceFrequency;
   interval: number;
+};
+
+export type TaskListDraft = {
+  name: string;
 };
 
 export type CreateSubtaskDraft = WorkItemDraft & {
@@ -104,6 +109,9 @@ export type TaskTimerGateway = {
   getActiveTimer(): Promise<ActiveTimer | null>;
   getNotificationDisplayMode(): Promise<NotificationDisplayMode>;
   createTask(input: WorkItemDraft): Promise<Task>;
+  createTaskList(input: TaskListDraft): Promise<TaskListItem>;
+  updateTaskList(listId: string, input: TaskListDraft): Promise<TaskListItem>;
+  deleteTaskList(listId: string): Promise<void>;
   createSubtask(input: CreateSubtaskDraft): Promise<Subtask>;
   updateTask(input: UpdateTaskDraft): Promise<Task>;
   updateSubtask(input: UpdateSubtaskDraft): Promise<Subtask>;

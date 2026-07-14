@@ -3,7 +3,7 @@ use crate::domain::{
     recurrence::RecurrenceFrequency,
     task::{
         validate_date_range, validate_due_time_requires_due_date, validate_memo,
-        validate_optional_date, validate_optional_time, validate_title,
+        validate_optional_date, validate_optional_time, validate_task_list_name, validate_title,
     },
     timer::WorkTargetRef,
 };
@@ -15,7 +15,8 @@ use super::{
         ActiveTimer, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationDispatchSummary, NotificationHistoryRepository,
         NotificationPreferenceRepository, RecurrenceRuleInput, RepositoryResult, SubtaskRecord,
-        TaskRecord, TaskTimerCommandRepository, WorkItemCreate, WorkItemUpdate,
+        TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskRecord,
+        TaskTimerCommandRepository, WorkItemCreate, WorkItemUpdate,
     },
 };
 
@@ -26,6 +27,7 @@ const RECURRENCE_INTERVAL_MAX: i64 = 365;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItemDraft {
+    pub list_id: Option<String>,
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
@@ -35,6 +37,7 @@ pub struct WorkItemDraft {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItemUpdateDraft {
+    pub list_id: Option<String>,
     pub title: String,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
@@ -50,12 +53,53 @@ pub struct RecurrenceRuleDraft {
     pub interval: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskListDraft {
+    pub name: String,
+}
+
 pub fn create_task(
     repository: &impl TaskTimerCommandRepository,
     clock: &impl Clock,
     draft: WorkItemDraft,
 ) -> RepositoryResult<TaskRecord> {
     repository.create_task(validate_work_item_draft(draft, clock.now_utc_iso8601())?)
+}
+
+pub fn create_task_list(
+    repository: &impl TaskListCommandRepository,
+    clock: &impl Clock,
+    draft: TaskListDraft,
+) -> RepositoryResult<TaskListRecord> {
+    repository.create_task_list(TaskListCreate {
+        name: validate_task_list_name(&draft.name)?,
+        now: clock.now_utc_iso8601(),
+    })
+}
+
+pub fn update_task_list(
+    repository: &impl TaskListCommandRepository,
+    clock: &impl Clock,
+    list_id: String,
+    draft: TaskListDraft,
+) -> RepositoryResult<TaskListRecord> {
+    let list_id = validate_identifier(&list_id, "リストID")?;
+    repository.update_task_list(
+        list_id,
+        TaskListUpdate {
+            name: validate_task_list_name(&draft.name)?,
+            now: clock.now_utc_iso8601(),
+        },
+    )
+}
+
+pub fn delete_task_list(
+    repository: &impl TaskListCommandRepository,
+    clock: &impl Clock,
+    list_id: String,
+) -> RepositoryResult<()> {
+    let list_id = validate_identifier(&list_id, "リストID")?;
+    repository.delete_task_list(list_id, clock.now_utc_iso8601())
 }
 
 pub fn create_subtask(
@@ -273,8 +317,10 @@ fn validate_work_item_draft(draft: WorkItemDraft, now: String) -> RepositoryResu
     validate_date_range(&planned_start_date, &due_date)?;
     validate_due_time_requires_due_date(&due_date, &due_time)?;
     let memo = validate_memo(draft.memo.as_deref())?;
+    let list_id = validate_create_list_id(draft.list_id.as_deref())?;
 
     Ok(WorkItemCreate {
+        list_id,
         title,
         planned_start_date,
         due_date,
@@ -298,8 +344,10 @@ fn validate_work_item_update_draft(
     let recurrence_rule =
         validate_recurrence_rule(draft.recurrence_rule, &planned_start_date, &due_date)?;
     let memo = validate_memo(draft.memo.as_deref())?;
+    let list_id = validate_update_list_id(draft.list_id.as_deref())?;
 
     Ok(WorkItemUpdate {
+        list_id,
         title,
         planned_start_date,
         due_date,
@@ -309,6 +357,24 @@ fn validate_work_item_update_draft(
         memo,
         now,
     })
+}
+
+fn validate_create_list_id(value: Option<&str>) -> RepositoryResult<String> {
+    match value {
+        Some(raw_value) if !raw_value.trim().is_empty() => {
+            validate_identifier(raw_value, "リストID")
+        }
+        _ => Ok("default".to_string()),
+    }
+}
+
+fn validate_update_list_id(value: Option<&str>) -> RepositoryResult<Option<String>> {
+    match value {
+        Some(raw_value) if !raw_value.trim().is_empty() => {
+            validate_identifier(raw_value, "リストID").map(Some)
+        }
+        _ => Ok(None),
+    }
 }
 
 fn validate_timer_target_seconds(value: Option<i64>) -> RepositoryResult<Option<i64>> {
@@ -365,6 +431,7 @@ mod tests {
     fn validate_work_item_draft_rejects_blank_title() {
         let result = validate_work_item_draft(
             WorkItemDraft {
+                list_id: None,
                 title: "   ".to_string(),
                 planned_start_date: None,
                 due_date: None,
@@ -381,6 +448,7 @@ mod tests {
     fn validate_work_item_draft_rejects_reversed_date_range() {
         let result = validate_work_item_draft(
             WorkItemDraft {
+                list_id: None,
                 title: "設計レビュー".to_string(),
                 planned_start_date: Some("2026-07-07".to_string()),
                 due_date: Some("2026-07-06".to_string()),
@@ -397,6 +465,7 @@ mod tests {
     fn validate_work_item_draft_rejects_due_time_without_due_date() {
         let result = validate_work_item_draft(
             WorkItemDraft {
+                list_id: None,
                 title: "通知時刻だけ".to_string(),
                 planned_start_date: None,
                 due_date: None,

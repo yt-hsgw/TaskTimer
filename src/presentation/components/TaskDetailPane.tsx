@@ -1,6 +1,7 @@
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import type {
   TaskWithSubtasks,
+  TaskListItem,
   WorkItemDraft,
   WorkItemUpdateDraft,
 } from "../../application/usecases/contracts";
@@ -18,6 +19,7 @@ type TaskDetailPaneProps = {
   task: TaskWithSubtasks;
   selectedSubtaskId: string | null;
   activeTimer: ActiveTimer | null;
+  taskLists: TaskListItem[];
   displayMode: NotificationDisplayMode;
   isMutating: boolean;
   onClose(): void;
@@ -41,6 +43,7 @@ type TaskDetailPaneProps = {
 
 type DetailFormDraft = {
   title: string;
+  listId: string;
   dueDate: string;
   dueTime: string;
   timerTargetMinutes: string;
@@ -83,6 +86,7 @@ export function TaskDetailPane({
   task,
   selectedSubtaskId,
   activeTimer,
+  taskLists,
   displayMode,
   isMutating,
   onClose,
@@ -120,7 +124,11 @@ export function TaskDetailPane({
   const hasSubtasks = task.subtasks.length > 0;
   const detailKey = `${selectedSubtask ? "subtask" : "task"}:${detailItem.id}`;
   const detailMemo = detailItem.memo.trim();
-  const [draft, setDraft] = useState(() => toDetailFormDraft(detailItem));
+  const taskListName =
+    taskLists.find((list) => list.id === task.listId)?.name ?? "タスク";
+  const [draft, setDraft] = useState(() =>
+    toDetailFormDraft(detailItem, task.listId),
+  );
   const [isCoreEditOpen, setIsCoreEditOpen] = useState(false);
   const [isDuePopoverOpen, setIsDuePopoverOpen] = useState(false);
   const [isSubtaskCreateOpen, setIsSubtaskCreateOpen] = useState(false);
@@ -149,12 +157,12 @@ export function TaskDetailPane({
   const dueChipLabel = formatDueChipLabel(detailItem.dueDate, detailItem.dueTime);
 
   useEffect(() => {
-    setDraft(toDetailFormDraft(detailItem));
+    setDraft(toDetailFormDraft(detailItem, task.listId));
     setCustomDueDraft({
       dueDate: detailItem.dueDate ?? getTodayDateInputValue(),
       dueTime: detailItem.dueTime ?? "",
     });
-  }, [detailItem]);
+  }, [detailItem, task.listId]);
 
   useEffect(() => {
     setIsCoreEditOpen(false);
@@ -342,6 +350,12 @@ export function TaskDetailPane({
           <span>状態</span>
           <strong>{statusLabels[detailItem.status]}</strong>
         </div>
+        {isTaskDetail ? (
+          <div>
+            <span>リスト</span>
+            <strong>{taskListName}</strong>
+          </div>
+        ) : null}
         <div>
           <span>期限</span>
           <strong>{formatDue(detailItem.dueDate, detailItem.dueTime)}</strong>
@@ -490,6 +504,28 @@ export function TaskDetailPane({
               required
             />
           </label>
+
+          {isTaskDetail ? (
+            <label>
+              <span>所属リスト</span>
+              <select
+                value={draft.listId}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    listId: event.target.value,
+                  }))
+                }
+                disabled={isMutating}
+              >
+                {taskLists.map((list) => (
+                  <option key={list.id} value={list.id}>
+                    {list.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
           <label>
             <span>目標時間（分）</span>
@@ -969,9 +1005,11 @@ function toDetailFormDraft(
     | "recurrenceRule"
     | "memo"
   >,
+  listId: string,
 ): DetailFormDraft {
   return {
     title: item.title,
+    listId,
     dueDate: item.dueDate ?? "",
     dueTime: item.dueTime ?? "",
     timerTargetMinutes: secondsToMinutesText(item.timerTargetSeconds),
@@ -987,6 +1025,7 @@ function toDetailFormDraft(
 function toWorkItemUpdateDraft(input: DetailFormDraft): WorkItemUpdateDraft {
   const dueDate = normalizeOptionalText(input.dueDate);
   return {
+    listId: input.listId,
     title: input.title,
     plannedStartDate: null,
     dueDate,

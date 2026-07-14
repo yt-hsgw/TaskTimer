@@ -7,6 +7,7 @@ import type {
   TaskListItem,
   TaskRow,
   TaskWithSubtasks,
+  TaskListDraft,
   UpdateSubtaskDraft,
   UpdateTaskDraft,
   WeekCalendarItem,
@@ -31,6 +32,12 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<NotificationDisplayMode>("get_notification_display_mode"),
   createTask: (input: WorkItemDraft) =>
     invoke<Task>("create_task", { request: input }),
+  createTaskList: (input: TaskListDraft) =>
+    invoke<TaskListItem>("create_task_list", { request: input }),
+  updateTaskList: (listId: string, input: TaskListDraft) =>
+    invoke<TaskListItem>("update_task_list", { request: { ...input, listId } }),
+  deleteTaskList: (listId: string) =>
+    invoke<void>("delete_task_list", { request: { listId } }),
   createSubtask: (input: CreateSubtaskDraft) =>
     invoke<Subtask>("create_subtask", { request: input }),
   updateTask: (input: UpdateTaskDraft) =>

@@ -21,9 +21,9 @@ use crate::{
         target_ref, ActiveTimer, CalendarMarker, CalendarRepository, NotificationCommandRepository,
         NotificationDeliveryAttemptRecord, NotificationHistoryRepository, NotificationJob,
         NotificationPreferenceRepository, RecurrenceRuleInput, RecurrenceRuleRecord,
-        RepositoryResult, SubtaskRecord, TaskListRecord, TaskReadRepository, TaskRecord,
-        TaskRowRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
-        WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
+        RepositoryResult, SubtaskRecord, TaskListCommandRepository, TaskListCreate, TaskListRecord,
+        TaskListUpdate, TaskReadRepository, TaskRecord, TaskRowRecord, TaskTimerCommandRepository,
+        TaskWithSubtasksRecord, TimerRepository, WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
     },
     domain::{
         notification::{
@@ -189,9 +189,9 @@ impl TaskReadRepository for SqliteDatabase {
         limit: i64,
     ) -> RepositoryResult<Vec<TaskRowRecord>> {
         let limit = limit.clamp(1, 500);
-        let list_id = normalize_list_id(list_id);
+        let list_id = normalize_optional_list_id(list_id);
 
-        self.with_connection(|connection| select_task_rows(connection, &list_id, limit))
+        self.with_connection(|connection| select_task_rows(connection, list_id.as_deref(), limit))
     }
 }
 
@@ -494,6 +494,24 @@ impl TaskTimerCommandRepository for SqliteDatabase {
     }
 }
 
+impl TaskListCommandRepository for SqliteDatabase {
+    fn create_task_list(&self, input: TaskListCreate) -> RepositoryResult<TaskListRecord> {
+        self.with_transaction(|transaction| insert_task_list(transaction, input))
+    }
+
+    fn update_task_list(
+        &self,
+        list_id: String,
+        input: TaskListUpdate,
+    ) -> RepositoryResult<TaskListRecord> {
+        self.with_transaction(|transaction| update_task_list_detail(transaction, &list_id, input))
+    }
+
+    fn delete_task_list(&self, list_id: String, now: String) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| soft_delete_task_list(transaction, &list_id, &now))
+    }
+}
+
 impl NotificationPreferenceRepository for SqliteDatabase {
     fn get_notification_display_mode(&self) -> RepositoryResult<NotificationDisplayMode> {
         self.with_connection(|connection| {
@@ -684,7 +702,8 @@ fn insert_task(
 ) -> RepositoryResult<TaskRecord> {
     let id = Uuid::new_v4().to_string();
     ensure_default_task_list(transaction, &input.now)?;
-    let sort_order = next_task_sort_order(transaction, DEFAULT_TASK_LIST_ID)?;
+    ensure_task_list_exists(transaction, &input.list_id)?;
+    let sort_order = next_task_sort_order(transaction, &input.list_id)?;
     let planned_start_date = input.planned_start_date.clone();
     let due_date = input.due_date.clone();
     let due_time = input.due_time.clone();
@@ -701,7 +720,7 @@ fn insert_task(
             ",
             params![
                 id,
-                DEFAULT_TASK_LIST_ID,
+                input.list_id,
                 input.title,
                 input.planned_start_date,
                 input.due_date,
@@ -725,6 +744,31 @@ fn insert_task(
     )?;
 
     select_task_by_id(transaction, &id)
+}
+
+fn insert_task_list(
+    transaction: &Transaction<'_>,
+    input: TaskListCreate,
+) -> RepositoryResult<TaskListRecord> {
+    ensure_default_task_list(transaction, &input.now)?;
+    ensure_unique_task_list_name(transaction, &input.name, None)?;
+
+    let id = Uuid::new_v4().to_string();
+    let sort_order = next_task_list_sort_order(transaction)?;
+
+    transaction
+        .execute(
+            "
+            INSERT INTO task_lists (
+              id, name, sort_order, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?4)
+            ",
+            params![id, input.name, sort_order, input.now],
+        )
+        .map_err(|error| format!("タスクリストを作成できません: {error}"))?;
+
+    select_task_list_by_id(transaction, &id)
 }
 
 fn insert_subtask(
@@ -781,6 +825,28 @@ fn update_task_detail(
     input: WorkItemUpdate,
 ) -> RepositoryResult<TaskRecord> {
     ensure_task_exists(transaction, task_id)?;
+    let current_list_id: String = transaction
+        .query_row(
+            "
+            SELECT list_id
+            FROM tasks
+            WHERE id = ?1
+              AND deleted_at IS NULL
+            ",
+            params![task_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("タスクの所属リストを取得できません: {error}"))?;
+    let next_sort_order = if let Some(list_id) = input.list_id.as_deref() {
+        ensure_task_list_exists(transaction, list_id)?;
+        if list_id != current_list_id {
+            Some(next_task_sort_order(transaction, list_id)?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let planned_start_date = input.planned_start_date.clone();
     let due_date = input.due_date.clone();
     let due_time = input.due_time.clone();
@@ -791,17 +857,21 @@ fn update_task_detail(
         .execute(
             "
             UPDATE tasks
-            SET title = ?1,
-                planned_start_date = ?2,
-                due_date = ?3,
-                due_time = ?4,
-                timer_target_seconds = ?5,
-                memo = ?6,
-                updated_at = ?7
-            WHERE id = ?8
+            SET list_id = COALESCE(?1, list_id),
+                sort_order = COALESCE(?2, sort_order),
+                title = ?3,
+                planned_start_date = ?4,
+                due_date = ?5,
+                due_time = ?6,
+                timer_target_seconds = ?7,
+                memo = ?8,
+                updated_at = ?9
+            WHERE id = ?10
               AND deleted_at IS NULL
             ",
             params![
+                input.list_id,
+                next_sort_order,
                 input.title,
                 input.planned_start_date,
                 input.due_date,
@@ -839,6 +909,73 @@ fn update_task_detail(
     )?;
 
     select_existing_task_by_id(transaction, task_id)
+}
+
+fn update_task_list_detail(
+    transaction: &Transaction<'_>,
+    list_id: &str,
+    input: TaskListUpdate,
+) -> RepositoryResult<TaskListRecord> {
+    ensure_custom_task_list(transaction, list_id)?;
+    ensure_unique_task_list_name(transaction, &input.name, Some(list_id))?;
+
+    let updated = transaction
+        .execute(
+            "
+            UPDATE task_lists
+            SET name = ?1,
+                updated_at = ?2
+            WHERE id = ?3
+              AND deleted_at IS NULL
+            ",
+            params![input.name, input.now, list_id],
+        )
+        .map_err(|error| format!("タスクリストを更新できません: {error}"))?;
+    if updated != 1 {
+        return Err("更新対象のタスクリストが存在しません".to_string());
+    }
+
+    select_task_list_by_id(transaction, list_id)
+}
+
+fn soft_delete_task_list(
+    transaction: &Transaction<'_>,
+    list_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    ensure_default_task_list(transaction, now)?;
+    ensure_custom_task_list(transaction, list_id)?;
+
+    transaction
+        .execute(
+            "
+            UPDATE tasks
+            SET list_id = ?1,
+                updated_at = ?2
+            WHERE list_id = ?3
+              AND deleted_at IS NULL
+            ",
+            params![DEFAULT_TASK_LIST_ID, now, list_id],
+        )
+        .map_err(|error| format!("タスクリスト内のタスクを移動できません: {error}"))?;
+
+    let updated = transaction
+        .execute(
+            "
+            UPDATE task_lists
+            SET deleted_at = ?1,
+                updated_at = ?1
+            WHERE id = ?2
+              AND deleted_at IS NULL
+            ",
+            params![now, list_id],
+        )
+        .map_err(|error| format!("タスクリストを削除できません: {error}"))?;
+    if updated != 1 {
+        return Err("削除対象のタスクリストが存在しません".to_string());
+    }
+
+    Ok(())
 }
 
 fn update_subtask_detail(
@@ -1530,9 +1667,52 @@ fn select_task_lists(connection: &Connection) -> RepositoryResult<Vec<TaskListRe
         .collect()
 }
 
+fn select_task_list_by_id(connection: &Connection, id: &str) -> RepositoryResult<TaskListRecord> {
+    connection
+        .query_row(
+            "
+            SELECT task_lists.id,
+                   task_lists.name,
+                   task_lists.sort_order,
+                   task_lists.created_at,
+                   task_lists.updated_at,
+                   COUNT(tasks.id) AS task_count,
+                   COALESCE(SUM(CASE WHEN tasks.status NOT IN ('done', 'archived') THEN 1 ELSE 0 END), 0)
+                     AS active_task_count,
+                   COALESCE(SUM(CASE WHEN tasks.status = 'done' THEN 1 ELSE 0 END), 0)
+                     AS completed_task_count
+            FROM task_lists
+            LEFT JOIN tasks
+              ON tasks.list_id = task_lists.id
+             AND tasks.deleted_at IS NULL
+            WHERE task_lists.id = ?1
+              AND task_lists.deleted_at IS NULL
+            GROUP BY task_lists.id,
+                     task_lists.name,
+                     task_lists.sort_order,
+                     task_lists.created_at,
+                     task_lists.updated_at
+            ",
+            params![id],
+            |row| {
+                Ok(TaskListRecord {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    sort_order: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                    task_count: row.get(5)?,
+                    active_task_count: row.get(6)?,
+                    completed_task_count: row.get(7)?,
+                })
+            },
+        )
+        .map_err(|error| format!("タスクリストを取得できません: {error}"))
+}
+
 fn select_task_rows(
     connection: &Connection,
-    list_id: &str,
+    list_id: Option<&str>,
     limit: i64,
 ) -> RepositoryResult<Vec<TaskRowRecord>> {
     let mut statement = connection
@@ -1581,9 +1761,9 @@ fn select_task_rows(
               OR (
                 active_timer.target_type = 'subtask'
                 AND active_timer.parent_task_id = tasks.id
-              )
+            )
             WHERE tasks.deleted_at IS NULL
-              AND tasks.list_id = ?1
+              AND (?1 IS NULL OR tasks.list_id = ?1)
             GROUP BY tasks.id,
                      tasks.list_id,
                      tasks.title,
@@ -1712,6 +1892,65 @@ fn ensure_task_exists(connection: &Connection, task_id: &str) -> RepositoryResul
     } else {
         Err("親タスクが存在しません".to_string())
     }
+}
+
+fn ensure_task_list_exists(connection: &Connection, list_id: &str) -> RepositoryResult<()> {
+    let exists: bool = connection
+        .query_row(
+            "
+            SELECT EXISTS(
+              SELECT 1
+              FROM task_lists
+              WHERE id = ?1
+                AND deleted_at IS NULL
+            )
+            ",
+            params![list_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("タスクリストを確認できません: {error}"))?;
+
+    if exists {
+        Ok(())
+    } else {
+        Err("タスクリストが存在しません".to_string())
+    }
+}
+
+fn ensure_custom_task_list(connection: &Connection, list_id: &str) -> RepositoryResult<()> {
+    if list_id == DEFAULT_TASK_LIST_ID {
+        return Err("初期タスクリストは変更または削除できません".to_string());
+    }
+    ensure_task_list_exists(connection, list_id)
+}
+
+fn ensure_unique_task_list_name(
+    connection: &Connection,
+    name: &str,
+    except_id: Option<&str>,
+) -> RepositoryResult<()> {
+    let existing_id = connection
+        .query_row(
+            "
+            SELECT id
+            FROM task_lists
+            WHERE name = ?1
+              AND deleted_at IS NULL
+            LIMIT 1
+            ",
+            params![name],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("タスクリスト名の重複を確認できません: {error}"))?;
+
+    if let Some(existing_id) = existing_id {
+        if except_id != Some(existing_id.as_str()) {
+            return Err("同じ名前のタスクリストがすでに存在します".to_string());
+        }
+    }
+
+    Ok(())
 }
 
 fn ensure_subtask_exists(connection: &Connection, subtask_id: &str) -> RepositoryResult<()> {
@@ -2029,6 +2268,20 @@ fn next_task_sort_order(connection: &Connection, list_id: &str) -> RepositoryRes
             |row| row.get(0),
         )
         .map_err(|error| format!("タスクの並び順を取得できません: {error}"))
+}
+
+fn next_task_list_sort_order(connection: &Connection) -> RepositoryResult<i64> {
+    connection
+        .query_row(
+            "
+            SELECT COALESCE(MAX(sort_order), -1) + 1
+            FROM task_lists
+            WHERE deleted_at IS NULL
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("タスクリストの並び順を取得できません: {error}"))
 }
 
 fn next_subtask_sort_order(connection: &Connection, task_id: &str) -> RepositoryResult<i64> {
@@ -2900,12 +3153,11 @@ fn seed_default_ui_preferences(connection: &Connection) -> RepositoryResult<()> 
         .map_err(|error| format!("UI設定の初期化に失敗しました: {error}"))
 }
 
-fn normalize_list_id(list_id: Option<&str>) -> String {
+fn normalize_optional_list_id(list_id: Option<&str>) -> Option<String> {
     list_id
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(DEFAULT_TASK_LIST_ID)
-        .to_string()
+        .map(ToOwned::to_owned)
 }
 
 fn current_timestamp_value(connection: &Connection) -> RepositoryResult<String> {
@@ -3248,6 +3500,7 @@ mod tests {
 
     fn draft(title: &str) -> usecases::WorkItemDraft {
         usecases::WorkItemDraft {
+            list_id: None,
             title: title.to_string(),
             planned_start_date: None,
             due_date: None,
@@ -3774,6 +4027,7 @@ mod tests {
                 &clock,
                 task.id,
                 usecases::WorkItemDraft {
+                    list_id: None,
                     title: "画面に表示".to_string(),
                     planned_start_date: Some("2026-07-06".to_string()),
                     due_date: Some("2026-07-07".to_string()),
@@ -3798,6 +4052,169 @@ mod tests {
     }
 
     #[test]
+    fn custom_task_list_filters_task_rows_and_keeps_default_list_separate() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let list = usecases::create_task_list(
+            &database,
+            &clock,
+            usecases::TaskListDraft {
+                name: "仕事".to_string(),
+            },
+        )
+        .expect("create task list");
+        let custom_task = usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: Some(list.id.clone()),
+                title: "リスト所属タスク".to_string(),
+                planned_start_date: None,
+                due_date: None,
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create task in custom list");
+        usecases::create_task(&database, &clock, draft("既定リストタスク"))
+            .expect("create default task");
+
+        let custom_rows = database
+            .list_task_rows(Some(&list.id), 200)
+            .expect("custom rows");
+        let default_rows = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("default rows");
+        let all_rows = database.list_task_rows(None, 200).expect("all rows");
+
+        assert_eq!(custom_rows.len(), 1);
+        assert_eq!(custom_rows[0].id, custom_task.id);
+        assert_eq!(default_rows.len(), 1);
+        assert_eq!(all_rows.len(), 2);
+    }
+
+    #[test]
+    fn delete_custom_task_list_moves_tasks_to_default_without_deleting_timer_history() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let stop_clock = FixedClock {
+            now: "2026-07-06T00:05:00Z",
+        };
+        let list = usecases::create_task_list(
+            &database,
+            &clock,
+            usecases::TaskListDraft {
+                name: "案件A".to_string(),
+            },
+        )
+        .expect("create task list");
+        let task = usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: Some(list.id.clone()),
+                title: "移動対象".to_string(),
+                planned_start_date: None,
+                due_date: None,
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create custom task");
+        usecases::start_timer(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id.clone(),
+            },
+        )
+        .expect("start timer");
+        usecases::stop_active_timer(&database, &stop_clock).expect("stop timer");
+
+        usecases::delete_task_list(&database, &clock, list.id.clone()).expect("delete list");
+
+        let default_rows = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("default rows");
+        let lists = database.list_task_lists().expect("task lists");
+        let timer_count: i64 = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "
+                        SELECT COUNT(*)
+                        FROM timer_sessions
+                        WHERE target_type = 'task'
+                          AND target_id = ?1
+                          AND deleted_at IS NULL
+                        ",
+                        params![task.id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("timer count: {error}"))
+            })
+            .expect("timer count");
+
+        assert!(default_rows.iter().any(|row| row.id == task.id));
+        assert!(!lists.iter().any(|item| item.id == list.id));
+        assert_eq!(timer_count, 1);
+    }
+
+    #[test]
+    fn task_list_name_policy_rejects_default_update_and_duplicate_names() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let list = usecases::create_task_list(
+            &database,
+            &clock,
+            usecases::TaskListDraft {
+                name: "重複確認".to_string(),
+            },
+        )
+        .expect("create task list");
+
+        let default_update = usecases::update_task_list(
+            &database,
+            &clock,
+            DEFAULT_TASK_LIST_ID.to_string(),
+            usecases::TaskListDraft {
+                name: "変更不可".to_string(),
+            },
+        );
+        let duplicate = usecases::create_task_list(
+            &database,
+            &clock,
+            usecases::TaskListDraft {
+                name: "重複確認".to_string(),
+            },
+        );
+        let renamed = usecases::update_task_list(
+            &database,
+            &clock,
+            list.id,
+            usecases::TaskListDraft {
+                name: "重複確認 2".to_string(),
+            },
+        )
+        .expect("rename task list");
+
+        assert!(default_update
+            .expect_err("default list update")
+            .contains("初期タスクリスト"));
+        assert!(duplicate
+            .expect_err("duplicate list name")
+            .contains("すでに存在"));
+        assert_eq!(renamed.name, "重複確認 2");
+    }
+
+    #[test]
     fn list_calendar_items_returns_range_parent_title_and_active_timer_time() {
         let database = in_memory_database();
         let create_clock = FixedClock {
@@ -3813,6 +4230,7 @@ mod tests {
             &create_clock,
             parent.id,
             usecases::WorkItemDraft {
+                list_id: None,
                 title: "調査サブタスク".to_string(),
                 planned_start_date: Some("2026-07-20".to_string()),
                 due_date: Some("2026-07-21".to_string()),
@@ -3825,6 +4243,7 @@ mod tests {
             &database,
             &create_clock,
             usecases::WorkItemDraft {
+                list_id: None,
                 title: "範囲外".to_string(),
                 planned_start_date: Some("2026-10-01".to_string()),
                 due_date: None,
@@ -3888,6 +4307,7 @@ mod tests {
             &database,
             &create_clock,
             usecases::WorkItemDraft {
+                list_id: None,
                 title: "UI設計".to_string(),
                 planned_start_date: Some("2026-07-06".to_string()),
                 due_date: Some("2026-07-07".to_string()),
@@ -4067,6 +4487,7 @@ mod tests {
             &database,
             &create_clock,
             usecases::WorkItemDraft {
+                list_id: None,
                 title: "更新前".to_string(),
                 planned_start_date: Some("2026-07-06".to_string()),
                 due_date: Some("2026-07-07".to_string()),
@@ -4081,6 +4502,7 @@ mod tests {
             &update_clock,
             task.id.clone(),
             usecases::WorkItemUpdateDraft {
+                list_id: None,
                 title: "更新後".to_string(),
                 planned_start_date: Some("2026-07-08".to_string()),
                 due_date: None,
@@ -4164,6 +4586,7 @@ mod tests {
             &database,
             &create_clock,
             usecases::WorkItemDraft {
+                list_id: None,
                 title: "通知切替対象".to_string(),
                 planned_start_date: None,
                 due_date: Some("2026-07-06".to_string()),
@@ -4232,6 +4655,7 @@ mod tests {
             &update_clock,
             task.id.clone(),
             usecases::WorkItemUpdateDraft {
+                list_id: None,
                 title: "繰り返し対象".to_string(),
                 planned_start_date: None,
                 due_date: Some("2026-07-10".to_string()),
@@ -4256,6 +4680,7 @@ mod tests {
             &update_clock,
             recurrence.target.id.clone(),
             usecases::WorkItemUpdateDraft {
+                list_id: None,
                 title: "繰り返し対象".to_string(),
                 planned_start_date: None,
                 due_date: Some("2026-07-10".to_string()),
@@ -4301,6 +4726,7 @@ mod tests {
             &clock,
             task.id,
             usecases::WorkItemUpdateDraft {
+                list_id: None,
                 title: "基準日なし".to_string(),
                 planned_start_date: None,
                 due_date: None,
@@ -4336,6 +4762,7 @@ mod tests {
             &clock,
             subtask.id.clone(),
             usecases::WorkItemUpdateDraft {
+                list_id: None,
                 title: "子タスク更新".to_string(),
                 planned_start_date: None,
                 due_date: Some("2026-07-09".to_string()),
@@ -4391,6 +4818,7 @@ mod tests {
             &clock,
             subtask.id.clone(),
             usecases::WorkItemUpdateDraft {
+                list_id: None,
                 title: "月次サブタスク".to_string(),
                 planned_start_date: Some("2026-07-09".to_string()),
                 due_date: None,
@@ -4425,6 +4853,7 @@ mod tests {
             &clock,
             task.id,
             usecases::WorkItemUpdateDraft {
+                list_id: None,
                 title: "目標時間".to_string(),
                 planned_start_date: None,
                 due_date: None,
@@ -4673,6 +5102,7 @@ mod tests {
             &database,
             &create_clock,
             usecases::WorkItemDraft {
+                list_id: None,
                 title: "秘密の顧客タスク".to_string(),
                 planned_start_date: Some("2026-07-06".to_string()),
                 due_date: Some("2026-07-07".to_string()),
@@ -4737,6 +5167,7 @@ mod tests {
             &database,
             &clock,
             usecases::WorkItemDraft {
+                list_id: None,
                 title: "通知失敗確認".to_string(),
                 planned_start_date: None,
                 due_date: Some("2026-07-06".to_string()),
@@ -4830,6 +5261,7 @@ mod tests {
             &database,
             &create_clock,
             usecases::WorkItemDraft {
+                list_id: None,
                 title: "復帰時通知".to_string(),
                 planned_start_date: None,
                 due_date: Some("2026-07-06".to_string()),
