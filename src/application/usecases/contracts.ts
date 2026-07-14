@@ -93,6 +93,22 @@ export type SqliteRestoreResult = {
   manifest: SqliteBackupManifest;
 };
 
+export type DataExportManifest = {
+  format: string;
+  formatVersion: number;
+  appVersion: string;
+  createdAt: string;
+  platform: string;
+  compatibility: string;
+  containsPersonalData: boolean;
+};
+
+export type DataExportResult = {
+  exportPath: string;
+  files: string[];
+  manifest: DataExportManifest;
+};
+
 export type TaskListItem = {
   id: string;
   name: string;
@@ -160,6 +176,8 @@ export type TaskTimerGateway = {
   listNotificationFailureHistory(): Promise<NotificationDeliveryAttempt[]>;
   createSqliteBackup(destinationDir: string): Promise<SqliteBackupResult>;
   restoreSqliteBackup(backupDir: string): Promise<SqliteRestoreResult>;
+  createJsonExport(destinationDir: string): Promise<DataExportResult>;
+  createCsvExport(destinationDir: string): Promise<DataExportResult>;
 };
 
 export type TaskWithSubtasks = Task & {
