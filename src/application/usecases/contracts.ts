@@ -68,6 +68,31 @@ export type NotificationDeliveryAttempt = {
   attemptCount: number;
 };
 
+export type SqliteBackupManifest = {
+  format: string;
+  formatVersion: number;
+  appVersion: string;
+  schemaVersion: number;
+  createdAt: string;
+  platform: string;
+  databaseFile: string;
+  integrityCheck: string;
+};
+
+export type SqliteBackupResult = {
+  backupDir: string;
+  databaseFile: string;
+  manifestFile: string;
+  manifest: SqliteBackupManifest;
+};
+
+export type SqliteRestoreResult = {
+  backupDir: string;
+  restoredAt: string;
+  previousDatabaseFile: string;
+  manifest: SqliteBackupManifest;
+};
+
 export type TaskListItem = {
   id: string;
   name: string;
@@ -133,6 +158,8 @@ export type TaskTimerGateway = {
   updateNotificationsEnabled(enabled: boolean): Promise<boolean>;
   dispatchDueNotifications(): Promise<NotificationDispatchSummary>;
   listNotificationFailureHistory(): Promise<NotificationDeliveryAttempt[]>;
+  createSqliteBackup(destinationDir: string): Promise<SqliteBackupResult>;
+  restoreSqliteBackup(backupDir: string): Promise<SqliteRestoreResult>;
 };
 
 export type TaskWithSubtasks = Task & {

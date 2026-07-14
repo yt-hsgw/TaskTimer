@@ -15,9 +15,11 @@ use super::{
     repositories::{
         ActiveTimer, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationDispatchSummary, NotificationHistoryRepository,
-        NotificationPreferenceRepository, RecurrenceRuleInput, RepositoryResult, SubtaskRecord,
-        TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskRecord,
-        TaskTimerCommandRepository, WorkItemCreate, WorkItemUpdate,
+        NotificationPreferenceRepository, RecurrenceRuleInput, RepositoryResult,
+        SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore,
+        SqliteRestoreRecord, SubtaskRecord, TaskListCommandRepository, TaskListCreate,
+        TaskListRecord, TaskListUpdate, TaskRecord, TaskTimerCommandRepository, WorkItemCreate,
+        WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
 
@@ -25,6 +27,7 @@ const NOTIFICATION_DISPATCH_LIMIT: i64 = 20;
 const NOTIFICATION_HISTORY_LIMIT: i64 = 20;
 const TIMER_TARGET_MAX_SECONDS: i64 = 60 * 60 * 24 * 30;
 const RECURRENCE_INTERVAL_MAX: i64 = 365;
+const LOCAL_PATH_MAX_CHARS: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItemDraft {
@@ -57,6 +60,16 @@ pub struct RecurrenceRuleDraft {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskListDraft {
     pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqliteBackupCreateDraft {
+    pub destination_dir: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SqliteBackupRestoreDraft {
+    pub backup_dir: String,
 }
 
 pub fn create_task(
@@ -310,6 +323,31 @@ pub fn list_notification_failure_history(
     repository.list_notification_failure_history(NOTIFICATION_HISTORY_LIMIT)
 }
 
+pub fn create_sqlite_backup(
+    repository: &impl SqliteBackupRepository,
+    clock: &impl Clock,
+    draft: SqliteBackupCreateDraft,
+) -> RepositoryResult<SqliteBackupRecord> {
+    repository.create_sqlite_backup(SqliteBackupCreate {
+        destination_dir: validate_local_path(&draft.destination_dir, "バックアップ保存先")?,
+        now: clock.now_utc_iso8601(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        platform: std::env::consts::OS.to_string(),
+        schema_version: CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+    })
+}
+
+pub fn restore_sqlite_backup(
+    repository: &impl SqliteBackupRepository,
+    clock: &impl Clock,
+    draft: SqliteBackupRestoreDraft,
+) -> RepositoryResult<SqliteRestoreRecord> {
+    repository.restore_sqlite_backup(SqliteBackupRestore {
+        backup_dir: validate_local_path(&draft.backup_dir, "バックアップフォルダ")?,
+        now: clock.now_utc_iso8601(),
+    })
+}
+
 fn validate_work_item_draft(draft: WorkItemDraft, now: String) -> RepositoryResult<WorkItemCreate> {
     let title = validate_title(&draft.title)?;
     let planned_start_date = validate_optional_date(draft.planned_start_date.as_deref(), "開始日")?;
@@ -420,6 +458,22 @@ fn validate_identifier(value: &str, field_label: &str) -> RepositoryResult<Strin
     }
     if trimmed.chars().count() > 128 {
         return Err(format!("{field_label}は128文字以内で入力してください"));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn validate_local_path(value: &str, field_label: &str) -> RepositoryResult<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{field_label}は必須です"));
+    }
+    if trimmed.chars().count() > LOCAL_PATH_MAX_CHARS {
+        return Err(format!(
+            "{field_label}は{LOCAL_PATH_MAX_CHARS}文字以内で指定してください"
+        ));
+    }
+    if trimmed.contains('\0') {
+        return Err(format!("{field_label}に不正な文字が含まれています"));
     }
     Ok(trimmed.to_string())
 }

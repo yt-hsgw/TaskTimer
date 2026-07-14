@@ -8,10 +8,14 @@ use crate::domain::{
 use super::{
     repositories::{
         ActiveTimer, NotificationDeliveryAttemptRecord, NotificationDispatchSummary,
-        RecurrenceRuleRecord, SubtaskRecord, TaskListRecord, TaskRecord, TaskRowRecord,
-        TaskWithSubtasksRecord, WeekCalendarItem,
+        RecurrenceRuleRecord, SqliteBackupManifestRecord, SqliteBackupRecord, SqliteRestoreRecord,
+        SubtaskRecord, TaskListRecord, TaskRecord, TaskRowRecord, TaskWithSubtasksRecord,
+        WeekCalendarItem,
     },
-    usecases::{RecurrenceRuleDraft, TaskListDraft, WorkItemDraft, WorkItemUpdateDraft},
+    usecases::{
+        RecurrenceRuleDraft, SqliteBackupCreateDraft, SqliteBackupRestoreDraft, TaskListDraft,
+        WorkItemDraft, WorkItemUpdateDraft,
+    },
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -156,6 +160,18 @@ pub struct UpdateNotificationDisplayModeRequestDto {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateNotificationsEnabledRequestDto {
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateSqliteBackupRequestDto {
+    pub destination_dir: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreSqliteBackupRequestDto {
+    pub backup_dir: String,
 }
 
 #[derive(Serialize)]
@@ -317,6 +333,37 @@ pub struct NotificationDeliveryAttemptDto {
     pub attempt_count: i64,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SqliteBackupManifestDto {
+    pub format: String,
+    pub format_version: i64,
+    pub app_version: String,
+    pub schema_version: i64,
+    pub created_at: String,
+    pub platform: String,
+    pub database_file: String,
+    pub integrity_check: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SqliteBackupDto {
+    pub backup_dir: String,
+    pub database_file: String,
+    pub manifest_file: String,
+    pub manifest: SqliteBackupManifestDto,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SqliteRestoreDto {
+    pub backup_dir: String,
+    pub restored_at: String,
+    pub previous_database_file: String,
+    pub manifest: SqliteBackupManifestDto,
+}
+
 impl TryFrom<UpdateNotificationDisplayModeRequestDto> for NotificationDisplayMode {
     type Error = String;
 
@@ -409,6 +456,22 @@ impl From<RecurrenceRuleRequestDto> for RecurrenceRuleDraft {
         Self {
             frequency: value.frequency,
             interval: value.interval,
+        }
+    }
+}
+
+impl From<CreateSqliteBackupRequestDto> for SqliteBackupCreateDraft {
+    fn from(value: CreateSqliteBackupRequestDto) -> Self {
+        Self {
+            destination_dir: value.destination_dir,
+        }
+    }
+}
+
+impl From<RestoreSqliteBackupRequestDto> for SqliteBackupRestoreDraft {
+    fn from(value: RestoreSqliteBackupRequestDto) -> Self {
+        Self {
+            backup_dir: value.backup_dir,
         }
     }
 }
@@ -606,6 +669,43 @@ impl From<NotificationDeliveryAttemptRecord> for NotificationDeliveryAttemptDto 
             result: value.result.as_str().to_string(),
             error_message: value.error_message,
             attempt_count: value.attempt_count,
+        }
+    }
+}
+
+impl From<SqliteBackupManifestRecord> for SqliteBackupManifestDto {
+    fn from(value: SqliteBackupManifestRecord) -> Self {
+        Self {
+            format: value.format,
+            format_version: value.format_version,
+            app_version: value.app_version,
+            schema_version: value.schema_version,
+            created_at: value.created_at,
+            platform: value.platform,
+            database_file: value.database_file,
+            integrity_check: value.integrity_check,
+        }
+    }
+}
+
+impl From<SqliteBackupRecord> for SqliteBackupDto {
+    fn from(value: SqliteBackupRecord) -> Self {
+        Self {
+            backup_dir: value.backup_dir,
+            database_file: value.database_file,
+            manifest_file: value.manifest_file,
+            manifest: value.manifest.into(),
+        }
+    }
+}
+
+impl From<SqliteRestoreRecord> for SqliteRestoreDto {
+    fn from(value: SqliteRestoreRecord) -> Self {
+        Self {
+            backup_dir: value.backup_dir,
+            restored_at: value.restored_at,
+            previous_database_file: value.previous_database_file,
+            manifest: value.manifest.into(),
         }
     }
 }
