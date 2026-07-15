@@ -131,7 +131,8 @@ flowchart LR
 | UpdateSubtaskSchedule | サブタスクの開始予定日、期限、通知ルールを同一トランザクションで更新する。 |
 | UpdateRecurrenceRule | 対象の繰り返し設定を検証し保存する。 |
 | SetTimerTarget | タスクまたはサブタスクの目標タイマー時間を保存する。 |
-| UpdateUiPreference | 左ペイン開閉や最後に開いたビューなど、UI設定を保存する。 |
+| GetUiPreferences | 左ペイン開閉、最後のビュー、最後のリストID、カレンダー表示モードを取得する。 |
+| UpdateUiPreferences | 左ペイン開閉、最後のビュー、最後のリストID、カレンダー表示モードを同一トランザクションで保存する。 |
 
 OS通知登録はDBトランザクションに含めない。DBコミット後に実行し、失敗時は再試行状態を記録する。
 
@@ -148,6 +149,8 @@ Issue #68 では、右詳細ペインの編集対象を期限日/期限時刻中
 Issue #54 では、`TaskList` をタスク分類の境界として扱う。`CreateTaskList`、`UpdateTaskList`、`DeleteTaskList` はApplication Use Caseとして入力検証とトランザクション境界を持つ。カスタムリスト削除時は、同一トランザクション内で所属タスクを初期リストへ移動し、タイマー履歴や通知ルールは削除しない。
 
 既定タスクリストのIDと名称はDomainの不変値として扱う。Applicationは既定値補完に使い、Infrastructureは初期データ投入と削除時の移動先に使う。Presentationで同じ意味を扱う場合も、UI固有の文字列ではなくDomain定数を参照する。
+
+Issue #57 では、UI設定を `ui_preferences` に保存する。保存対象は `left_pane_open`、`last_view`、`last_task_list_id`、`calendar_view_mode` に限定する。壊れた値はRepositoryの読み取り時に既定値へフォールバックし、Use Caseの更新時はホワイトリスト化された値だけを受け付ける。選択中タスクや右詳細ペイン開閉は、削除やアーカイブで無効になりやすいため保存しない。
 
 ## Read Model
 

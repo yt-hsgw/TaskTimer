@@ -6,6 +6,7 @@ import type {
   TaskListItem,
   TaskRow,
   TaskWithSubtasks,
+  UiPreferences,
   WeekCalendarItem,
   WorkItemDraft,
   WorkItemUpdateDraft,
@@ -46,6 +47,7 @@ export function App() {
   const [selectedCalendarTarget, setSelectedCalendarTarget] =
     useState<WorkTargetRef | null>(null);
   const [isNavigationOpen, setIsNavigationOpen] = useState(true);
+  const [lastTaskListId, setLastTaskListId] = useState(DEFAULT_TASK_LIST_ID);
   const [displayMode, setDisplayMode] =
     useState<NotificationDisplayMode>("title_only");
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -59,6 +61,8 @@ export function App() {
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(
     getTodayDateInputValue,
   );
+  const [hasHydratedUiPreferences, setHasHydratedUiPreferences] =
+    useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
   const [isCreatingTaskPending, setIsCreatingTaskPending] = useState(false);
@@ -70,6 +74,7 @@ export function App() {
     isSyncing: false,
     lastSyncedAt: Date.now(),
   });
+  const lastPersistedUiPreferencesRef = useRef<string | null>(null);
 
   const favoriteCount = useMemo(
     () => tasks.filter((task) => task.isFavorite).length,
@@ -204,8 +209,85 @@ export function App() {
   }, [activeView, calendarRange.endDate, calendarRange.startDate]);
 
   useEffect(() => {
+    let isCancelled = false;
+
+    async function hydrateUiPreferences() {
+      try {
+        const preferences = await tauriTaskTimerGateway.getUiPreferences();
+        if (isCancelled) {
+          return;
+        }
+        setIsNavigationOpen(preferences.leftPaneOpen);
+        setLastTaskListId(normalizeTaskListId(preferences.lastTaskListId));
+        setCalendarViewMode(preferences.calendarViewMode);
+        setActiveView(appViewFromPreferences(preferences));
+        lastPersistedUiPreferencesRef.current =
+          serializeUiPreferences(preferences);
+      } catch {
+        if (!isCancelled) {
+          lastPersistedUiPreferencesRef.current = serializeUiPreferences(
+            uiPreferencesFromState({
+              activeView: { kind: "list", listId: DEFAULT_TASK_LIST_ID },
+              isNavigationOpen: true,
+              lastTaskListId: DEFAULT_TASK_LIST_ID,
+              calendarViewMode: "week",
+            }),
+          );
+        }
+      } finally {
+        if (!isCancelled) {
+          setHasHydratedUiPreferences(true);
+        }
+      }
+    }
+
+    void hydrateUiPreferences();
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydratedUiPreferences) {
+      return;
+    }
     void loadSnapshot({ showLoading: true });
-  }, [loadSnapshot]);
+  }, [hasHydratedUiPreferences, loadSnapshot]);
+
+  useEffect(() => {
+    if (activeView.kind === "list") {
+      setLastTaskListId(activeView.listId);
+    }
+  }, [activeView]);
+
+  useEffect(() => {
+    if (!hasHydratedUiPreferences) {
+      return;
+    }
+
+    const preferences = uiPreferencesFromState({
+      activeView,
+      isNavigationOpen,
+      lastTaskListId,
+      calendarViewMode,
+    });
+    const serialized = serializeUiPreferences(preferences);
+    if (lastPersistedUiPreferencesRef.current === serialized) {
+      return;
+    }
+
+    lastPersistedUiPreferencesRef.current = serialized;
+    void tauriTaskTimerGateway.updateUiPreferences(preferences).catch((error) => {
+      lastPersistedUiPreferencesRef.current = null;
+      setErrorMessage(toErrorMessage(error));
+    });
+  }, [
+    activeView,
+    calendarViewMode,
+    hasHydratedUiPreferences,
+    isNavigationOpen,
+    lastTaskListId,
+  ]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -996,6 +1078,47 @@ function getTaskPanelEyebrow(activeView: AppView) {
     return "お気に入り";
   }
   return "リスト";
+}
+
+function appViewFromPreferences(preferences: UiPreferences): AppView {
+  if (preferences.lastView === "list") {
+    return {
+      kind: "list",
+      listId: normalizeTaskListId(preferences.lastTaskListId),
+    };
+  }
+  return { kind: preferences.lastView };
+}
+
+function uiPreferencesFromState({
+  activeView,
+  isNavigationOpen,
+  lastTaskListId,
+  calendarViewMode,
+}: {
+  activeView: AppView;
+  isNavigationOpen: boolean;
+  lastTaskListId: string;
+  calendarViewMode: CalendarViewMode;
+}): UiPreferences {
+  return {
+    leftPaneOpen: isNavigationOpen,
+    lastView: activeView.kind,
+    lastTaskListId:
+      activeView.kind === "list"
+        ? normalizeTaskListId(activeView.listId)
+        : normalizeTaskListId(lastTaskListId),
+    calendarViewMode,
+  };
+}
+
+function serializeUiPreferences(preferences: UiPreferences) {
+  return JSON.stringify(preferences);
+}
+
+function normalizeTaskListId(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : DEFAULT_TASK_LIST_ID;
 }
 
 function isTaskDueOnDate(task: TaskWithSubtasks, date: string) {

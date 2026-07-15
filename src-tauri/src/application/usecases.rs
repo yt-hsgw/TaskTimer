@@ -19,7 +19,8 @@ use super::{
         NotificationPreferenceRepository, RecurrenceRuleInput, RepositoryResult,
         SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore,
         SqliteRestoreRecord, SubtaskRecord, TaskListCommandRepository, TaskListCreate,
-        TaskListRecord, TaskListUpdate, TaskRecord, TaskTimerCommandRepository, WorkItemCreate,
+        TaskListRecord, TaskListUpdate, TaskRecord, TaskTimerCommandRepository,
+        UiPreferenceRepository, UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate,
         WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
@@ -29,6 +30,15 @@ const NOTIFICATION_HISTORY_LIMIT: i64 = 20;
 const TIMER_TARGET_MAX_SECONDS: i64 = 60 * 60 * 24 * 30;
 const RECURRENCE_INTERVAL_MAX: i64 = 365;
 const LOCAL_PATH_MAX_CHARS: usize = 4096;
+
+const UI_VIEW_LIST: &str = "list";
+const UI_VIEW_TODAY: &str = "today";
+const UI_VIEW_FAVORITES: &str = "favorites";
+const UI_VIEW_CALENDAR: &str = "calendar";
+const UI_VIEW_SETTINGS: &str = "settings";
+const CALENDAR_VIEW_WEEK: &str = "week";
+const CALENDAR_VIEW_DAY: &str = "day";
+const CALENDAR_VIEW_MONTH: &str = "month";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItemDraft {
@@ -76,6 +86,14 @@ pub struct SqliteBackupRestoreDraft {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DataExportCreateDraft {
     pub destination_dir: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiPreferencesDraft {
+    pub left_pane_open: bool,
+    pub last_view: String,
+    pub last_task_list_id: String,
+    pub calendar_view_mode: String,
 }
 
 pub fn create_task(
@@ -398,6 +416,26 @@ pub fn create_csv_export(
     })
 }
 
+pub fn get_ui_preferences(
+    repository: &impl UiPreferenceRepository,
+) -> RepositoryResult<UiPreferencesRecord> {
+    repository.get_ui_preferences()
+}
+
+pub fn update_ui_preferences(
+    repository: &impl UiPreferenceRepository,
+    clock: &impl Clock,
+    draft: UiPreferencesDraft,
+) -> RepositoryResult<UiPreferencesRecord> {
+    repository.update_ui_preferences(UiPreferencesUpdate {
+        left_pane_open: draft.left_pane_open,
+        last_view: validate_ui_view(&draft.last_view)?,
+        last_task_list_id: validate_identifier(&draft.last_task_list_id, "最後のリストID")?,
+        calendar_view_mode: validate_calendar_view_mode(&draft.calendar_view_mode)?,
+        now: clock.now_utc_iso8601(),
+    })
+}
+
 fn validate_work_item_draft(draft: WorkItemDraft, now: String) -> RepositoryResult<WorkItemCreate> {
     let title = validate_title(&draft.title)?;
     let planned_start_date = validate_optional_date(draft.planned_start_date.as_deref(), "開始日")?;
@@ -512,6 +550,24 @@ fn validate_identifier(value: &str, field_label: &str) -> RepositoryResult<Strin
     Ok(trimmed.to_string())
 }
 
+fn validate_ui_view(value: &str) -> RepositoryResult<String> {
+    let trimmed = value.trim();
+    match trimmed {
+        UI_VIEW_LIST | UI_VIEW_TODAY | UI_VIEW_FAVORITES | UI_VIEW_CALENDAR | UI_VIEW_SETTINGS => {
+            Ok(trimmed.to_string())
+        }
+        _ => Err("最後のビュー設定が不正です".to_string()),
+    }
+}
+
+fn validate_calendar_view_mode(value: &str) -> RepositoryResult<String> {
+    let trimmed = value.trim();
+    match trimmed {
+        CALENDAR_VIEW_WEEK | CALENDAR_VIEW_DAY | CALENDAR_VIEW_MONTH => Ok(trimmed.to_string()),
+        _ => Err("カレンダー表示モード設定が不正です".to_string()),
+    }
+}
+
 fn validate_local_path(value: &str, field_label: &str) -> RepositoryResult<String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -581,5 +637,15 @@ mod tests {
         );
 
         assert!(result.expect_err("due date is required").contains("期限日"));
+    }
+
+    #[test]
+    fn validate_ui_preferences_rejects_unknown_values() {
+        assert!(validate_ui_view("board")
+            .expect_err("invalid view")
+            .contains("ビュー"));
+        assert!(validate_calendar_view_mode("year")
+            .expect_err("invalid calendar mode")
+            .contains("カレンダー"));
     }
 }
