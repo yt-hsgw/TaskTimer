@@ -66,6 +66,8 @@ GitHubをアプリ実行時データの保存先には使わない。
 注意:
 
 - Actions内の依存取得やGitHub通信は開発・運用時の通信であり、アプリ実行時の外部通信ではない。
+- Rust CIは `Swatinem/rust-cache` でCargo registry、Cargo git、`src-tauri/target` をキャッシュする。キャッシュ導入後も `cargo test` と `cargo clippy --all-targets -- -D warnings` は維持する。
+- Rust cacheの効果はGitHub Actionsの実行時間で確認する。`Cargo.lock`、Rust toolchain、OSが変わる場合はキャッシュが分かれる前提で扱う。
 - OS固有の通知権限、インストーラー、署名警告はCIだけでは保証しない。リリース前チェックリストで手動確認する。
 
 `依存関係アラート監視` ワークフローは、週1回と手動実行で `glib` advisoryの上流制約を再評価する。

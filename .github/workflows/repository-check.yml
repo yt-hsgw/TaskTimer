@@ -32,6 +32,13 @@ jobs:
           rustup default stable
           rustup component add rustfmt clippy
 
+      - name: Rustビルドキャッシュを復元
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: repository-check-rust
+          workspaces: |
+            src-tauri -> target
+
       - name: Linuxビルド依存関係をインストール
         run: |
           sudo apt-get update
