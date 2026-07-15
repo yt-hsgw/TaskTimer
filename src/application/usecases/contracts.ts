@@ -24,7 +24,16 @@ export type RecurrenceRuleDraft = {
 
 export type TaskListDraft = {
   name: string;
+  colorToken?: TaskListColorToken | null;
 };
+
+export type TaskListColorToken =
+  | "green"
+  | "blue"
+  | "amber"
+  | "rose"
+  | "violet"
+  | "gray";
 
 export type CreateSubtaskDraft = WorkItemDraft & {
   taskId: string;
@@ -47,6 +56,7 @@ export type WeekCalendarItem = {
   time: string | null;
   marker: "planned_start" | "due" | "active_timer";
   status: Task["status"];
+  colorToken: TaskListColorToken;
 };
 
 export type NotificationDispatchSummary = {
@@ -123,6 +133,7 @@ export type UiPreferences = {
 export type TaskListItem = {
   id: string;
   name: string;
+  colorToken: TaskListColorToken;
   sortOrder: number;
   taskCount: number;
   activeTaskCount: number;

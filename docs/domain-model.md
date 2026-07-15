@@ -91,6 +91,7 @@ erDiagram
   TASK_LIST {
     string id PK
     string name
+    string color_token
     int sort_order
     datetime deleted_at
     datetime created_at
@@ -123,6 +124,9 @@ erDiagram
 - 初期リストIDと名称はドメイン不変値として扱い、Application、Infrastructure、Presentationで直書きしない。
 - カスタムリスト名はtrim後に必須、最大80文字。
 - アクティブなリスト間で同名は作成できない。
+- リスト色は許可済み色トークン `green`、`blue`、`amber`、`rose`、`violet`、`gray` のいずれか。
+- 初期リストと既存リストの既定色は `green`。
+- タスクとサブタスクのカレンダー色は所属リスト色を継承する。
 - カスタムリスト削除時、所属タスクは初期リストへ移動し、タスク、サブタスク、タイマー履歴、通知ルールは削除しない。
 
 ### Task

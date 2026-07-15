@@ -210,14 +210,20 @@ fn seed_database(connection: &mut Connection, config: &Config) -> Result<(), Box
         let mut statement = transaction.prepare(
             "
             INSERT INTO task_lists (
-              id, name, sort_order, deleted_at, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, NULL, ?4, ?4)
+              id, name, color_token, sort_order, deleted_at, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?5)
             ",
         )?;
 
         for index in 0..config.list_count {
             let (id, name) = task_list_identity(index);
-            statement.execute(params![id, name, index as i64, created_at])?;
+            statement.execute(params![
+                id,
+                name,
+                task_list_color_token(index),
+                index as i64,
+                created_at
+            ])?;
         }
     }
 
@@ -370,6 +376,11 @@ fn task_list_identity(index: usize) -> (String, String) {
             format!("性能検証リスト {:03}", index + 1),
         )
     }
+}
+
+fn task_list_color_token(index: usize) -> &'static str {
+    const COLORS: &[&str] = &["green", "blue", "amber", "rose", "violet", "gray"];
+    COLORS[index % COLORS.len()]
 }
 
 fn task_list_id(index: usize) -> String {

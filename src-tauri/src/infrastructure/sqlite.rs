@@ -38,8 +38,8 @@ use crate::{
         },
         recurrence::RecurrenceFrequency,
         task::{
-            assert_completable, assert_timer_startable, WorkStatus, DEFAULT_TASK_LIST_ID,
-            DEFAULT_TASK_LIST_NAME,
+            assert_completable, assert_timer_startable, WorkStatus, DEFAULT_TASK_LIST_COLOR_TOKEN,
+            DEFAULT_TASK_LIST_ID, DEFAULT_TASK_LIST_NAME,
         },
         timer::{WorkTargetRef, WorkTargetType},
     },
@@ -185,6 +185,7 @@ struct ExportDataset {
 struct ExportTaskListRow {
     id: String,
     name: String,
+    color_token: String,
     sort_order: i64,
     created_at: String,
     updated_at: String,
@@ -1276,11 +1277,11 @@ fn insert_task_list(
         .execute(
             "
             INSERT INTO task_lists (
-              id, name, sort_order, created_at, updated_at
+              id, name, color_token, sort_order, created_at, updated_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?4)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?5)
             ",
-            params![id, input.name, sort_order, input.now],
+            params![id, input.name, input.color_token, sort_order, input.now],
         )
         .map_err(|error| format!("タスクリストを作成できません: {error}"))?;
 
@@ -1432,19 +1433,26 @@ fn update_task_list_detail(
     list_id: &str,
     input: TaskListUpdate,
 ) -> RepositoryResult<TaskListRecord> {
-    ensure_custom_task_list(transaction, list_id)?;
-    ensure_unique_task_list_name(transaction, &input.name, Some(list_id))?;
+    ensure_task_list_exists(transaction, list_id)?;
+    if list_id == DEFAULT_TASK_LIST_ID {
+        if input.name != DEFAULT_TASK_LIST_NAME {
+            return Err("初期リスト名は変更できません".to_string());
+        }
+    } else {
+        ensure_unique_task_list_name(transaction, &input.name, Some(list_id))?;
+    }
 
     let updated = transaction
         .execute(
             "
             UPDATE task_lists
             SET name = ?1,
-                updated_at = ?2
-            WHERE id = ?3
+                color_token = COALESCE(?2, color_token),
+                updated_at = ?3
+            WHERE id = ?4
               AND deleted_at IS NULL
             ",
-            params![input.name, input.now, list_id],
+            params![input.name, input.color_token, input.now, list_id],
         )
         .map_err(|error| format!("タスクリストを更新できません: {error}"))?;
     if updated != 1 {
@@ -2252,6 +2260,7 @@ fn select_task_lists(connection: &Connection) -> RepositoryResult<Vec<TaskListRe
             "
             SELECT task_lists.id,
                    task_lists.name,
+                   task_lists.color_token,
                    task_lists.sort_order,
                    task_lists.created_at,
                    task_lists.updated_at,
@@ -2268,6 +2277,7 @@ fn select_task_lists(connection: &Connection) -> RepositoryResult<Vec<TaskListRe
             WHERE task_lists.deleted_at IS NULL
             GROUP BY task_lists.id,
                      task_lists.name,
+                     task_lists.color_token,
                      task_lists.sort_order,
                      task_lists.created_at,
                      task_lists.updated_at
@@ -2282,12 +2292,13 @@ fn select_task_lists(connection: &Connection) -> RepositoryResult<Vec<TaskListRe
             Ok(TaskListRecord {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                sort_order: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-                task_count: row.get(5)?,
-                active_task_count: row.get(6)?,
-                completed_task_count: row.get(7)?,
+                color_token: row.get(2)?,
+                sort_order: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+                task_count: row.get(6)?,
+                active_task_count: row.get(7)?,
+                completed_task_count: row.get(8)?,
             })
         })
         .map_err(|error| format!("タスクリスト一覧を取得できません: {error}"))?;
@@ -2302,6 +2313,7 @@ fn select_task_list_by_id(connection: &Connection, id: &str) -> RepositoryResult
             "
             SELECT task_lists.id,
                    task_lists.name,
+                   task_lists.color_token,
                    task_lists.sort_order,
                    task_lists.created_at,
                    task_lists.updated_at,
@@ -2319,6 +2331,7 @@ fn select_task_list_by_id(connection: &Connection, id: &str) -> RepositoryResult
               AND task_lists.deleted_at IS NULL
             GROUP BY task_lists.id,
                      task_lists.name,
+                     task_lists.color_token,
                      task_lists.sort_order,
                      task_lists.created_at,
                      task_lists.updated_at
@@ -2328,12 +2341,13 @@ fn select_task_list_by_id(connection: &Connection, id: &str) -> RepositoryResult
                 Ok(TaskListRecord {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    sort_order: row.get(2)?,
-                    created_at: row.get(3)?,
-                    updated_at: row.get(4)?,
-                    task_count: row.get(5)?,
-                    active_task_count: row.get(6)?,
-                    completed_task_count: row.get(7)?,
+                    color_token: row.get(2)?,
+                    sort_order: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                    task_count: row.get(6)?,
+                    active_task_count: row.get(7)?,
+                    completed_task_count: row.get(8)?,
                 })
             },
         )
@@ -3711,6 +3725,9 @@ fn run_ui_read_model_migration(connection: &Connection) -> RepositoryResult<()> 
             CREATE TABLE IF NOT EXISTS task_lists (
               id TEXT PRIMARY KEY,
               name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+              color_token TEXT NOT NULL DEFAULT 'green' CHECK (
+                color_token IN ('green', 'blue', 'amber', 'rose', 'violet', 'gray')
+              ),
               sort_order INTEGER NOT NULL DEFAULT 0,
               deleted_at TEXT NULL,
               created_at TEXT NOT NULL,
@@ -3726,6 +3743,12 @@ fn run_ui_read_model_migration(connection: &Connection) -> RepositoryResult<()> 
         )
         .map_err(|error| format!("UI Read Model用テーブルを作成できません: {error}"))?;
 
+    ensure_column(
+        connection,
+        "task_lists",
+        "color_token",
+        "ALTER TABLE task_lists ADD COLUMN color_token TEXT NOT NULL DEFAULT 'green' CHECK (color_token IN ('green', 'blue', 'amber', 'rose', 'violet', 'gray'))",
+    )?;
     ensure_column(
         connection,
         "tasks",
@@ -3834,11 +3857,16 @@ fn ensure_default_task_list(connection: &Connection, now: &str) -> RepositoryRes
         .execute(
             "
             INSERT OR IGNORE INTO task_lists (
-              id, name, sort_order, created_at, updated_at
+              id, name, color_token, sort_order, created_at, updated_at
             )
-            VALUES (?1, ?2, 0, ?3, ?3)
+            VALUES (?1, ?2, ?3, 0, ?4, ?4)
             ",
-            params![DEFAULT_TASK_LIST_ID, DEFAULT_TASK_LIST_NAME, now],
+            params![
+                DEFAULT_TASK_LIST_ID,
+                DEFAULT_TASK_LIST_NAME,
+                DEFAULT_TASK_LIST_COLOR_TOKEN,
+                now
+            ],
         )
         .map(|_| ())
         .map_err(|error| format!("初期タスクリストを保存できません: {error}"))
@@ -4091,7 +4119,14 @@ fn write_csv_export_files(
     write_export_manifest_file(&export_dir.join(CSV_EXPORT_MANIFEST_FILE), manifest)?;
     write_csv_file(
         &export_dir.join("task_lists.csv"),
-        &["id", "name", "sort_order", "created_at", "updated_at"],
+        &[
+            "id",
+            "name",
+            "color_token",
+            "sort_order",
+            "created_at",
+            "updated_at",
+        ],
         dataset
             .task_lists
             .iter()
@@ -4099,6 +4134,7 @@ fn write_csv_export_files(
                 vec![
                     row.id.clone(),
                     row.name.clone(),
+                    row.color_token.clone(),
                     row.sort_order.to_string(),
                     row.created_at.clone(),
                     row.updated_at.clone(),
@@ -4388,7 +4424,7 @@ fn select_export_task_lists(connection: &Connection) -> RepositoryResult<Vec<Exp
     let mut statement = connection
         .prepare(
             "
-            SELECT id, name, sort_order, created_at, updated_at
+            SELECT id, name, color_token, sort_order, created_at, updated_at
             FROM task_lists
             WHERE deleted_at IS NULL
             ORDER BY sort_order, created_at, id
@@ -4400,9 +4436,10 @@ fn select_export_task_lists(connection: &Connection) -> RepositoryResult<Vec<Exp
             Ok(ExportTaskListRow {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                sort_order: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
+                color_token: row.get(2)?,
+                sort_order: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
             })
         })
         .map_err(|error| format!("エクスポート用リストを取得できません: {error}"))?;
@@ -4616,13 +4653,22 @@ fn collect_task_calendar_items(
     let mut statement = connection
         .prepare(
             "
-            SELECT id, title, planned_start_date, due_date, due_time, status
+            SELECT tasks.id,
+                   tasks.title,
+                   tasks.planned_start_date,
+                   tasks.due_date,
+                   tasks.due_time,
+                   tasks.status,
+                   task_lists.color_token
             FROM tasks
-            WHERE deleted_at IS NULL
-              AND status <> 'archived'
+            INNER JOIN task_lists
+              ON task_lists.id = tasks.list_id
+             AND task_lists.deleted_at IS NULL
+            WHERE tasks.deleted_at IS NULL
+              AND tasks.status <> 'archived'
               AND (
-                planned_start_date BETWEEN ?1 AND ?2
-                OR due_date BETWEEN ?1 AND ?2
+                tasks.planned_start_date BETWEEN ?1 AND ?2
+                OR tasks.due_date BETWEEN ?1 AND ?2
               )
             ",
         )
@@ -4638,6 +4684,7 @@ fn collect_task_calendar_items(
                 due_date: row.get(3)?,
                 due_time: row.get(4)?,
                 status: WorkStatus::from_db(&row.get::<_, String>(5)?).map_err(db_value_error)?,
+                color_token: row.get(6)?,
                 parent_title: None,
             })
         })
@@ -4667,12 +4714,16 @@ fn collect_subtask_calendar_items(
                    subtasks.due_date,
                    subtasks.due_time,
                    subtasks.status,
-                   tasks.title AS parent_title
+                   tasks.title AS parent_title,
+                   task_lists.color_token
             FROM subtasks
             INNER JOIN tasks
               ON tasks.id = subtasks.task_id
              AND tasks.deleted_at IS NULL
              AND tasks.status <> 'archived'
+            INNER JOIN task_lists
+              ON task_lists.id = tasks.list_id
+             AND task_lists.deleted_at IS NULL
             WHERE subtasks.deleted_at IS NULL
               AND subtasks.status <> 'archived'
               AND (
@@ -4694,6 +4745,7 @@ fn collect_subtask_calendar_items(
                 due_time: row.get(4)?,
                 status: WorkStatus::from_db(&row.get::<_, String>(5)?).map_err(db_value_error)?,
                 parent_title: row.get(6)?,
+                color_token: row.get(7)?,
             })
         })
         .map_err(|error| format!("サブタスクカレンダーを取得できません: {error}"))?;
@@ -4721,7 +4773,9 @@ fn collect_active_timer_calendar_item(
                    timer_sessions.started_at,
                    COALESCE(task_targets.title, subtask_targets.title) AS title,
                    COALESCE(task_targets.status, subtask_targets.status) AS status,
-                   parent_tasks.title AS parent_title
+                   parent_tasks.title AS parent_title,
+                   COALESCE(task_target_lists.color_token, parent_task_lists.color_token, ?3)
+                     AS color_token
             FROM timer_sessions
             LEFT JOIN tasks AS task_targets
               ON timer_sessions.target_type = 'task'
@@ -4737,6 +4791,12 @@ fn collect_active_timer_calendar_item(
               ON subtask_targets.task_id = parent_tasks.id
              AND parent_tasks.deleted_at IS NULL
              AND parent_tasks.status <> 'archived'
+            LEFT JOIN task_lists AS task_target_lists
+              ON task_targets.list_id = task_target_lists.id
+             AND task_target_lists.deleted_at IS NULL
+            LEFT JOIN task_lists AS parent_task_lists
+              ON parent_tasks.list_id = parent_task_lists.id
+             AND parent_task_lists.deleted_at IS NULL
             WHERE timer_sessions.stopped_at IS NULL
               AND timer_sessions.deleted_at IS NULL
               AND (
@@ -4753,7 +4813,7 @@ fn collect_active_timer_calendar_item(
               AND substr(timer_sessions.started_at, 1, 10) BETWEEN ?1 AND ?2
             LIMIT 1
             ",
-            params![start_date, end_date],
+            params![start_date, end_date, DEFAULT_TASK_LIST_COLOR_TOKEN],
             |row| {
                 let target_type_text: String = row.get(0)?;
                 let target_type =
@@ -4774,6 +4834,7 @@ fn collect_active_timer_calendar_item(
                     marker: CalendarMarker::ActiveTimer,
                     status: WorkStatus::from_db(&row.get::<_, String>(4)?)
                         .map_err(db_value_error)?,
+                    color_token: row.get(6)?,
                 })
             },
         )
@@ -4795,6 +4856,7 @@ struct CalendarSourceRow {
     due_time: Option<String>,
     status: WorkStatus,
     parent_title: Option<String>,
+    color_token: String,
 }
 
 fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>) {
@@ -4809,6 +4871,7 @@ fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>
             time: None,
             marker: CalendarMarker::PlannedStart,
             status: row.status.clone(),
+            color_token: row.color_token.clone(),
         });
     }
 
@@ -4822,6 +4885,7 @@ fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>
             time: row.due_time,
             marker: CalendarMarker::Due,
             status: row.status,
+            color_token: row.color_token,
         });
     }
 }
@@ -5211,11 +5275,11 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .expect("migrated task");
-        let task_list_name: String = connection
+        let (task_list_name, task_list_color_token): (String, String) = connection
             .query_row(
-                "SELECT name FROM task_lists WHERE id = 'default'",
+                "SELECT name, color_token FROM task_lists WHERE id = 'default'",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .expect("default task list");
         let ui_preference_count: i64 = connection
@@ -5238,6 +5302,7 @@ mod tests {
         assert_eq!(is_favorite, 0);
         assert_eq!(timer_target_seconds, None);
         assert_eq!(task_list_name, DEFAULT_TASK_LIST_NAME);
+        assert_eq!(task_list_color_token, DEFAULT_TASK_LIST_COLOR_TOKEN);
         assert_eq!(ui_preference_count, 4);
         assert_eq!(timer_recurrence_table_count, 2);
         assert!(
@@ -5946,9 +6011,11 @@ mod tests {
             &clock,
             usecases::TaskListDraft {
                 name: "仕事".to_string(),
+                color_token: Some("blue".to_string()),
             },
         )
         .expect("create task list");
+        assert_eq!(list.color_token, "blue");
         let custom_task = usecases::create_task(
             &database,
             &clock,
@@ -5993,6 +6060,7 @@ mod tests {
             &clock,
             usecases::TaskListDraft {
                 name: "案件A".to_string(),
+                color_token: None,
             },
         )
         .expect("create task list");
@@ -6060,6 +6128,7 @@ mod tests {
             &clock,
             usecases::TaskListDraft {
                 name: "重複確認".to_string(),
+                color_token: Some("rose".to_string()),
             },
         )
         .expect("create task list");
@@ -6070,13 +6139,33 @@ mod tests {
             DEFAULT_TASK_LIST_ID.to_string(),
             usecases::TaskListDraft {
                 name: "変更不可".to_string(),
+                color_token: None,
             },
         );
+        let default_color_update = usecases::update_task_list(
+            &database,
+            &clock,
+            DEFAULT_TASK_LIST_ID.to_string(),
+            usecases::TaskListDraft {
+                name: DEFAULT_TASK_LIST_NAME.to_string(),
+                color_token: Some("gray".to_string()),
+            },
+        )
+        .expect("update default list color");
         let duplicate = usecases::create_task_list(
             &database,
             &clock,
             usecases::TaskListDraft {
                 name: "重複確認".to_string(),
+                color_token: None,
+            },
+        );
+        let invalid_color = usecases::create_task_list(
+            &database,
+            &clock,
+            usecases::TaskListDraft {
+                name: "不正色".to_string(),
+                color_token: Some("javascript:alert(1)".to_string()),
             },
         );
         let renamed = usecases::update_task_list(
@@ -6085,17 +6174,23 @@ mod tests {
             list.id,
             usecases::TaskListDraft {
                 name: "重複確認 2".to_string(),
+                color_token: Some("violet".to_string()),
             },
         )
         .expect("rename task list");
 
         assert!(default_update
             .expect_err("default list update")
-            .contains("初期タスクリスト"));
+            .contains("初期リスト名"));
         assert!(duplicate
             .expect_err("duplicate list name")
             .contains("すでに存在"));
+        assert!(invalid_color
+            .expect_err("invalid color")
+            .contains("許可済み"));
+        assert_eq!(default_color_update.color_token, "gray");
         assert_eq!(renamed.name, "重複確認 2");
+        assert_eq!(renamed.color_token, "violet");
     }
 
     #[test]
@@ -6107,8 +6202,28 @@ mod tests {
         let timer_clock = FixedClock {
             now: "2026-07-20T10:15:00Z",
         };
-        let parent =
-            usecases::create_task(&database, &create_clock, draft("親タスク")).expect("task");
+        let list = usecases::create_task_list(
+            &database,
+            &create_clock,
+            usecases::TaskListDraft {
+                name: "色付きリスト".to_string(),
+                color_token: Some("violet".to_string()),
+            },
+        )
+        .expect("create colored task list");
+        let parent = usecases::create_task(
+            &database,
+            &create_clock,
+            usecases::WorkItemDraft {
+                list_id: Some(list.id.clone()),
+                title: "親タスク".to_string(),
+                planned_start_date: None,
+                due_date: None,
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("task");
         let subtask = usecases::create_subtask(
             &database,
             &create_clock,
@@ -6162,10 +6277,12 @@ mod tests {
         assert_eq!(planned_subtask.title, "調査サブタスク");
         assert_eq!(planned_subtask.parent_title.as_deref(), Some("親タスク"));
         assert_eq!(planned_subtask.time, None);
+        assert_eq!(planned_subtask.color_token, "violet");
         assert_eq!(active_timer.target.target_type, WorkTargetType::Subtask);
         assert_eq!(active_timer.parent_title.as_deref(), Some("親タスク"));
         assert_eq!(active_timer.date, "2026-07-20");
         assert_eq!(active_timer.time.as_deref(), Some("10:15"));
+        assert_eq!(active_timer.color_token, "violet");
         assert!(!items.iter().any(|item| item.title == "範囲外"));
 
         assert!(database

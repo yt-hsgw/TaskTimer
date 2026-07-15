@@ -3,7 +3,8 @@ use crate::domain::{
     recurrence::RecurrenceFrequency,
     task::{
         validate_date_range, validate_due_time_requires_due_date, validate_memo,
-        validate_optional_date, validate_optional_time, validate_task_list_name, validate_title,
+        validate_optional_date, validate_optional_time, validate_task_list_color_token,
+        validate_task_list_name, validate_title, DEFAULT_TASK_LIST_COLOR_TOKEN,
         DEFAULT_TASK_LIST_ID,
     },
     timer::WorkTargetRef,
@@ -71,6 +72,7 @@ pub struct RecurrenceRuleDraft {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskListDraft {
     pub name: String,
+    pub color_token: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,6 +113,12 @@ pub fn create_task_list(
 ) -> RepositoryResult<TaskListRecord> {
     repository.create_task_list(TaskListCreate {
         name: validate_task_list_name(&draft.name)?,
+        color_token: validate_task_list_color_token(
+            draft
+                .color_token
+                .as_deref()
+                .unwrap_or(DEFAULT_TASK_LIST_COLOR_TOKEN),
+        )?,
         now: clock.now_utc_iso8601(),
     })
 }
@@ -126,6 +134,11 @@ pub fn update_task_list(
         list_id,
         TaskListUpdate {
             name: validate_task_list_name(&draft.name)?,
+            color_token: draft
+                .color_token
+                .as_deref()
+                .map(validate_task_list_color_token)
+                .transpose()?,
             now: clock.now_utc_iso8601(),
         },
     )

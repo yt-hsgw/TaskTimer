@@ -312,12 +312,14 @@ button {
 }
 
 .nav-list-row {
+  display: grid;
+  gap: 4px;
   min-width: 0;
   position: relative;
 }
 
 .nav-list-row.has-actions .nav-item {
-  padding-right: 66px;
+  padding-right: 8px;
 }
 
 .is-nav-collapsed .nav-list-row .nav-item,
@@ -334,14 +336,81 @@ button {
   align-items: center;
   display: flex;
   gap: 4px;
-  position: absolute;
-  right: 5px;
-  top: 5px;
+  justify-content: space-between;
+  padding: 0 4px 4px 42px;
 }
 
 .nav-list-actions .nav-mini-button {
   height: 28px;
   min-width: 28px;
+}
+
+.nav-color-picker {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.nav-color-button,
+.nav-list-color-swatch {
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgb(23 32 38 / 14%);
+  display: inline-block;
+}
+
+.nav-color-button {
+  border: 2px solid #ffffff;
+  height: 18px;
+  padding: 0;
+  width: 18px;
+}
+
+.nav-color-button[aria-pressed="true"] {
+  box-shadow:
+    0 0 0 2px #ffffff,
+    0 0 0 4px rgb(47 138 104 / 55%);
+}
+
+.nav-color-button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.nav-list-color-swatch {
+  height: 12px;
+  width: 12px;
+}
+
+.nav-color-button.color-green,
+.nav-list-color-swatch.color-green {
+  background: #2f8a68;
+}
+
+.nav-color-button.color-blue,
+.nav-list-color-swatch.color-blue {
+  background: #3b82c4;
+}
+
+.nav-color-button.color-amber,
+.nav-list-color-swatch.color-amber {
+  background: #c58a15;
+}
+
+.nav-color-button.color-rose,
+.nav-list-color-swatch.color-rose {
+  background: #c75f6a;
+}
+
+.nav-color-button.color-violet,
+.nav-list-color-swatch.color-violet {
+  background: #8067c7;
+}
+
+.nav-color-button.color-gray,
+.nav-list-color-swatch.color-gray {
+  background: #687985;
 }
 
 .nav-list-form {
@@ -1840,6 +1909,7 @@ button {
 
 .calendar-item {
   border: 0;
+  border-left: 3px solid transparent;
   border-radius: 6px;
   color: #173824;
   display: grid;
@@ -1892,18 +1962,45 @@ button {
 }
 
 .calendar-item.marker-planned_start {
+  border-left-color: rgb(47 138 104 / 56%);
+}
+
+.calendar-item.marker-due {
+  border-left-color: rgb(197 138 21 / 62%);
+}
+
+.calendar-item.marker-active_timer {
+  border-left-color: rgb(26 115 232 / 62%);
+}
+
+.calendar-item.color-green {
   background: #cce9dc;
   color: #123824;
 }
 
-.calendar-item.marker-due {
+.calendar-item.color-blue {
+  background: #d7e8fb;
+  color: #12345f;
+}
+
+.calendar-item.color-amber {
   background: #fde68a;
   color: #463600;
 }
 
-.calendar-item.marker-active_timer {
-  background: #bfdbfe;
-  color: #12345f;
+.calendar-item.color-rose {
+  background: #f9d6da;
+  color: #5f1721;
+}
+
+.calendar-item.color-violet {
+  background: #e4ddfb;
+  color: #2e245f;
+}
+
+.calendar-item.color-gray {
+  background: #dfe7ea;
+  color: #27343a;
 }
 
 .calendar-item small {

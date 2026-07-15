@@ -4,6 +4,7 @@ import type {
   NotificationDeliveryAttempt,
   NotificationDispatchSummary,
   RecurrenceRuleDraft,
+  TaskListColorToken,
   TaskListItem,
   TaskRow,
   TaskWithSubtasks,
@@ -489,9 +490,28 @@ export function App() {
   const handleRenameTaskList = useCallback(
     (listId: string, name: string) =>
       runMutation(async () => {
-        await tauriTaskTimerGateway.updateTaskList(listId, { name });
+        const currentList = taskLists.find((list) => list.id === listId);
+        await tauriTaskTimerGateway.updateTaskList(listId, {
+          name,
+          colorToken: currentList?.colorToken,
+        });
       }),
-    [runMutation],
+    [runMutation, taskLists],
+  );
+
+  const handleUpdateTaskListColor = useCallback(
+    (listId: string, colorToken: TaskListColorToken) =>
+      runMutation(async () => {
+        const currentList = taskLists.find((list) => list.id === listId);
+        if (!currentList) {
+          throw new Error("色を変更するリストが見つかりません。");
+        }
+        await tauriTaskTimerGateway.updateTaskList(listId, {
+          name: currentList.name,
+          colorToken,
+        });
+      }),
+    [runMutation, taskLists],
   );
 
   const handleDeleteTaskList = useCallback(
@@ -984,6 +1004,7 @@ export function App() {
           onSelectView={handleSelectView}
           onCreateTaskList={handleCreateTaskList}
           onRenameTaskList={handleRenameTaskList}
+          onUpdateTaskListColor={handleUpdateTaskListColor}
           onDeleteTaskList={handleDeleteTaskList}
           onToggle={() => setIsNavigationOpen((current) => !current)}
         />

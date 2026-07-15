@@ -11,6 +11,8 @@ const TASK_LIST_NAME_MAX_CHARS: usize = 80;
 
 pub const DEFAULT_TASK_LIST_ID: &str = "default";
 pub const DEFAULT_TASK_LIST_NAME: &str = "タスク";
+pub const DEFAULT_TASK_LIST_COLOR_TOKEN: &str = "green";
+pub const TASK_LIST_COLOR_TOKENS: &[&str] = &["green", "blue", "amber", "rose", "violet", "gray"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkStatus {
@@ -127,6 +129,15 @@ pub fn validate_task_list_name(name: &str) -> Result<String, String> {
         ));
     }
     Ok(trimmed.to_string())
+}
+
+pub fn validate_task_list_color_token(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if TASK_LIST_COLOR_TOKENS.contains(&trimmed) {
+        return Ok(trimmed.to_string());
+    }
+
+    Err("リスト色は許可済みの色から選択してください".to_string())
 }
 
 pub fn assert_timer_startable(status: &WorkStatus) -> Result<(), String> {
