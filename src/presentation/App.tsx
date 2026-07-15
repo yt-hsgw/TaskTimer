@@ -468,7 +468,8 @@ export function App() {
         await tauriTaskTimerGateway.createTask({
           ...input,
           listId:
-            activeView.kind === "list" ? activeView.listId : DEFAULT_TASK_LIST_ID,
+            input.listId ??
+            (activeView.kind === "list" ? activeView.listId : DEFAULT_TASK_LIST_ID),
         });
       }),
     [activeView, runCreateTaskMutation],
@@ -1011,13 +1012,17 @@ export function App() {
                 viewMode={calendarViewMode}
                 anchorDate={calendarAnchorDate}
                 items={items}
+                taskLists={taskLists}
+                defaultTaskListId={lastTaskListId}
                 isLoading={isLoading}
+                isCreatingTaskPending={isCreatingTaskPending}
                 selectedTarget={selectedCalendarTarget}
                 onChangeViewMode={handleChangeCalendarViewMode}
                 onPreviousRange={handlePreviousCalendarRange}
                 onNextRange={handleNextCalendarRange}
                 onToday={handleTodayCalendarRange}
                 onSelectItem={handleSelectCalendarItem}
+                onCreateTask={handleCreateTask}
               />
               {selectedTask ? (
                 <TaskDetailPane
