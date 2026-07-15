@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type {
   NotificationDeliveryAttempt,
   NotificationDispatchSummary,
+  RecurrenceRuleDraft,
   TaskListItem,
   TaskRow,
   TaskWithSubtasks,
@@ -856,6 +857,60 @@ export function App() {
     [tasks],
   );
 
+  const handleRescheduleCalendarItem = useCallback(
+    (item: WeekCalendarItem, dueDate: string, dueTime: string | null) => {
+      if (item.marker !== "due") {
+        setErrorMessage("移動できるのは期限のカレンダー項目だけです。");
+        return Promise.resolve(false);
+      }
+
+      if (item.date === dueDate && (item.time ?? null) === (dueTime ?? null)) {
+        return Promise.resolve(true);
+      }
+
+      if (item.target.type === "task") {
+        const task = tasks.find((candidate) => candidate.id === item.target.id);
+        if (!task) {
+          setErrorMessage("移動対象のタスクが見つかりません。");
+          return Promise.resolve(false);
+        }
+
+        return handleUpdateTask(task.id, {
+          listId: task.listId,
+          title: task.title,
+          plannedStartDate: task.plannedStartDate,
+          dueDate,
+          dueTime,
+          timerTargetSeconds: task.timerTargetSeconds,
+          recurrenceRule: toRecurrenceRuleDraft(task.recurrenceRule),
+          memo: task.memo,
+        });
+      }
+
+      const parentTask = tasks.find((task) =>
+        task.subtasks.some((subtask) => subtask.id === item.target.id),
+      );
+      const subtask =
+        parentTask?.subtasks.find((candidate) => candidate.id === item.target.id) ??
+        null;
+      if (!subtask) {
+        setErrorMessage("移動対象のサブタスクが見つかりません。");
+        return Promise.resolve(false);
+      }
+
+      return handleUpdateSubtask(subtask.id, {
+        title: subtask.title,
+        plannedStartDate: subtask.plannedStartDate,
+        dueDate,
+        dueTime,
+        timerTargetSeconds: subtask.timerTargetSeconds,
+        recurrenceRule: toRecurrenceRuleDraft(subtask.recurrenceRule),
+        memo: subtask.memo,
+      });
+    },
+    [handleUpdateSubtask, handleUpdateTask, tasks],
+  );
+
   const handleChangeCalendarViewMode = useCallback(
     (viewMode: CalendarViewMode) => {
       setCalendarViewMode(viewMode);
@@ -1016,6 +1071,7 @@ export function App() {
                 defaultTaskListId={lastTaskListId}
                 isLoading={isLoading}
                 isCreatingTaskPending={isCreatingTaskPending}
+                isReschedulingItem={isMutating}
                 selectedTarget={selectedCalendarTarget}
                 onChangeViewMode={handleChangeCalendarViewMode}
                 onPreviousRange={handlePreviousCalendarRange}
@@ -1023,6 +1079,7 @@ export function App() {
                 onToday={handleTodayCalendarRange}
                 onSelectItem={handleSelectCalendarItem}
                 onCreateTask={handleCreateTask}
+                onRescheduleItem={handleRescheduleCalendarItem}
               />
               {selectedTask ? (
                 <TaskDetailPane
@@ -1131,6 +1188,19 @@ function isTaskDueOnDate(task: TaskWithSubtasks, date: string) {
     task.dueDate === date ||
     task.subtasks.some((subtask) => subtask.dueDate === date)
   );
+}
+
+function toRecurrenceRuleDraft(
+  recurrenceRule: TaskWithSubtasks["recurrenceRule"] | Subtask["recurrenceRule"],
+): RecurrenceRuleDraft | null {
+  if (!recurrenceRule) {
+    return null;
+  }
+
+  return {
+    frequency: recurrenceRule.frequency,
+    interval: recurrenceRule.interval,
+  };
 }
 
 function getTodayDateInputValue() {

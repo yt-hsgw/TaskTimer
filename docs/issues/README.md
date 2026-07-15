@@ -44,6 +44,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [036 タスクのアーカイブ操作をUse Caseへ追加する](036-task-archive-usecase.md) / GitHub #52
 - [037 UI設定の永続化範囲を拡張する](037-ui-preferences-persistence.md) / GitHub #57
 - [038 カレンダーからタスクを追加できるようにする](038-calendar-task-create.md) / GitHub #82
+- [039 カレンダー上でタスク期限を調整できるようにする](039-calendar-reschedule.md) / GitHub #83
 
 ## 運用
 

@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent, FormEvent } from "react";
 import type {
   TaskListItem,
   WeekCalendarItem,
@@ -16,6 +17,7 @@ type WeekCalendarProps = {
   defaultTaskListId: string;
   isLoading: boolean;
   isCreatingTaskPending: boolean;
+  isReschedulingItem: boolean;
   selectedTarget: WorkTargetRef | null;
   onChangeViewMode(viewMode: CalendarViewMode): void;
   onPreviousRange(): void;
@@ -23,6 +25,11 @@ type WeekCalendarProps = {
   onToday(): void;
   onSelectItem(item: WeekCalendarItem): void;
   onCreateTask(input: WorkItemDraft): Promise<boolean>;
+  onRescheduleItem(
+    item: WeekCalendarItem,
+    dueDate: string,
+    dueTime: string | null,
+  ): Promise<boolean>;
 };
 
 const dayLabels = ["月", "火", "水", "木", "金", "土", "日"];
@@ -47,6 +54,11 @@ type CalendarTaskDraft = {
   sourceLabel: string;
 };
 
+type CalendarDropTarget = {
+  dueDate: string;
+  dueTime: string | null;
+};
+
 export function WeekCalendar({
   viewMode,
   anchorDate,
@@ -55,6 +67,7 @@ export function WeekCalendar({
   defaultTaskListId,
   isLoading,
   isCreatingTaskPending,
+  isReschedulingItem,
   selectedTarget,
   onChangeViewMode,
   onPreviousRange,
@@ -62,9 +75,12 @@ export function WeekCalendar({
   onToday,
   onSelectItem,
   onCreateTask,
+  onRescheduleItem,
 }: WeekCalendarProps) {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const [createDraft, setCreateDraft] = useState<CalendarTaskDraft | null>(null);
+  const [draggedItem, setDraggedItem] = useState<WeekCalendarItem | null>(null);
+  const [dropTarget, setDropTarget] = useState<CalendarDropTarget | null>(null);
   const rangeDays =
     viewMode === "day"
       ? [buildDay(anchorDate)]
@@ -108,6 +124,70 @@ export function WeekCalendar({
       memo: "",
       sourceLabel: formatCreateSourceLabel(dueDate, dueTime),
     });
+  }
+
+  function handleDragStart(
+    item: WeekCalendarItem,
+    event: DragEvent<HTMLButtonElement>,
+  ) {
+    if (!canRescheduleItem(item) || isReschedulingItem) {
+      event.preventDefault();
+      return;
+    }
+
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", item.id);
+    setDraggedItem(item);
+  }
+
+  function handleDragEnd() {
+    setDraggedItem(null);
+    setDropTarget(null);
+  }
+
+  function handleDragOver(
+    target: CalendarDropTarget,
+    event: DragEvent<HTMLElement>,
+  ) {
+    if (!draggedItem || !canRescheduleItem(draggedItem) || isReschedulingItem) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTarget(target);
+  }
+
+  function handleDragLeave(
+    target: CalendarDropTarget,
+    event: DragEvent<HTMLElement>,
+  ) {
+    if (
+      event.currentTarget instanceof Node &&
+      event.relatedTarget instanceof Node &&
+      event.currentTarget.contains(event.relatedTarget)
+    ) {
+      return;
+    }
+
+    setDropTarget((current) =>
+      isSameDropTarget(current, target) ? null : current,
+    );
+  }
+
+  async function handleDrop(
+    target: CalendarDropTarget,
+    event: DragEvent<HTMLElement>,
+  ) {
+    if (!draggedItem || !canRescheduleItem(draggedItem) || isReschedulingItem) {
+      return;
+    }
+
+    event.preventDefault();
+    const item = draggedItem;
+    setDraggedItem(null);
+    setDropTarget(null);
+    await onRescheduleItem(item, target.dueDate, target.dueTime);
   }
 
   async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
@@ -331,8 +411,16 @@ export function WeekCalendar({
           items={items}
           isLoading={isLoading}
           selectedTarget={selectedTarget}
+          draggedItem={draggedItem}
+          dropTarget={dropTarget}
+          isReschedulingItem={isReschedulingItem}
           onOpenCreateTask={openCreateForm}
           onSelectItem={onSelectItem}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
         />
       ) : (
         <TimeGridCalendar
@@ -341,8 +429,16 @@ export function WeekCalendar({
           isLoading={isLoading}
           selectedTarget={selectedTarget}
           viewMode={viewMode}
+          draggedItem={draggedItem}
+          dropTarget={dropTarget}
+          isReschedulingItem={isReschedulingItem}
           onOpenCreateTask={openCreateForm}
           onSelectItem={onSelectItem}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
         />
       )}
     </section>
@@ -355,16 +451,32 @@ function TimeGridCalendar({
   isLoading,
   selectedTarget,
   viewMode,
+  draggedItem,
+  dropTarget,
+  isReschedulingItem,
   onOpenCreateTask,
   onSelectItem,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }: {
   days: CalendarDay[];
   items: WeekCalendarItem[];
   isLoading: boolean;
   selectedTarget: WorkTargetRef | null;
   viewMode: CalendarViewMode;
+  draggedItem: WeekCalendarItem | null;
+  dropTarget: CalendarDropTarget | null;
+  isReschedulingItem: boolean;
   onOpenCreateTask(dueDate: string, dueTime: string | null): void;
   onSelectItem(item: WeekCalendarItem): void;
+  onDragStart(item: WeekCalendarItem, event: DragEvent<HTMLButtonElement>): void;
+  onDragEnd(): void;
+  onDragOver(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
+  onDragLeave(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
+  onDrop(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
 }) {
   const currentTime = getCurrentTimeMarker(days);
 
@@ -390,8 +502,19 @@ function TimeGridCalendar({
         const dateOnlyItems = items
           .filter((item) => item.date === day.date && !item.time)
           .sort(sortCalendarItems);
+        const dropTargetForDay = { dueDate: day.date, dueTime: null };
         return (
-          <div className="calendar-all-day-cell" key={`${day.date}:all-day`}>
+          <div
+            className={`calendar-all-day-cell ${
+              isSameDropTarget(dropTarget, dropTargetForDay)
+                ? "is-drop-target"
+                : ""
+            }`}
+            key={`${day.date}:all-day`}
+            onDragOver={(event) => onDragOver(dropTargetForDay, event)}
+            onDragLeave={(event) => onDragLeave(dropTargetForDay, event)}
+            onDrop={(event) => onDrop(dropTargetForDay, event)}
+          >
             <CalendarAddButton
               dueDate={day.date}
               dueTime={null}
@@ -401,8 +524,12 @@ function TimeGridCalendar({
               isLoading={isLoading}
               items={dateOnlyItems}
               selectedTarget={selectedTarget}
+              draggedItem={draggedItem}
+              isReschedulingItem={isReschedulingItem}
               variant="all-day"
               onSelectItem={onSelectItem}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
             />
           </div>
         );
@@ -417,8 +544,16 @@ function TimeGridCalendar({
           currentTime={currentTime}
           isLoading={isLoading}
           selectedTarget={selectedTarget}
+          draggedItem={draggedItem}
+          dropTarget={dropTarget}
+          isReschedulingItem={isReschedulingItem}
           onOpenCreateTask={onOpenCreateTask}
           onSelectItem={onSelectItem}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
         />
       ))}
     </div>
@@ -432,8 +567,16 @@ function TimeGridRow({
   currentTime,
   isLoading,
   selectedTarget,
+  draggedItem,
+  dropTarget,
+  isReschedulingItem,
   onOpenCreateTask,
   onSelectItem,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }: {
   hour: number;
   days: CalendarDay[];
@@ -441,8 +584,16 @@ function TimeGridRow({
   currentTime: CurrentTimeMarker | null;
   isLoading: boolean;
   selectedTarget: WorkTargetRef | null;
+  draggedItem: WeekCalendarItem | null;
+  dropTarget: CalendarDropTarget | null;
+  isReschedulingItem: boolean;
   onOpenCreateTask(dueDate: string, dueTime: string | null): void;
   onSelectItem(item: WeekCalendarItem): void;
+  onDragStart(item: WeekCalendarItem, event: DragEvent<HTMLButtonElement>): void;
+  onDragEnd(): void;
+  onDragOver(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
+  onDragLeave(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
+  onDrop(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
 }) {
   return (
     <>
@@ -453,12 +604,23 @@ function TimeGridRow({
           .sort(sortCalendarItems);
         const shouldShowCurrentTime =
           currentTime?.date === day.date && currentTime.hour === hour;
+        const dropTargetForHour = {
+          dueDate: day.date,
+          dueTime: formatHourInput(hour),
+        };
         return (
           <div
             className={`calendar-time-cell ${
               shouldShowCurrentTime ? "has-current-time" : ""
+            } ${
+              isSameDropTarget(dropTarget, dropTargetForHour)
+                ? "is-drop-target"
+                : ""
             }`}
             key={`${day.date}:${hour}`}
+            onDragOver={(event) => onDragOver(dropTargetForHour, event)}
+            onDragLeave={(event) => onDragLeave(dropTargetForHour, event)}
+            onDrop={(event) => onDrop(dropTargetForHour, event)}
           >
             <CalendarAddButton
               dueDate={day.date}
@@ -475,8 +637,12 @@ function TimeGridRow({
               isLoading={isLoading}
               items={hourItems}
               selectedTarget={selectedTarget}
+              draggedItem={draggedItem}
+              isReschedulingItem={isReschedulingItem}
               variant="timed"
               onSelectItem={onSelectItem}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
             />
           </div>
         );
@@ -489,14 +655,22 @@ function CalendarCellItems({
   isLoading,
   items,
   selectedTarget,
+  draggedItem,
+  isReschedulingItem,
   variant,
   onSelectItem,
+  onDragStart,
+  onDragEnd,
 }: {
   isLoading: boolean;
   items: WeekCalendarItem[];
   selectedTarget: WorkTargetRef | null;
+  draggedItem: WeekCalendarItem | null;
+  isReschedulingItem: boolean;
   variant: "all-day" | "timed";
   onSelectItem(item: WeekCalendarItem): void;
+  onDragStart(item: WeekCalendarItem, event: DragEvent<HTMLButtonElement>): void;
+  onDragEnd(): void;
 }) {
   if (isLoading) {
     return <p className="calendar-empty">読み込み中</p>;
@@ -513,8 +687,12 @@ function CalendarCellItems({
           item={item}
           key={item.id}
           selectedTarget={selectedTarget}
+          draggedItem={draggedItem}
+          isReschedulingItem={isReschedulingItem}
           variant={variant}
           onSelectItem={onSelectItem}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
         />
       ))}
     </div>
@@ -527,16 +705,32 @@ function MonthCalendar({
   items,
   isLoading,
   selectedTarget,
+  draggedItem,
+  dropTarget,
+  isReschedulingItem,
   onOpenCreateTask,
   onSelectItem,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
 }: {
   days: CalendarDay[];
   anchorDate: string;
   items: WeekCalendarItem[];
   isLoading: boolean;
   selectedTarget: WorkTargetRef | null;
+  draggedItem: WeekCalendarItem | null;
+  dropTarget: CalendarDropTarget | null;
+  isReschedulingItem: boolean;
   onOpenCreateTask(dueDate: string, dueTime: string | null): void;
   onSelectItem(item: WeekCalendarItem): void;
+  onDragStart(item: WeekCalendarItem, event: DragEvent<HTMLButtonElement>): void;
+  onDragEnd(): void;
+  onDragOver(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
+  onDragLeave(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
+  onDrop(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
 }) {
   const anchor = parseDateInputValue(anchorDate);
   const currentMonth = anchor.getMonth();
@@ -557,12 +751,20 @@ function MonthCalendar({
           const hiddenCount = dayItems.length - visibleItems.length;
           const isOutsideMonth =
             parseDateInputValue(day.date).getMonth() !== currentMonth;
+          const dropTargetForDay = { dueDate: day.date, dueTime: null };
           return (
             <div
               className={`calendar-month-day ${
                 isOutsideMonth ? "is-outside-month" : ""
-              } ${isToday(day.date) ? "is-today" : ""}`}
+              } ${isToday(day.date) ? "is-today" : ""} ${
+                isSameDropTarget(dropTarget, dropTargetForDay)
+                  ? "is-drop-target"
+                  : ""
+              }`}
               key={day.date}
+              onDragOver={(event) => onDragOver(dropTargetForDay, event)}
+              onDragLeave={(event) => onDragLeave(dropTargetForDay, event)}
+              onDrop={(event) => onDrop(dropTargetForDay, event)}
             >
               <div className="calendar-month-day-heading">
                 <CalendarAddButton
@@ -582,8 +784,12 @@ function MonthCalendar({
                       item={item}
                       key={item.id}
                       selectedTarget={selectedTarget}
+                      draggedItem={draggedItem}
+                      isReschedulingItem={isReschedulingItem}
                       variant="month"
                       onSelectItem={onSelectItem}
+                      onDragStart={onDragStart}
+                      onDragEnd={onDragEnd}
                     />
                   ))}
                   {hiddenCount > 0 ? (
@@ -602,15 +808,25 @@ function MonthCalendar({
 function CalendarItemButton({
   item,
   selectedTarget,
+  draggedItem,
+  isReschedulingItem,
   variant,
   onSelectItem,
+  onDragStart,
+  onDragEnd,
 }: {
   item: WeekCalendarItem;
   selectedTarget: WorkTargetRef | null;
+  draggedItem: WeekCalendarItem | null;
+  isReschedulingItem: boolean;
   variant: "all-day" | "timed" | "month";
   onSelectItem(item: WeekCalendarItem): void;
+  onDragStart(item: WeekCalendarItem, event: DragEvent<HTMLButtonElement>): void;
+  onDragEnd(): void;
 }) {
   const isSelected = isSameTarget(item.target, selectedTarget);
+  const isDraggable = canRescheduleItem(item) && !isReschedulingItem;
+  const isDragging = draggedItem?.id === item.id;
   const relationLabel = item.parentTitle ? `親: ${item.parentTitle}` : null;
   const markerText = item.time
     ? `${item.time} ${markerLabels[item.marker]}`
@@ -622,10 +838,16 @@ function CalendarItemButton({
         item.target.type === "subtask" ? "is-subtask" : ""
       } ${item.status === "done" ? "is-done" : ""} ${
         isSelected ? "is-selected" : ""
+      } ${isDraggable ? "is-draggable" : ""} ${
+        isDragging ? "is-dragging" : ""
       }`}
       type="button"
+      draggable={isDraggable}
       aria-pressed={isSelected}
-      aria-label={`${relationLabel ? `${relationLabel}、` : ""}${item.title}の${markerText}を開く`}
+      aria-label={`${relationLabel ? `${relationLabel}、` : ""}${item.title}の${markerText}を開く${isDraggable ? "。ドラッグで期限を移動できます" : ""}`}
+      title={isDraggable ? "ドラッグで期限を移動" : undefined}
+      onDragStart={(event) => onDragStart(item, event)}
+      onDragEnd={onDragEnd}
       onClick={(event) => {
         event.stopPropagation();
         onSelectItem(item);
@@ -668,6 +890,10 @@ function CalendarAddButton({
       ＋
     </button>
   );
+}
+
+function canRescheduleItem(item: WeekCalendarItem) {
+  return item.marker === "due";
 }
 
 function getDisplayHour(item: WeekCalendarItem) {
@@ -743,6 +969,16 @@ function markerWeight(marker: WeekCalendarItem["marker"]) {
 function isSameTarget(target: WorkTargetRef, selectedTarget: WorkTargetRef | null) {
   return (
     selectedTarget?.type === target.type && selectedTarget.id === target.id
+  );
+}
+
+function isSameDropTarget(
+  first: CalendarDropTarget | null,
+  second: CalendarDropTarget | null,
+) {
+  return (
+    first?.dueDate === second?.dueDate &&
+    (first?.dueTime ?? null) === (second?.dueTime ?? null)
   );
 }
 

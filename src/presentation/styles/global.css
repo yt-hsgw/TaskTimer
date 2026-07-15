@@ -1793,6 +1793,13 @@ button {
   position: relative;
 }
 
+.calendar-all-day-cell.is-drop-target,
+.calendar-time-cell.is-drop-target,
+.calendar-month-day.is-drop-target {
+  background: #edf7f2;
+  box-shadow: inset 0 0 0 2px #8dbfa8;
+}
+
 .calendar-items {
   display: grid;
   gap: 3px;
@@ -1859,6 +1866,18 @@ button {
 
 .calendar-item.is-done {
   opacity: 0.62;
+}
+
+.calendar-item.is-draggable {
+  cursor: grab;
+}
+
+.calendar-item.is-draggable:active {
+  cursor: grabbing;
+}
+
+.calendar-item.is-dragging {
+  opacity: 0.45;
 }
 
 .calendar-item.is-all-day,
