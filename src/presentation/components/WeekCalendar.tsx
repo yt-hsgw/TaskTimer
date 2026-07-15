@@ -834,7 +834,7 @@ function CalendarItemButton({
 
   return (
     <button
-      className={`calendar-item marker-${item.marker} is-${variant} ${
+      className={`calendar-item marker-${item.marker} color-${item.colorToken} is-${variant} ${
         item.target.type === "subtask" ? "is-subtask" : ""
       } ${item.status === "done" ? "is-done" : ""} ${
         isSelected ? "is-selected" : ""

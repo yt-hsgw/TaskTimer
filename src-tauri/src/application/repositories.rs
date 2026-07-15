@@ -35,6 +35,7 @@ pub struct WeekCalendarItem {
     pub time: Option<String>,
     pub marker: CalendarMarker,
     pub status: WorkStatus,
+    pub color_token: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,12 +83,14 @@ pub struct RecurrenceRuleInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskListCreate {
     pub name: String,
+    pub color_token: String,
     pub now: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskListUpdate {
     pub name: String,
+    pub color_token: Option<String>,
     pub now: String,
 }
 
@@ -106,6 +109,7 @@ pub struct RecurrenceRuleRecord {
 pub struct TaskListRecord {
     pub id: String,
     pub name: String,
+    pub color_token: String,
     pub sort_order: i64,
     pub task_count: i64,
     pub active_task_count: i64,
@@ -297,7 +301,7 @@ pub struct UiPreferencesUpdate {
 }
 
 pub type RepositoryResult<T> = Result<T, String>;
-pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 1;
+pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 2;
 
 pub trait CalendarRepository {
     fn list_calendar_items(

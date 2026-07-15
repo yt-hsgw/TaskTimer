@@ -1,5 +1,9 @@
 import { FormEvent, useState } from "react";
-import type { TaskListItem } from "../../application/usecases/contracts";
+import type { ReactNode } from "react";
+import type {
+  TaskListColorToken,
+  TaskListItem,
+} from "../../application/usecases/contracts";
 import { DEFAULT_TASK_LIST_ID } from "../../domain/task/types";
 
 export type AppView =
@@ -19,8 +23,30 @@ type LeftNavigationProps = {
   onSelectView(view: AppView): void;
   onCreateTaskList(name: string): Promise<boolean>;
   onRenameTaskList(listId: string, name: string): Promise<boolean>;
+  onUpdateTaskListColor(
+    listId: string,
+    colorToken: TaskListColorToken,
+  ): Promise<boolean>;
   onDeleteTaskList(listId: string): Promise<boolean>;
   onToggle(): void;
+};
+
+const taskListColorOptions: TaskListColorToken[] = [
+  "green",
+  "blue",
+  "amber",
+  "rose",
+  "violet",
+  "gray",
+];
+
+const taskListColorLabels: Record<TaskListColorToken, string> = {
+  green: "緑",
+  blue: "青",
+  amber: "黄",
+  rose: "赤",
+  violet: "紫",
+  gray: "灰",
 };
 
 export function LeftNavigation({
@@ -33,6 +59,7 @@ export function LeftNavigation({
   onSelectView,
   onCreateTaskList,
   onRenameTaskList,
+  onUpdateTaskListColor,
   onDeleteTaskList,
   onToggle,
 }: LeftNavigationProps) {
@@ -135,9 +162,7 @@ export function LeftNavigation({
           ) : null}
           {taskLists.map((list) => (
             <div
-              className={`nav-list-row ${
-                isOpen && list.id !== DEFAULT_TASK_LIST_ID ? "has-actions" : ""
-              }`}
+              className={`nav-list-row ${isOpen ? "has-actions" : ""}`}
               key={list.id}
             >
               {editingListId === list.id ? (
@@ -172,7 +197,7 @@ export function LeftNavigation({
               ) : (
                 <>
                   <NavButton
-                    icon="□"
+                    icon={<ColorSwatch colorToken={list.colorToken} />}
                     label={list.name}
                     count={list.activeTaskCount}
                     isOpen={isOpen}
@@ -181,32 +206,54 @@ export function LeftNavigation({
                     }
                     onClick={() => onSelectView({ kind: "list", listId: list.id })}
                   />
-                  {isOpen && list.id !== DEFAULT_TASK_LIST_ID ? (
+                  {isOpen ? (
                     <div className="nav-list-actions">
-                      <button
-                        className="nav-mini-button"
-                        type="button"
-                        aria-label={`${list.name}の名前を変更`}
-                        title="名前を変更"
-                        disabled={isMutating}
-                        onClick={() => {
-                          setIsCreateOpen(false);
-                          setEditingListId(list.id);
-                          setEditingListName(list.name);
-                        }}
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className="nav-mini-button"
-                        type="button"
-                        aria-label={`${list.name}を削除`}
-                        title="削除"
-                        disabled={isMutating}
-                        onClick={() => void handleDelete(list)}
-                      >
-                        ×
-                      </button>
+                      <div className="nav-color-picker" aria-label={`${list.name}の色`}>
+                        {taskListColorOptions.map((colorToken) => (
+                          <button
+                            className={`nav-color-button color-${colorToken}`}
+                            type="button"
+                            key={colorToken}
+                            aria-label={`${list.name}の色を${taskListColorLabels[colorToken]}に変更`}
+                            aria-pressed={list.colorToken === colorToken}
+                            title={taskListColorLabels[colorToken]}
+                            disabled={
+                              isMutating || list.colorToken === colorToken
+                            }
+                            onClick={() =>
+                              void onUpdateTaskListColor(list.id, colorToken)
+                            }
+                          />
+                        ))}
+                      </div>
+                      {list.id !== DEFAULT_TASK_LIST_ID ? (
+                        <>
+                          <button
+                            className="nav-mini-button"
+                            type="button"
+                            aria-label={`${list.name}の名前を変更`}
+                            title="名前を変更"
+                            disabled={isMutating}
+                            onClick={() => {
+                              setIsCreateOpen(false);
+                              setEditingListId(list.id);
+                              setEditingListName(list.name);
+                            }}
+                          >
+                            ✎
+                          </button>
+                          <button
+                            className="nav-mini-button"
+                            type="button"
+                            aria-label={`${list.name}を削除`}
+                            title="削除"
+                            disabled={isMutating}
+                            onClick={() => void handleDelete(list)}
+                          >
+                            ×
+                          </button>
+                        </>
+                      ) : null}
                     </div>
                   ) : null}
                 </>
@@ -215,7 +262,7 @@ export function LeftNavigation({
           ))}
           {taskLists.length === 0 ? (
             <NavButton
-              icon="□"
+              icon={<ColorSwatch colorToken="green" />}
               label="タスク"
               count={0}
               isOpen={isOpen}
@@ -268,7 +315,7 @@ export function LeftNavigation({
 }
 
 type NavButtonProps = {
-  icon: string;
+  icon: string | ReactNode;
   label: string;
   count?: number;
   isActive: boolean;
@@ -302,4 +349,8 @@ function NavButton({
       ) : null}
     </button>
   );
+}
+
+function ColorSwatch({ colorToken }: { colorToken: TaskListColorToken }) {
+  return <span className={`nav-list-color-swatch color-${colorToken}`} />;
 }

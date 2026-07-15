@@ -120,7 +120,7 @@ TaskTimer-export-YYYYMMDD-HHMMSS-csv/
 同梱ファイル:
 
 - `export-manifest.json`
-- `task_lists.csv`
+- `task_lists.csv`: `id`, `name`, `color_token`, `sort_order`, `created_at`, `updated_at`
 - `tasks.csv`
 - `subtasks.csv`
 - `timer_sessions.csv`

@@ -52,6 +52,7 @@ pub struct CreateSubtaskRequestDto {
 #[serde(rename_all = "camelCase")]
 pub struct CreateTaskListRequestDto {
     pub name: String,
+    pub color_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -59,6 +60,7 @@ pub struct CreateTaskListRequestDto {
 pub struct UpdateTaskListRequestDto {
     pub list_id: String,
     pub name: String,
+    pub color_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -213,6 +215,7 @@ pub struct WeekCalendarItemDto {
     pub time: Option<String>,
     pub marker: String,
     pub status: String,
+    pub color_token: String,
 }
 
 #[derive(Serialize)]
@@ -308,6 +311,7 @@ pub struct TaskWithSubtasksDto {
 pub struct TaskListDto {
     pub id: String,
     pub name: String,
+    pub color_token: String,
     pub sort_order: i64,
     pub task_count: i64,
     pub active_task_count: i64,
@@ -498,13 +502,19 @@ impl From<UpdateSubtaskRequestDto> for WorkItemUpdateDraft {
 
 impl From<CreateTaskListRequestDto> for TaskListDraft {
     fn from(value: CreateTaskListRequestDto) -> Self {
-        Self { name: value.name }
+        Self {
+            name: value.name,
+            color_token: value.color_token,
+        }
     }
 }
 
 impl From<UpdateTaskListRequestDto> for TaskListDraft {
     fn from(value: UpdateTaskListRequestDto) -> Self {
-        Self { name: value.name }
+        Self {
+            name: value.name,
+            color_token: value.color_token,
+        }
     }
 }
 
@@ -566,6 +576,7 @@ impl From<WeekCalendarItem> for WeekCalendarItemDto {
             time: value.time,
             marker: value.marker.as_str().to_string(),
             status: value.status.as_str().to_string(),
+            color_token: value.color_token,
         }
     }
 }
@@ -661,6 +672,7 @@ impl From<TaskListRecord> for TaskListDto {
         Self {
             id: value.id,
             name: value.name,
+            color_token: value.color_token,
             sort_order: value.sort_order,
             task_count: value.task_count,
             active_task_count: value.active_task_count,

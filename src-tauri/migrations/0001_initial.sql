@@ -3,6 +3,9 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS task_lists (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+  color_token TEXT NOT NULL DEFAULT 'green' CHECK (
+    color_token IN ('green', 'blue', 'amber', 'rose', 'violet', 'gray')
+  ),
   sort_order INTEGER NOT NULL DEFAULT 0,
   deleted_at TEXT NULL,
   created_at TEXT NOT NULL,
