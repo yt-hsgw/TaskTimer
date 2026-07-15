@@ -40,6 +40,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [032 JSON/CSVエクスポートUse Caseを実装する](032-json-csv-export-usecase.md) / GitHub #87
 - [033 SQLiteバックアップ/復元Use Caseを実装する](033-sqlite-backup-restore-usecase.md) / GitHub #88
 - [034 バックアップ/復元/エクスポートUIを追加する](034-data-management-settings-ui.md) / GitHub #89
+- [035 Rust静的解析CIの実行時間を短縮する](035-rust-ci-optimization.md) / GitHub #94
 
 ## 運用
 
