@@ -140,6 +140,18 @@ pub struct ToggleTaskFavoriteRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ArchiveTaskRequestDto {
+    pub task_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreArchivedTaskRequestDto {
+    pub task_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeleteTaskRequestDto {
     pub task_id: String,
 }

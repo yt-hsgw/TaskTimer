@@ -70,6 +70,21 @@ const REQUIRED_RESTORE_TABLES: &[&str] = &[
     "recurrence_rules",
 ];
 
+#[derive(Debug, Clone, Copy)]
+enum TaskRowScope {
+    Normal,
+    Archived,
+}
+
+impl TaskRowScope {
+    fn as_query_value(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Archived => "archived",
+        }
+    }
+}
+
 pub struct SqliteDatabase {
     path: PathBuf,
     connection: Mutex<Connection>,
@@ -384,7 +399,17 @@ impl TaskReadRepository for SqliteDatabase {
         let limit = limit.clamp(1, 500);
         let list_id = normalize_optional_list_id(list_id);
 
-        self.with_connection(|connection| select_task_rows(connection, list_id.as_deref(), limit))
+        self.with_connection(|connection| {
+            select_task_rows(connection, list_id.as_deref(), limit, TaskRowScope::Normal)
+        })
+    }
+
+    fn list_archived_task_rows(&self, limit: i64) -> RepositoryResult<Vec<TaskRowRecord>> {
+        let limit = limit.clamp(1, 500);
+
+        self.with_connection(|connection| {
+            select_task_rows(connection, None, limit, TaskRowScope::Archived)
+        })
     }
 }
 
@@ -861,6 +886,58 @@ impl TaskTimerCommandRepository for SqliteDatabase {
             if updated != 1 {
                 return Err("お気に入り更新対象のタスクが存在しません".to_string());
             }
+
+            select_existing_task_by_id(transaction, &task_id)
+        })
+    }
+
+    fn archive_task(&self, task_id: String, now: String) -> RepositoryResult<TaskRecord> {
+        self.with_transaction(|transaction| {
+            let task = select_existing_task_by_id(transaction, &task_id)?;
+            if task.status == WorkStatus::Archived {
+                return Ok(task);
+            }
+            ensure_no_active_timer_for_task_graph(transaction, &task_id)?;
+
+            transaction
+                .execute(
+                    "
+                    UPDATE tasks
+                    SET status = 'archived',
+                        updated_at = ?1
+                    WHERE id = ?2
+                      AND deleted_at IS NULL
+                    ",
+                    params![now, task_id],
+                )
+                .map_err(|error| format!("タスクをアーカイブできません: {error}"))?;
+
+            select_existing_task_by_id(transaction, &task_id)
+        })
+    }
+
+    fn restore_archived_task(&self, task_id: String, now: String) -> RepositoryResult<TaskRecord> {
+        self.with_transaction(|transaction| {
+            let task = select_existing_task_by_id(transaction, &task_id)?;
+            if task.status != WorkStatus::Archived {
+                return Ok(task);
+            }
+
+            transaction
+                .execute(
+                    "
+                    UPDATE tasks
+                    SET status = CASE
+                          WHEN completed_at IS NULL THEN 'todo'
+                          ELSE 'done'
+                        END,
+                        updated_at = ?1
+                    WHERE id = ?2
+                      AND deleted_at IS NULL
+                    ",
+                    params![now, task_id],
+                )
+                .map_err(|error| format!("アーカイブ済みタスクを復元できません: {error}"))?;
 
             select_existing_task_by_id(transaction, &task_id)
         })
@@ -1807,15 +1884,32 @@ fn select_due_notification_jobs(
               ON notification_rules.target_type = 'task'
              AND notification_rules.target_id = tasks.id
              AND tasks.deleted_at IS NULL
+             AND tasks.status <> 'archived'
             LEFT JOIN subtasks
               ON notification_rules.target_type = 'subtask'
              AND notification_rules.target_id = subtasks.id
              AND subtasks.deleted_at IS NULL
+             AND subtasks.status <> 'archived'
+            LEFT JOIN tasks AS subtask_parent_tasks
+              ON notification_rules.target_type = 'subtask'
+             AND subtasks.task_id = subtask_parent_tasks.id
+             AND subtask_parent_tasks.deleted_at IS NULL
+             AND subtask_parent_tasks.status <> 'archived'
             WHERE notification_rules.enabled = 1
               AND notification_rules.deleted_at IS NULL
               AND notification_rules.notify_at <= ?1
               AND notification_rules.registration_status IN ('pending', 'failed')
-              AND COALESCE(tasks.id, subtasks.id) IS NOT NULL
+              AND (
+                (
+                  notification_rules.target_type = 'task'
+                  AND tasks.id IS NOT NULL
+                )
+                OR (
+                  notification_rules.target_type = 'subtask'
+                  AND subtasks.id IS NOT NULL
+                  AND subtask_parent_tasks.id IS NOT NULL
+                )
+              )
             ORDER BY notification_rules.notify_at ASC,
                      notification_rules.created_at ASC
             LIMIT ?2
@@ -1990,6 +2084,7 @@ fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec
                AND recurrence_rules.target_id = tasks.id
                AND recurrence_rules.deleted_at IS NULL
               WHERE tasks.deleted_at IS NULL
+                AND tasks.status <> 'archived'
               ORDER BY tasks.sort_order ASC, tasks.created_at ASC
               LIMIT ?1
             )
@@ -2023,6 +2118,7 @@ fn select_task_lists(connection: &Connection) -> RepositoryResult<Vec<TaskListRe
             LEFT JOIN tasks
               ON tasks.list_id = task_lists.id
              AND tasks.deleted_at IS NULL
+             AND tasks.status <> 'archived'
             WHERE task_lists.deleted_at IS NULL
             GROUP BY task_lists.id,
                      task_lists.name,
@@ -2072,6 +2168,7 @@ fn select_task_list_by_id(connection: &Connection, id: &str) -> RepositoryResult
             LEFT JOIN tasks
               ON tasks.list_id = task_lists.id
              AND tasks.deleted_at IS NULL
+             AND tasks.status <> 'archived'
             WHERE task_lists.id = ?1
               AND task_lists.deleted_at IS NULL
             GROUP BY task_lists.id,
@@ -2101,6 +2198,7 @@ fn select_task_rows(
     connection: &Connection,
     list_id: Option<&str>,
     limit: i64,
+    scope: TaskRowScope,
 ) -> RepositoryResult<Vec<TaskRowRecord>> {
     let mut statement = connection
         .prepare(
@@ -2151,6 +2249,10 @@ fn select_task_rows(
             )
             WHERE tasks.deleted_at IS NULL
               AND (?1 IS NULL OR tasks.list_id = ?1)
+              AND (
+                (?2 = 'normal' AND tasks.status <> 'archived')
+                OR (?2 = 'archived' AND tasks.status = 'archived')
+              )
             GROUP BY tasks.id,
                      tasks.list_id,
                      tasks.title,
@@ -2169,13 +2271,16 @@ fn select_task_rows(
             ORDER BY CASE WHEN tasks.status = 'done' THEN 1 ELSE 0 END ASC,
                      tasks.sort_order ASC,
                      tasks.created_at ASC
-            LIMIT ?2
+            LIMIT ?3
             ",
         )
         .map_err(|error| format!("タスク行Read Modelクエリを準備できません: {error}"))?;
 
     let rows = statement
-        .query_map(params![list_id, limit], map_task_read_model_row)
+        .query_map(
+            params![list_id, scope.as_query_value(), limit],
+            map_task_read_model_row,
+        )
         .map_err(|error| format!("タスク行Read Modelを取得できません: {error}"))?;
 
     rows.map(|row| row.map_err(|error| format!("タスク行Read Modelを読めません: {error}")))
@@ -2193,6 +2298,7 @@ fn select_subtasks_for_task_list(
               SELECT id, sort_order
               FROM tasks
               WHERE deleted_at IS NULL
+                AND status <> 'archived'
               ORDER BY sort_order ASC, created_at ASC
               LIMIT ?1
             )
@@ -2698,9 +2804,60 @@ fn find_target_status(
         ),
         WorkTargetType::Subtask => query_work_status(
             connection,
-            "SELECT status FROM subtasks WHERE id = ?1 AND deleted_at IS NULL",
+            "
+            SELECT CASE
+                     WHEN tasks.status = 'archived' THEN 'archived'
+                     ELSE subtasks.status
+                   END
+            FROM subtasks
+            INNER JOIN tasks
+              ON tasks.id = subtasks.task_id
+             AND tasks.deleted_at IS NULL
+            WHERE subtasks.id = ?1
+              AND subtasks.deleted_at IS NULL
+            ",
             &target.id,
         ),
+    }
+}
+
+fn ensure_no_active_timer_for_task_graph(
+    connection: &Connection,
+    task_id: &str,
+) -> RepositoryResult<()> {
+    let exists: bool = connection
+        .query_row(
+            "
+            SELECT EXISTS(
+              SELECT 1
+              FROM timer_sessions
+              LEFT JOIN subtasks
+                ON timer_sessions.target_type = 'subtask'
+               AND timer_sessions.target_id = subtasks.id
+               AND subtasks.deleted_at IS NULL
+              WHERE timer_sessions.stopped_at IS NULL
+                AND timer_sessions.deleted_at IS NULL
+                AND (
+                  (
+                    timer_sessions.target_type = 'task'
+                    AND timer_sessions.target_id = ?1
+                  )
+                  OR (
+                    timer_sessions.target_type = 'subtask'
+                    AND subtasks.task_id = ?1
+                  )
+                )
+            )
+            ",
+            params![task_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("関連アクティブタイマーを確認できません: {error}"))?;
+
+    if exists {
+        Err("タイマー開始中のタスクはアーカイブできません".to_string())
+    } else {
+        Ok(())
     }
 }
 
@@ -3054,21 +3211,37 @@ fn select_active_timer(connection: &Connection) -> RepositoryResult<Option<Activ
                    timer_sessions.created_at,
                    open_pause.paused_at
             FROM timer_sessions
-            LEFT JOIN tasks
+            LEFT JOIN tasks AS task_targets
               ON timer_sessions.target_type = 'task'
-             AND timer_sessions.target_id = tasks.id
-             AND tasks.deleted_at IS NULL
-            LEFT JOIN subtasks
+             AND timer_sessions.target_id = task_targets.id
+             AND task_targets.deleted_at IS NULL
+             AND task_targets.status <> 'archived'
+            LEFT JOIN subtasks AS subtask_targets
               ON timer_sessions.target_type = 'subtask'
-             AND timer_sessions.target_id = subtasks.id
-             AND subtasks.deleted_at IS NULL
+             AND timer_sessions.target_id = subtask_targets.id
+             AND subtask_targets.deleted_at IS NULL
+             AND subtask_targets.status <> 'archived'
+            LEFT JOIN tasks AS parent_tasks
+              ON subtask_targets.task_id = parent_tasks.id
+             AND parent_tasks.deleted_at IS NULL
+             AND parent_tasks.status <> 'archived'
             LEFT JOIN timer_pauses AS open_pause
               ON open_pause.timer_session_id = timer_sessions.id
              AND open_pause.resumed_at IS NULL
              AND open_pause.deleted_at IS NULL
             WHERE stopped_at IS NULL
               AND timer_sessions.deleted_at IS NULL
-              AND COALESCE(tasks.id, subtasks.id) IS NOT NULL
+              AND (
+                (
+                  timer_sessions.target_type = 'task'
+                  AND task_targets.id IS NOT NULL
+                )
+                OR (
+                  timer_sessions.target_type = 'subtask'
+                  AND subtask_targets.id IS NOT NULL
+                  AND parent_tasks.id IS NOT NULL
+                )
+              )
             LIMIT 1
             ",
             [],
@@ -4299,6 +4472,7 @@ fn collect_task_calendar_items(
             SELECT id, title, planned_start_date, due_date, due_time, status
             FROM tasks
             WHERE deleted_at IS NULL
+              AND status <> 'archived'
               AND (
                 planned_start_date BETWEEN ?1 AND ?2
                 OR due_date BETWEEN ?1 AND ?2
@@ -4351,7 +4525,9 @@ fn collect_subtask_calendar_items(
             INNER JOIN tasks
               ON tasks.id = subtasks.task_id
              AND tasks.deleted_at IS NULL
+             AND tasks.status <> 'archived'
             WHERE subtasks.deleted_at IS NULL
+              AND subtasks.status <> 'archived'
               AND (
                 subtasks.planned_start_date BETWEEN ?1 AND ?2
                 OR subtasks.due_date BETWEEN ?1 AND ?2
@@ -4404,16 +4580,29 @@ fn collect_active_timer_calendar_item(
               ON timer_sessions.target_type = 'task'
              AND timer_sessions.target_id = task_targets.id
              AND task_targets.deleted_at IS NULL
+             AND task_targets.status <> 'archived'
             LEFT JOIN subtasks AS subtask_targets
               ON timer_sessions.target_type = 'subtask'
              AND timer_sessions.target_id = subtask_targets.id
              AND subtask_targets.deleted_at IS NULL
+             AND subtask_targets.status <> 'archived'
             LEFT JOIN tasks AS parent_tasks
               ON subtask_targets.task_id = parent_tasks.id
              AND parent_tasks.deleted_at IS NULL
+             AND parent_tasks.status <> 'archived'
             WHERE timer_sessions.stopped_at IS NULL
               AND timer_sessions.deleted_at IS NULL
-              AND COALESCE(task_targets.id, subtask_targets.id) IS NOT NULL
+              AND (
+                (
+                  timer_sessions.target_type = 'task'
+                  AND task_targets.id IS NOT NULL
+                )
+                OR (
+                  timer_sessions.target_type = 'subtask'
+                  AND subtask_targets.id IS NOT NULL
+                  AND parent_tasks.id IS NOT NULL
+                )
+              )
               AND substr(timer_sessions.started_at, 1, 10) BETWEEN ?1 AND ?2
             LIMIT 1
             ",
@@ -5918,6 +6107,183 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].status, WorkStatus::Todo);
         assert_eq!(rows[0].completed_at, None);
+    }
+
+    #[test]
+    fn archive_task_hides_from_normal_rows_calendar_and_notifications() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-05T00:00:00Z",
+        };
+        let archive_clock = FixedClock {
+            now: "2026-07-05T00:10:00Z",
+        };
+        let dispatch_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task = usecases::create_task(
+            &database,
+            &create_clock,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "アーカイブ対象".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-06".to_string()),
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create task");
+        let subtask = usecases::create_subtask(
+            &database,
+            &create_clock,
+            task.id.clone(),
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "配下サブタスク".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-06".to_string()),
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create subtask");
+
+        let archived =
+            usecases::archive_task(&database, &archive_clock, task.id.clone()).expect("archive");
+        let normal_rows = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("normal rows");
+        let archived_rows = database
+            .list_archived_task_rows(200)
+            .expect("archived rows");
+        let task_tree = database.list_tasks_with_subtasks(200).expect("task tree");
+        let task_lists = database.list_task_lists().expect("task lists");
+        let calendar_items = database
+            .list_calendar_items("2026-07-06", "2026-07-06")
+            .expect("calendar items");
+        let notification_gateway = RecordingNotificationGateway::ok();
+        let notification_summary =
+            usecases::dispatch_due_notifications(&database, &notification_gateway, &dispatch_clock)
+                .expect("dispatch notifications");
+        let start_subtask_timer = usecases::start_timer(
+            &database,
+            &dispatch_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Subtask,
+                id: subtask.id,
+            },
+        );
+        let notification_rule_count: i64 = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM notification_rules WHERE deleted_at IS NULL",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("notification rule count: {error}"))
+            })
+            .expect("notification rule count");
+
+        assert_eq!(archived.status, WorkStatus::Archived);
+        assert!(normal_rows.is_empty());
+        assert_eq!(archived_rows.len(), 1);
+        assert_eq!(archived_rows[0].id, task.id);
+        assert!(task_tree.is_empty());
+        assert_eq!(task_lists[0].task_count, 0);
+        assert_eq!(task_lists[0].active_task_count, 0);
+        assert_eq!(task_lists[0].completed_task_count, 0);
+        assert!(calendar_items.is_empty());
+        assert_eq!(notification_summary.attempted, 0);
+        assert!(notification_gateway.messages().is_empty());
+        assert_eq!(notification_rule_count, 2);
+        assert!(start_subtask_timer
+            .expect_err("archived parent blocks subtask timer")
+            .contains("アーカイブ"));
+    }
+
+    #[test]
+    fn restore_archived_task_returns_to_normal_rows_without_changing_subtasks() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let restore_clock = FixedClock {
+            now: "2026-07-06T01:00:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &create_clock, draft("復元対象")).expect("task");
+        let subtask = usecases::create_subtask(
+            &database,
+            &create_clock,
+            task.id.clone(),
+            draft("完了済み子"),
+        )
+        .expect("subtask");
+
+        usecases::complete_subtask(&database, &create_clock, subtask.id.clone())
+            .expect("complete subtask");
+        usecases::complete_task(&database, &create_clock, task.id.clone(), true)
+            .expect("complete task");
+        usecases::archive_task(&database, &create_clock, task.id.clone()).expect("archive");
+        let restored = usecases::restore_archived_task(&database, &restore_clock, task.id.clone())
+            .expect("restore");
+        let rows = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("normal rows");
+        let archived_rows = database
+            .list_archived_task_rows(200)
+            .expect("archived rows");
+        let tree = database.list_tasks_with_subtasks(200).expect("task tree");
+
+        assert_eq!(restored.status, WorkStatus::Done);
+        assert_eq!(
+            restored.completed_at.as_deref(),
+            Some("2026-07-06T00:00:00Z")
+        );
+        assert_eq!(restored.updated_at, "2026-07-06T01:00:00Z");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, task.id);
+        assert!(archived_rows.is_empty());
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].subtasks.len(), 1);
+        assert_eq!(tree[0].subtasks[0].status, WorkStatus::Done);
+    }
+
+    #[test]
+    fn archive_task_rejects_when_child_subtask_timer_is_active() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task = usecases::create_task(&database, &clock, draft("タイマー中の親")).expect("task");
+        let subtask =
+            usecases::create_subtask(&database, &clock, task.id.clone(), draft("タイマー中の子"))
+                .expect("subtask");
+
+        usecases::start_timer(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Subtask,
+                id: subtask.id,
+            },
+        )
+        .expect("start subtask timer");
+        let rejected = usecases::archive_task(&database, &clock, task.id.clone());
+        let rows = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("normal rows");
+        let active_timer = database.get_active_timer().expect("active timer");
+
+        assert!(rejected
+            .expect_err("archive active child timer")
+            .contains("タイマー開始中"));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, WorkStatus::Todo);
+        assert!(rows[0].active_timer_target.is_some());
+        assert!(active_timer.is_some());
     }
 
     #[test]

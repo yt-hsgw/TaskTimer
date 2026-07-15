@@ -26,6 +26,7 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   listTaskLists: () => invoke<TaskListItem[]>("list_task_lists"),
   listTaskRows: (listId?: string | null) =>
     invoke<TaskRow[]>("list_task_rows", { listId: listId ?? null }),
+  listArchivedTaskRows: () => invoke<TaskRow[]>("list_archived_task_rows"),
   listCalendarItems: (startDate, endDate) =>
     invoke<WeekCalendarItem[]>("list_calendar_items", { startDate, endDate }),
   listWeekCalendarItems: (weekStartDate) =>
@@ -66,6 +67,10 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<Task>("toggle_task_favorite", {
       request: { taskId, isFavorite },
     }),
+  archiveTask: (taskId: string) =>
+    invoke<Task>("archive_task", { request: { taskId } }),
+  restoreArchivedTask: (taskId: string) =>
+    invoke<Task>("restore_archived_task", { request: { taskId } }),
   deleteTask: (taskId: string) =>
     invoke<void>("delete_task", { request: { taskId } }),
   deleteSubtask: (subtaskId: string) =>

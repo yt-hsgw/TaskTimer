@@ -145,6 +145,7 @@ export type TaskTimerGateway = {
   listTasks(): Promise<TaskWithSubtasks[]>;
   listTaskLists(): Promise<TaskListItem[]>;
   listTaskRows(listId?: string | null): Promise<TaskRow[]>;
+  listArchivedTaskRows(): Promise<TaskRow[]>;
   listCalendarItems(startDate: string, endDate: string): Promise<WeekCalendarItem[]>;
   listWeekCalendarItems(weekStartDate: string): Promise<WeekCalendarItem[]>;
   getActiveTimer(): Promise<ActiveTimer | null>;
@@ -165,6 +166,8 @@ export type TaskTimerGateway = {
   completeSubtask(subtaskId: string): Promise<Subtask>;
   reopenSubtask(subtaskId: string): Promise<Subtask>;
   toggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<Task>;
+  archiveTask(taskId: string): Promise<Task>;
+  restoreArchivedTask(taskId: string): Promise<Task>;
   deleteTask(taskId: string): Promise<void>;
   deleteSubtask(subtaskId: string): Promise<void>;
   updateNotificationDisplayMode(
