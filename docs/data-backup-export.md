@@ -188,7 +188,7 @@ SQLiteバックアップ/復元Use Caseは、設定画面UIから独立したApp
 
 ```mermaid
 flowchart LR
-  UI["Settings UI (後続Issue)"] --> CMD["Tauri command"]
+  UI["Settings UI"] --> CMD["Tauri command"]
   CMD --> UC["Application Use Case"]
   UC --> REPO["SqliteBackupRepository"]
   REPO --> DB["SQLite"]
@@ -211,7 +211,7 @@ Repository/Infrastructureの責務:
 
 ## UI方針
 
-最終的には設定画面に「データ管理」セクションを追加する。
+設定画面に「データ管理」セクションを置く。
 
 提供する操作:
 
@@ -220,11 +220,35 @@ Repository/Infrastructureの責務:
 - JSONエクスポート。
 - CSVエクスポート。
 
+UIの責務:
+
+- 保存先または復元元フォルダの選択。
+- 復元前の確認メッセージ表示。
+- 成功、失敗、キャンセル状態の表示。
+- 操作中の多重実行防止。
+
+UIが持たない責務:
+
+- バックアップmanifest、SQLite整合性、必須テーブル、マイグレーション可否の検証。
+- DBファイルの直接入れ替え。
+- JSON/CSVの内容生成。
+
 表示する注意:
 
 - バックアップ/エクスポートにはタスク名、メモ本文、タイマー履歴が含まれる。
 - 公開Issue、PR、Discussions、Release artifactへ添付しない。
 - 復元は現在のデータを置き換えるため、実行前に現在DBを退避する。
+
+設計理由:
+
+- ファイル名はUse Case側で生成し、UIはフォルダ選択に限定する。形式やタイムスタンプ命名のばらつきを防ぐため。
+- 復元確認はUIで実施し、検証と入れ替えはUse Case/Infrastructureへ閉じ込める。Presentation層がDBの正しさを判断しないため。
+- Tauri権限はフォルダ選択に必要な `dialog:allow-open` に限定する。外部通信やクラウド連携は追加しないため。
+
+トレードオフ:
+
+- ファイル名を利用者が直接指定できない代わりに、保存形式と衝突回避の責務をアプリ側に寄せられる。
+- UIでは詳細なファイルパスを出さないため、調査時の情報量は減るが、個人情報を含むパスの露出を抑えられる。
 
 ## セキュリティ
 

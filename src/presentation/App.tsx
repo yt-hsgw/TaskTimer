@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import type {
   NotificationDeliveryAttempt,
   NotificationDispatchSummary,
@@ -20,7 +21,10 @@ import { tauriTaskTimerGateway } from "../infrastructure/tauri/gateway";
 import { WeekCalendar, type CalendarViewMode } from "./components/WeekCalendar";
 import { TaskPanel } from "./components/TaskPanel";
 import { TaskDetailPane } from "./components/TaskDetailPane";
-import { SettingsPanel } from "./components/SettingsPanel";
+import {
+  SettingsPanel,
+  type DataManagementActionResult,
+} from "./components/SettingsPanel";
 import { LeftNavigation, type AppView } from "./components/LeftNavigation";
 
 type LoadSnapshotOptions = {
@@ -598,6 +602,127 @@ export function App() {
     [runMutation],
   );
 
+  const runDataManagementAction = useCallback(
+    async (
+      action: () => Promise<DataManagementActionResult>,
+    ): Promise<DataManagementActionResult> => {
+      setIsMutating(true);
+      setErrorMessage(null);
+      try {
+        return await action();
+      } catch (error) {
+        return {
+          status: "failed",
+          message: "データ管理操作に失敗しました。",
+          detail: toDataManagementErrorDetail(error),
+        };
+      } finally {
+        setIsMutating(false);
+      }
+    },
+    [],
+  );
+
+  const handleCreateSqliteBackup = useCallback(
+    () =>
+      runDataManagementAction(async (): Promise<DataManagementActionResult> => {
+        const destinationDir = await selectDirectory(
+          "SQLiteバックアップの保存先を選択",
+        );
+        if (!destinationDir) {
+          return createCancelledResult(
+            "SQLiteバックアップの作成をキャンセルしました。",
+          );
+        }
+
+        const result =
+          await tauriTaskTimerGateway.createSqliteBackup(destinationDir);
+        return {
+          status: "success",
+          message: "SQLiteバックアップを作成しました。",
+          detail: `保存先: ${getPathBasename(result.backupDir)}`,
+        };
+      }),
+    [runDataManagementAction],
+  );
+
+  const handleRestoreSqliteBackup = useCallback(
+    () =>
+      runDataManagementAction(async (): Promise<DataManagementActionResult> => {
+        const backupDir = await selectDirectory(
+          "SQLiteバックアップフォルダを選択",
+          false,
+        );
+        if (!backupDir) {
+          return createCancelledResult(
+            "SQLiteバックアップからの復元をキャンセルしました。",
+          );
+        }
+
+        const confirmed = window.confirm(
+          "選択したSQLiteバックアップで現在のデータを置き換えます。現在のDBを退避してから実行したい場合はキャンセルしてください。復元を続行しますか？",
+        );
+        if (!confirmed) {
+          return createCancelledResult(
+            "SQLiteバックアップからの復元をキャンセルしました。",
+          );
+        }
+
+        const result =
+          await tauriTaskTimerGateway.restoreSqliteBackup(backupDir);
+        clearDetailSelection();
+        await loadSnapshot({ showLoading: false });
+        return {
+          status: "success",
+          message: "SQLiteバックアップから復元しました。",
+          detail: `復元元: ${getPathBasename(result.backupDir)}`,
+        };
+      }),
+    [clearDetailSelection, loadSnapshot, runDataManagementAction],
+  );
+
+  const handleCreateJsonExport = useCallback(
+    () =>
+      runDataManagementAction(async (): Promise<DataManagementActionResult> => {
+        const destinationDir = await selectDirectory(
+          "JSONエクスポートの保存先を選択",
+        );
+        if (!destinationDir) {
+          return createCancelledResult("JSONエクスポートをキャンセルしました。");
+        }
+
+        const result =
+          await tauriTaskTimerGateway.createJsonExport(destinationDir);
+        return {
+          status: "success",
+          message: "JSONエクスポートを作成しました。",
+          detail: `保存先: ${getPathBasename(result.exportPath)}`,
+        };
+      }),
+    [runDataManagementAction],
+  );
+
+  const handleCreateCsvExport = useCallback(
+    () =>
+      runDataManagementAction(async (): Promise<DataManagementActionResult> => {
+        const destinationDir = await selectDirectory(
+          "CSVエクスポートの保存先を選択",
+        );
+        if (!destinationDir) {
+          return createCancelledResult("CSVエクスポートをキャンセルしました。");
+        }
+
+        const result =
+          await tauriTaskTimerGateway.createCsvExport(destinationDir);
+        return {
+          status: "success",
+          message: "CSVエクスポートを作成しました。",
+          detail: `保存先: ${getPathBasename(result.exportPath)}`,
+        };
+      }),
+    [runDataManagementAction],
+  );
+
   const handleSelectView = useCallback(
     (view: AppView) => {
       if (isSameAppView(activeView, view)) {
@@ -851,6 +976,10 @@ export function App() {
               onUpdateDisplayMode={handleUpdateNotificationDisplayMode}
               onUpdateNotificationsEnabled={handleUpdateNotificationsEnabled}
               onRetryNotifications={handleRetryNotifications}
+              onCreateSqliteBackup={handleCreateSqliteBackup}
+              onRestoreSqliteBackup={handleRestoreSqliteBackup}
+              onCreateJsonExport={handleCreateJsonExport}
+              onCreateCsvExport={handleCreateCsvExport}
             />
           ) : null}
         </section>
@@ -993,6 +1122,42 @@ function resolveTaskIdForTarget(
       task.subtasks.some((subtask) => subtask.id === target.id),
     )?.id ?? null
   );
+}
+
+async function selectDirectory(title: string, canCreateDirectories = true) {
+  const selected = await open({
+    title,
+    directory: true,
+    multiple: false,
+    canCreateDirectories,
+  });
+  if (Array.isArray(selected)) {
+    return selected[0] ?? null;
+  }
+  return selected;
+}
+
+function createCancelledResult(message: string): DataManagementActionResult {
+  return {
+    status: "cancelled",
+    message,
+  };
+}
+
+function getPathBasename(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? "選択した場所";
+}
+
+function toDataManagementErrorDetail(error: unknown) {
+  const message = toErrorMessage(error);
+  const withoutUnixPaths = message.replace(/\/[^:\s]+/g, "選択した場所");
+  const withoutWindowsPaths = withoutUnixPaths.replace(
+    /[A-Za-z]:\\[^:\s]+/g,
+    "選択した場所",
+  );
+  return withoutWindowsPaths.length > 180
+    ? `${withoutWindowsPaths.slice(0, 177)}...`
+    : withoutWindowsPaths;
 }
 
 function toErrorMessage(error: unknown) {
