@@ -310,6 +310,8 @@ pub trait TaskReadRepository {
         list_id: Option<&str>,
         limit: i64,
     ) -> RepositoryResult<Vec<TaskRowRecord>>;
+
+    fn list_archived_task_rows(&self, limit: i64) -> RepositoryResult<Vec<TaskRowRecord>>;
 }
 
 pub trait TaskTimerCommandRepository {
@@ -356,6 +358,10 @@ pub trait TaskTimerCommandRepository {
         is_favorite: bool,
         now: String,
     ) -> RepositoryResult<TaskRecord>;
+
+    fn archive_task(&self, task_id: String, now: String) -> RepositoryResult<TaskRecord>;
+
+    fn restore_archived_task(&self, task_id: String, now: String) -> RepositoryResult<TaskRecord>;
 
     fn delete_task(&self, task_id: String, now: String) -> RepositoryResult<()>;
 

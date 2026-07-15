@@ -241,6 +241,24 @@ pub fn toggle_task_favorite(
     repository.toggle_task_favorite(task_id, is_favorite, clock.now_utc_iso8601())
 }
 
+pub fn archive_task(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    task_id: String,
+) -> RepositoryResult<TaskRecord> {
+    let task_id = validate_identifier(&task_id, "タスクID")?;
+    repository.archive_task(task_id, clock.now_utc_iso8601())
+}
+
+pub fn restore_archived_task(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    task_id: String,
+) -> RepositoryResult<TaskRecord> {
+    let task_id = validate_identifier(&task_id, "タスクID")?;
+    repository.restore_archived_task(task_id, clock.now_utc_iso8601())
+}
+
 pub fn delete_task(
     repository: &impl TaskTimerCommandRepository,
     clock: &impl Clock,

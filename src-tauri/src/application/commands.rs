@@ -72,6 +72,17 @@ pub fn list_task_rows(
 }
 
 #[tauri::command]
+pub fn list_archived_task_rows(
+    database: DatabaseState<'_>,
+) -> Result<Vec<super::dto::TaskRowDto>, String> {
+    use crate::application::repositories::TaskReadRepository;
+
+    database
+        .list_archived_task_rows(TASK_LIST_LIMIT)
+        .map(|rows| rows.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
 pub fn get_active_timer(
     database: DatabaseState<'_>,
 ) -> Result<Option<super::dto::ActiveTimerDto>, String> {
@@ -269,6 +280,25 @@ pub fn toggle_task_favorite(
         request.is_favorite,
     )
     .map(Into::into)
+}
+
+#[tauri::command]
+pub fn archive_task(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::ArchiveTaskRequestDto,
+) -> Result<super::dto::TaskDto, String> {
+    super::usecases::archive_task(database.inner(), clock.inner(), request.task_id).map(Into::into)
+}
+
+#[tauri::command]
+pub fn restore_archived_task(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::RestoreArchivedTaskRequestDto,
+) -> Result<super::dto::TaskDto, String> {
+    super::usecases::restore_archived_task(database.inner(), clock.inner(), request.task_id)
+        .map(Into::into)
 }
 
 #[tauri::command]
