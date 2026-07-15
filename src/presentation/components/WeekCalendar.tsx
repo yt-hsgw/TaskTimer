@@ -1,4 +1,9 @@
-import type { WeekCalendarItem } from "../../application/usecases/contracts";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  TaskListItem,
+  WeekCalendarItem,
+  WorkItemDraft,
+} from "../../application/usecases/contracts";
 import type { WorkTargetRef } from "../../domain/task/types";
 
 export type CalendarViewMode = "week" | "day" | "month";
@@ -7,13 +12,17 @@ type WeekCalendarProps = {
   viewMode: CalendarViewMode;
   anchorDate: string;
   items: WeekCalendarItem[];
+  taskLists: TaskListItem[];
+  defaultTaskListId: string;
   isLoading: boolean;
+  isCreatingTaskPending: boolean;
   selectedTarget: WorkTargetRef | null;
   onChangeViewMode(viewMode: CalendarViewMode): void;
   onPreviousRange(): void;
   onNextRange(): void;
   onToday(): void;
   onSelectItem(item: WeekCalendarItem): void;
+  onCreateTask(input: WorkItemDraft): Promise<boolean>;
 };
 
 const dayLabels = ["月", "火", "水", "木", "金", "土", "日"];
@@ -29,18 +38,33 @@ const viewModeLabels: Record<CalendarViewMode, string> = {
   month: "月",
 };
 
+type CalendarTaskDraft = {
+  title: string;
+  listId: string;
+  dueDate: string;
+  dueTime: string;
+  memo: string;
+  sourceLabel: string;
+};
+
 export function WeekCalendar({
   viewMode,
   anchorDate,
   items,
+  taskLists,
+  defaultTaskListId,
   isLoading,
+  isCreatingTaskPending,
   selectedTarget,
   onChangeViewMode,
   onPreviousRange,
   onNextRange,
   onToday,
   onSelectItem,
+  onCreateTask,
 }: WeekCalendarProps) {
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const [createDraft, setCreateDraft] = useState<CalendarTaskDraft | null>(null);
   const rangeDays =
     viewMode === "day"
       ? [buildDay(anchorDate)]
@@ -49,6 +73,62 @@ export function WeekCalendar({
   const headingLabel = formatCalendarHeading(viewMode, anchorDate);
   const weekBadge =
     viewMode === "week" ? `第${getIsoWeekNumber(anchorDate)}週` : null;
+  const fallbackListId = useMemo(() => {
+    if (taskLists.some((list) => list.id === defaultTaskListId)) {
+      return defaultTaskListId;
+    }
+    return taskLists[0]?.id ?? defaultTaskListId;
+  }, [defaultTaskListId, taskLists]);
+
+  useEffect(() => {
+    titleInputRef.current?.focus();
+  }, [createDraft?.sourceLabel]);
+
+  useEffect(() => {
+    if (!createDraft) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setCreateDraft(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [createDraft]);
+
+  function openCreateForm(dueDate: string, dueTime: string | null) {
+    setCreateDraft({
+      title: "",
+      listId: fallbackListId,
+      dueDate,
+      dueTime: dueTime ?? "",
+      memo: "",
+      sourceLabel: formatCreateSourceLabel(dueDate, dueTime),
+    });
+  }
+
+  async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!createDraft) {
+      return;
+    }
+
+    const dueDate = normalizeOptionalText(createDraft.dueDate);
+    const created = await onCreateTask({
+      title: createDraft.title,
+      listId: createDraft.listId || fallbackListId,
+      plannedStartDate: null,
+      dueDate,
+      dueTime: dueDate ? normalizeOptionalText(createDraft.dueTime) : null,
+      memo: createDraft.memo,
+    });
+    if (created) {
+      setCreateDraft(null);
+    }
+  }
 
   return (
     <section className="panel calendar-panel" aria-labelledby="calendar-title">
@@ -84,6 +164,16 @@ export function WeekCalendar({
         </div>
 
         <div className="calendar-heading-controls">
+          <button
+            className="calendar-add-task-button"
+            type="button"
+            aria-label={`${formatDateLabel(anchorDate)}にタスクを追加`}
+            title="タスクを追加"
+            disabled={isCreatingTaskPending}
+            onClick={() => openCreateForm(anchorDate, null)}
+          >
+            ＋
+          </button>
           <div className="calendar-view-switch" aria-label="カレンダー表示切替">
             {(["week", "day", "month"] as const).map((mode) => (
               <button
@@ -100,6 +190,140 @@ export function WeekCalendar({
         </div>
       </div>
 
+      {createDraft ? (
+        <div className="calendar-create-form-shell">
+          <form
+            className="work-form calendar-create-form"
+            onSubmit={(event) => void handleCreateTask(event)}
+          >
+            <div className="calendar-create-form-heading">
+              <div>
+                <strong>タスクを追加</strong>
+                <span>{createDraft.sourceLabel}</span>
+              </div>
+              <button
+                className="inline-icon-button"
+                type="button"
+                aria-label="作成フォームを閉じる"
+                disabled={isCreatingTaskPending}
+                onClick={() => setCreateDraft(null)}
+              >
+                ×
+              </button>
+            </div>
+
+            <label>
+              <span>タスク名</span>
+              <input
+                ref={titleInputRef}
+                value={createDraft.title}
+                onChange={(event) =>
+                  setCreateDraft((current) =>
+                    current ? { ...current, title: event.target.value } : current,
+                  )
+                }
+                placeholder="例: 企画メモを整理"
+                disabled={isCreatingTaskPending}
+                maxLength={120}
+                required
+              />
+            </label>
+
+            <div className="calendar-create-grid">
+              <label>
+                <span>リスト</span>
+                <select
+                  value={createDraft.listId}
+                  onChange={(event) =>
+                    setCreateDraft((current) =>
+                      current
+                        ? { ...current, listId: event.target.value }
+                        : current,
+                    )
+                  }
+                  disabled={isCreatingTaskPending}
+                >
+                  {taskLists.length > 0 ? (
+                    taskLists.map((list) => (
+                      <option key={list.id} value={list.id}>
+                        {list.name}
+                      </option>
+                    ))
+                  ) : (
+                    <option value={fallbackListId}>タスク</option>
+                  )}
+                </select>
+              </label>
+              <label>
+                <span>期限日</span>
+                <input
+                  type="date"
+                  value={createDraft.dueDate}
+                  onChange={(event) =>
+                    setCreateDraft((current) =>
+                      current
+                        ? {
+                            ...current,
+                            dueDate: event.target.value,
+                            dueTime: event.target.value ? current.dueTime : "",
+                          }
+                        : current,
+                    )
+                  }
+                  disabled={isCreatingTaskPending}
+                />
+              </label>
+              <label>
+                <span>期限時刻</span>
+                <input
+                  type="time"
+                  value={createDraft.dueTime}
+                  onChange={(event) =>
+                    setCreateDraft((current) =>
+                      current ? { ...current, dueTime: event.target.value } : current,
+                    )
+                  }
+                  disabled={isCreatingTaskPending || !createDraft.dueDate}
+                />
+              </label>
+            </div>
+
+            <label>
+              <span>メモ</span>
+              <textarea
+                value={createDraft.memo}
+                onChange={(event) =>
+                  setCreateDraft((current) =>
+                    current ? { ...current, memo: event.target.value } : current,
+                  )
+                }
+                disabled={isCreatingTaskPending}
+                maxLength={2000}
+                rows={2}
+              />
+            </label>
+
+            <div className="composer-actions">
+              <button
+                className="primary-button"
+                type="submit"
+                disabled={isCreatingTaskPending}
+              >
+                追加
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={isCreatingTaskPending}
+                onClick={() => setCreateDraft(null)}
+              >
+                キャンセル
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
       {viewMode === "month" ? (
         <MonthCalendar
           days={monthDays}
@@ -107,6 +331,7 @@ export function WeekCalendar({
           items={items}
           isLoading={isLoading}
           selectedTarget={selectedTarget}
+          onOpenCreateTask={openCreateForm}
           onSelectItem={onSelectItem}
         />
       ) : (
@@ -116,6 +341,7 @@ export function WeekCalendar({
           isLoading={isLoading}
           selectedTarget={selectedTarget}
           viewMode={viewMode}
+          onOpenCreateTask={openCreateForm}
           onSelectItem={onSelectItem}
         />
       )}
@@ -129,6 +355,7 @@ function TimeGridCalendar({
   isLoading,
   selectedTarget,
   viewMode,
+  onOpenCreateTask,
   onSelectItem,
 }: {
   days: CalendarDay[];
@@ -136,6 +363,7 @@ function TimeGridCalendar({
   isLoading: boolean;
   selectedTarget: WorkTargetRef | null;
   viewMode: CalendarViewMode;
+  onOpenCreateTask(dueDate: string, dueTime: string | null): void;
   onSelectItem(item: WeekCalendarItem): void;
 }) {
   const currentTime = getCurrentTimeMarker(days);
@@ -164,6 +392,11 @@ function TimeGridCalendar({
           .sort(sortCalendarItems);
         return (
           <div className="calendar-all-day-cell" key={`${day.date}:all-day`}>
+            <CalendarAddButton
+              dueDate={day.date}
+              dueTime={null}
+              onOpenCreateTask={onOpenCreateTask}
+            />
             <CalendarCellItems
               isLoading={isLoading}
               items={dateOnlyItems}
@@ -184,6 +417,7 @@ function TimeGridCalendar({
           currentTime={currentTime}
           isLoading={isLoading}
           selectedTarget={selectedTarget}
+          onOpenCreateTask={onOpenCreateTask}
           onSelectItem={onSelectItem}
         />
       ))}
@@ -198,6 +432,7 @@ function TimeGridRow({
   currentTime,
   isLoading,
   selectedTarget,
+  onOpenCreateTask,
   onSelectItem,
 }: {
   hour: number;
@@ -206,6 +441,7 @@ function TimeGridRow({
   currentTime: CurrentTimeMarker | null;
   isLoading: boolean;
   selectedTarget: WorkTargetRef | null;
+  onOpenCreateTask(dueDate: string, dueTime: string | null): void;
   onSelectItem(item: WeekCalendarItem): void;
 }) {
   return (
@@ -224,6 +460,11 @@ function TimeGridRow({
             }`}
             key={`${day.date}:${hour}`}
           >
+            <CalendarAddButton
+              dueDate={day.date}
+              dueTime={formatHourInput(hour)}
+              onOpenCreateTask={onOpenCreateTask}
+            />
             {shouldShowCurrentTime ? (
               <div
                 className="calendar-current-time-line"
@@ -286,6 +527,7 @@ function MonthCalendar({
   items,
   isLoading,
   selectedTarget,
+  onOpenCreateTask,
   onSelectItem,
 }: {
   days: CalendarDay[];
@@ -293,6 +535,7 @@ function MonthCalendar({
   items: WeekCalendarItem[];
   isLoading: boolean;
   selectedTarget: WorkTargetRef | null;
+  onOpenCreateTask(dueDate: string, dueTime: string | null): void;
   onSelectItem(item: WeekCalendarItem): void;
 }) {
   const anchor = parseDateInputValue(anchorDate);
@@ -322,6 +565,12 @@ function MonthCalendar({
               key={day.date}
             >
               <div className="calendar-month-day-heading">
+                <CalendarAddButton
+                  dueDate={day.date}
+                  dueTime={null}
+                  variant="month"
+                  onOpenCreateTask={onOpenCreateTask}
+                />
                 <span>{day.dayOfMonth}</span>
               </div>
               {isLoading ? (
@@ -377,7 +626,10 @@ function CalendarItemButton({
       type="button"
       aria-pressed={isSelected}
       aria-label={`${relationLabel ? `${relationLabel}、` : ""}${item.title}の${markerText}を開く`}
-      onClick={() => onSelectItem(item)}
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelectItem(item);
+      }}
     >
       <span className="calendar-item-title">{item.title}</span>
       {relationLabel ? (
@@ -386,6 +638,34 @@ function CalendarItemButton({
       {variant === "timed" || variant === "month" ? (
         <small>{markerText}</small>
       ) : null}
+    </button>
+  );
+}
+
+function CalendarAddButton({
+  dueDate,
+  dueTime,
+  variant = "cell",
+  onOpenCreateTask,
+}: {
+  dueDate: string;
+  dueTime: string | null;
+  variant?: "cell" | "month";
+  onOpenCreateTask(dueDate: string, dueTime: string | null): void;
+}) {
+  const label = `${formatCreateSourceLabel(dueDate, dueTime)}にタスクを追加`;
+  return (
+    <button
+      className={`calendar-cell-add-button is-${variant}`}
+      type="button"
+      aria-label={label}
+      title="タスクを追加"
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpenCreateTask(dueDate, dueTime);
+      }}
+    >
+      ＋
     </button>
   );
 }
@@ -402,6 +682,23 @@ function getDisplayHour(item: WeekCalendarItem) {
   }
 
   return Math.min(Math.max(hour, businessHours[0]), businessHours.at(-1) ?? hour);
+}
+
+function normalizeOptionalText(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  return value;
+}
+
+function formatHourInput(hour: number) {
+  return `${String(hour).padStart(2, "0")}:00`;
+}
+
+function formatCreateSourceLabel(dueDate: string, dueTime: string | null) {
+  return dueTime
+    ? `${formatDateLabel(dueDate)} ${dueTime}`
+    : formatDateLabel(dueDate);
 }
 
 function getCurrentTimeMarker(days: CalendarDay[]): CurrentTimeMarker | null {
@@ -532,6 +829,11 @@ function formatCalendarHeading(viewMode: CalendarViewMode, anchorDate: string) {
     return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
   }
   return `${date.getFullYear()}年${date.getMonth() + 1}月`;
+}
+
+function formatDateLabel(value: string) {
+  const date = parseDateInputValue(value);
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
 function formatHourLabel(hour: number) {

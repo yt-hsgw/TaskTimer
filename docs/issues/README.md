@@ -43,6 +43,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [035 Rust静的解析CIの実行時間を短縮する](035-rust-ci-optimization.md) / GitHub #94
 - [036 タスクのアーカイブ操作をUse Caseへ追加する](036-task-archive-usecase.md) / GitHub #52
 - [037 UI設定の永続化範囲を拡張する](037-ui-preferences-persistence.md) / GitHub #57
+- [038 カレンダーからタスクを追加できるようにする](038-calendar-task-create.md) / GitHub #82
 
 ## 運用
 

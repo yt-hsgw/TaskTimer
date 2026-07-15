@@ -152,6 +152,8 @@ Issue #54 では、`TaskList` をタスク分類の境界として扱う。`Crea
 
 Issue #57 では、UI設定を `ui_preferences` に保存する。保存対象は `left_pane_open`、`last_view`、`last_task_list_id`、`calendar_view_mode` に限定する。壊れた値はRepositoryの読み取り時に既定値へフォールバックし、Use Caseの更新時はホワイトリスト化された値だけを受け付ける。選択中タスクや右詳細ペイン開閉は、削除やアーカイブで無効になりやすいため保存しない。
 
+Issue #82 では、カレンダーからのタスク作成も既存の `CreateTask` を使う。Presentationはカレンダーの選択位置から `due_date` と `due_time` の初期値を組み立てるだけに留め、保存、入力検証、通知ルール同期、SQLiteトランザクションはApplication/Infrastructureの既存境界に委ねる。作成後の右詳細ペイン自動表示は行わない。
+
 ## Read Model
 
 UI/UX改修では、タスク一覧と詳細で必要な情報量が増えるため、Presentationが全データを走査しないように読み取り専用DTOを分ける。
