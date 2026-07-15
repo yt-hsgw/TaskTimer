@@ -52,6 +52,9 @@ flowchart TD
 - OS通知送信の成功/失敗は `notification_delivery_attempts` に保存され、設定画面で最新履歴として確認できる。
 - 通知全体OFF中はdispatch対象から除外され、ONへ戻すと既存の `pending` / `failed` 通知が対象に戻る。
 - 期限時刻がある期限通知は `due_date + due_time` を `notify_at` として保存する。
+- UI設定取得で左ペイン開閉、最後のビュー、最後のリストID、カレンダー表示モードが返る。
+- UI設定更新で許可された値だけが保存される。
+- UI設定値が破損していても既定値へフォールバックして取得できる。
 
 ## SQLiteテスト
 

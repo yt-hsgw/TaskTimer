@@ -110,6 +110,23 @@ pub fn get_notifications_enabled(database: DatabaseState<'_>) -> Result<bool, St
 }
 
 #[tauri::command]
+pub fn get_ui_preferences(
+    database: DatabaseState<'_>,
+) -> Result<super::dto::UiPreferencesDto, String> {
+    super::usecases::get_ui_preferences(database.inner()).map(Into::into)
+}
+
+#[tauri::command]
+pub fn update_ui_preferences(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::UpdateUiPreferencesRequestDto,
+) -> Result<super::dto::UiPreferencesDto, String> {
+    super::usecases::update_ui_preferences(database.inner(), clock.inner(), request.into())
+        .map(Into::into)
+}
+
+#[tauri::command]
 pub fn list_notification_failure_history(
     database: DatabaseState<'_>,
 ) -> Result<Vec<super::dto::NotificationDeliveryAttemptDto>, String> {

@@ -28,7 +28,8 @@ use crate::{
         SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TaskListCommandRepository,
         TaskListCreate, TaskListRecord, TaskListUpdate, TaskReadRepository, TaskRecord,
         TaskRowRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
-        WeekCalendarItem, WorkItemCreate, WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        UiPreferenceRepository, UiPreferencesRecord, UiPreferencesUpdate, WeekCalendarItem,
+        WorkItemCreate, WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
     domain::{
         notification::{
@@ -57,6 +58,19 @@ const CSV_EXPORT_FORMAT: &str = "tasktimer-csv-export";
 const DATA_EXPORT_FORMAT_VERSION: i64 = 1;
 const DATA_EXPORT_COMPATIBILITY: &str = "viewing-and-migration-aid-not-restore";
 const CSV_EXPORT_MANIFEST_FILE: &str = "export-manifest.json";
+const UI_PREF_LEFT_PANE_OPEN: &str = "left_pane_open";
+const UI_PREF_LAST_VIEW: &str = "last_view";
+const UI_PREF_LAST_TASK_LIST_ID: &str = "last_task_list_id";
+const UI_PREF_CALENDAR_VIEW_MODE: &str = "calendar_view_mode";
+const UI_VIEW_LIST: &str = "list";
+const UI_VIEW_TODAY: &str = "today";
+const UI_VIEW_FAVORITES: &str = "favorites";
+const UI_VIEW_CALENDAR: &str = "calendar";
+const UI_VIEW_SETTINGS: &str = "settings";
+const UI_VIEW_LEGACY_TASKS: &str = "tasks";
+const CALENDAR_VIEW_WEEK: &str = "week";
+const CALENDAR_VIEW_DAY: &str = "day";
+const CALENDAR_VIEW_MONTH: &str = "month";
 const REQUIRED_RESTORE_TABLES: &[&str] = &[
     "task_lists",
     "tasks",
@@ -1160,6 +1174,44 @@ impl NotificationCommandRepository for SqliteDatabase {
     }
 }
 
+impl UiPreferenceRepository for SqliteDatabase {
+    fn get_ui_preferences(&self) -> RepositoryResult<UiPreferencesRecord> {
+        self.with_connection(select_ui_preferences)
+    }
+
+    fn update_ui_preferences(
+        &self,
+        input: UiPreferencesUpdate,
+    ) -> RepositoryResult<UiPreferencesRecord> {
+        self.with_transaction(|transaction| {
+            upsert_ui_preference(
+                transaction,
+                UI_PREF_LEFT_PANE_OPEN,
+                if input.left_pane_open {
+                    "true"
+                } else {
+                    "false"
+                },
+                &input.now,
+            )?;
+            upsert_ui_preference(transaction, UI_PREF_LAST_VIEW, &input.last_view, &input.now)?;
+            upsert_ui_preference(
+                transaction,
+                UI_PREF_LAST_TASK_LIST_ID,
+                &input.last_task_list_id,
+                &input.now,
+            )?;
+            upsert_ui_preference(
+                transaction,
+                UI_PREF_CALENDAR_VIEW_MODE,
+                &input.calendar_view_mode,
+                &input.now,
+            )?;
+            select_ui_preferences(transaction)
+        })
+    }
+}
+
 fn insert_task(
     transaction: &Transaction<'_>,
     input: WorkItemCreate,
@@ -2042,6 +2094,100 @@ fn insert_notification_delivery_attempt(
 
 fn truncate_error(error: &str) -> String {
     error.chars().take(500).collect()
+}
+
+fn select_ui_preferences(connection: &Connection) -> RepositoryResult<UiPreferencesRecord> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT key, value
+            FROM ui_preferences
+            WHERE key IN (?1, ?2, ?3, ?4)
+            ",
+        )
+        .map_err(|error| format!("UI設定クエリを準備できません: {error}"))?;
+    let rows = statement
+        .query_map(
+            params![
+                UI_PREF_LEFT_PANE_OPEN,
+                UI_PREF_LAST_VIEW,
+                UI_PREF_LAST_TASK_LIST_ID,
+                UI_PREF_CALENDAR_VIEW_MODE
+            ],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .map_err(|error| format!("UI設定を取得できません: {error}"))?;
+
+    let mut values = HashMap::new();
+    for row in rows {
+        let (key, value) = row.map_err(|error| format!("UI設定行を読めません: {error}"))?;
+        values.insert(key, value);
+    }
+
+    Ok(UiPreferencesRecord {
+        left_pane_open: normalize_ui_bool(values.get(UI_PREF_LEFT_PANE_OPEN)),
+        last_view: normalize_ui_view(values.get(UI_PREF_LAST_VIEW)),
+        last_task_list_id: normalize_ui_identifier(values.get(UI_PREF_LAST_TASK_LIST_ID)),
+        calendar_view_mode: normalize_calendar_view_mode(values.get(UI_PREF_CALENDAR_VIEW_MODE)),
+    })
+}
+
+fn upsert_ui_preference(
+    transaction: &Transaction<'_>,
+    key: &str,
+    value: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            INSERT INTO ui_preferences (key, value, updated_at)
+            VALUES (?1, ?2, ?3)
+            ON CONFLICT(key) DO UPDATE SET
+              value = excluded.value,
+              updated_at = excluded.updated_at
+            ",
+            params![key, value, now],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("UI設定を保存できません: {error}"))
+}
+
+fn normalize_ui_bool(value: Option<&String>) -> bool {
+    match value.map(String::as_str) {
+        Some("false") => false,
+        Some("true") => true,
+        _ => true,
+    }
+}
+
+fn normalize_ui_view(value: Option<&String>) -> String {
+    match value.map(String::as_str) {
+        Some(UI_VIEW_LIST | UI_VIEW_LEGACY_TASKS) => UI_VIEW_LIST.to_string(),
+        Some(UI_VIEW_TODAY) => UI_VIEW_TODAY.to_string(),
+        Some(UI_VIEW_FAVORITES) => UI_VIEW_FAVORITES.to_string(),
+        Some(UI_VIEW_CALENDAR) => UI_VIEW_CALENDAR.to_string(),
+        Some(UI_VIEW_SETTINGS) => UI_VIEW_SETTINGS.to_string(),
+        _ => UI_VIEW_LIST.to_string(),
+    }
+}
+
+fn normalize_ui_identifier(value: Option<&String>) -> String {
+    value
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.chars().count() <= 128)
+        .unwrap_or(DEFAULT_TASK_LIST_ID)
+        .to_string()
+}
+
+fn normalize_calendar_view_mode(value: Option<&String>) -> String {
+    match value.map(String::as_str) {
+        Some(CALENDAR_VIEW_DAY) => CALENDAR_VIEW_DAY.to_string(),
+        Some(CALENDAR_VIEW_MONTH) => CALENDAR_VIEW_MONTH.to_string(),
+        Some(CALENDAR_VIEW_WEEK) => CALENDAR_VIEW_WEEK.to_string(),
+        _ => CALENDAR_VIEW_WEEK.to_string(),
+    }
 }
 
 fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec<TaskRecord>> {
@@ -3704,8 +3850,9 @@ fn seed_default_ui_preferences(connection: &Connection) -> RepositoryResult<()> 
             "
             INSERT OR IGNORE INTO ui_preferences (key, value, updated_at)
             VALUES ('left_pane_open', 'true', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                   ('last_view', 'tasks', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                   ('last_task_list_id', ?1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                   ('last_view', 'list', strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                   ('last_task_list_id', ?1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                   ('calendar_view_mode', 'week', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             ",
             params![DEFAULT_TASK_LIST_ID],
         )
@@ -4710,7 +4857,8 @@ mod tests {
             clock::Clock,
             notification::{LocalNotificationGateway, LocalNotificationMessage},
             repositories::{
-                NotificationHistoryRepository, NotificationPreferenceRepository, TaskReadRepository,
+                NotificationHistoryRepository, NotificationPreferenceRepository,
+                TaskReadRepository, UiPreferenceRepository,
             },
             usecases,
         },
@@ -4872,6 +5020,82 @@ mod tests {
     }
 
     #[test]
+    fn ui_preferences_defaults_update_and_fallback_are_safe() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+
+        let initial = database
+            .get_ui_preferences()
+            .expect("initial ui preferences");
+        assert!(initial.left_pane_open);
+        assert_eq!(initial.last_view, UI_VIEW_LIST);
+        assert_eq!(initial.last_task_list_id, DEFAULT_TASK_LIST_ID);
+        assert_eq!(initial.calendar_view_mode, CALENDAR_VIEW_WEEK);
+
+        let updated = usecases::update_ui_preferences(
+            &database,
+            &clock,
+            usecases::UiPreferencesDraft {
+                left_pane_open: false,
+                last_view: UI_VIEW_CALENDAR.to_string(),
+                last_task_list_id: "custom-list".to_string(),
+                calendar_view_mode: CALENDAR_VIEW_MONTH.to_string(),
+            },
+        )
+        .expect("update ui preferences");
+        assert!(!updated.left_pane_open);
+        assert_eq!(updated.last_view, UI_VIEW_CALENDAR);
+        assert_eq!(updated.last_task_list_id, "custom-list");
+        assert_eq!(updated.calendar_view_mode, CALENDAR_VIEW_MONTH);
+
+        database
+            .with_connection(|connection| {
+                connection
+                    .execute(
+                        "
+                        UPDATE ui_preferences
+                        SET value = 'broken'
+                        WHERE key IN ('left_pane_open', 'last_view', 'calendar_view_mode')
+                        ",
+                        [],
+                    )
+                    .map_err(|error| format!("break ui preferences: {error}"))?;
+                connection
+                    .execute(
+                        "
+                        UPDATE ui_preferences
+                        SET value = ''
+                        WHERE key = 'last_task_list_id'
+                        ",
+                        [],
+                    )
+                    .map_err(|error| format!("break last list: {error}"))?;
+                Ok(())
+            })
+            .expect("break preferences");
+
+        let fallback = database.get_ui_preferences().expect("fallback preferences");
+        assert!(fallback.left_pane_open);
+        assert_eq!(fallback.last_view, UI_VIEW_LIST);
+        assert_eq!(fallback.last_task_list_id, DEFAULT_TASK_LIST_ID);
+        assert_eq!(fallback.calendar_view_mode, CALENDAR_VIEW_WEEK);
+
+        let invalid = usecases::update_ui_preferences(
+            &database,
+            &clock,
+            usecases::UiPreferencesDraft {
+                left_pane_open: true,
+                last_view: "network".to_string(),
+                last_task_list_id: DEFAULT_TASK_LIST_ID.to_string(),
+                calendar_view_mode: CALENDAR_VIEW_DAY.to_string(),
+            },
+        );
+        assert!(invalid.expect_err("invalid ui view").contains("ビュー"));
+    }
+
+    #[test]
     fn migration_backfills_failed_notification_delivery_attempts() {
         let connection = Connection::open_in_memory().expect("in-memory database");
         configure_connection(&connection).expect("configure");
@@ -5014,7 +5238,7 @@ mod tests {
         assert_eq!(is_favorite, 0);
         assert_eq!(timer_target_seconds, None);
         assert_eq!(task_list_name, DEFAULT_TASK_LIST_NAME);
-        assert_eq!(ui_preference_count, 3);
+        assert_eq!(ui_preference_count, 4);
         assert_eq!(timer_recurrence_table_count, 2);
         assert!(
             column_exists(&connection, "subtasks", "timer_target_seconds")

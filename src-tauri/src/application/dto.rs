@@ -10,11 +10,12 @@ use super::{
         ActiveTimer, DataExportManifestRecord, DataExportRecord, NotificationDeliveryAttemptRecord,
         NotificationDispatchSummary, RecurrenceRuleRecord, SqliteBackupManifestRecord,
         SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord, TaskListRecord, TaskRecord,
-        TaskRowRecord, TaskWithSubtasksRecord, WeekCalendarItem,
+        TaskRowRecord, TaskWithSubtasksRecord, UiPreferencesRecord, WeekCalendarItem,
     },
     usecases::{
         DataExportCreateDraft, RecurrenceRuleDraft, SqliteBackupCreateDraft,
-        SqliteBackupRestoreDraft, TaskListDraft, WorkItemDraft, WorkItemUpdateDraft,
+        SqliteBackupRestoreDraft, TaskListDraft, UiPreferencesDraft, WorkItemDraft,
+        WorkItemUpdateDraft,
     },
 };
 
@@ -190,6 +191,15 @@ pub struct RestoreSqliteBackupRequestDto {
 #[serde(rename_all = "camelCase")]
 pub struct CreateDataExportRequestDto {
     pub destination_dir: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateUiPreferencesRequestDto {
+    pub left_pane_open: bool,
+    pub last_view: String,
+    pub last_task_list_id: String,
+    pub calendar_view_mode: String,
 }
 
 #[derive(Serialize)]
@@ -402,6 +412,15 @@ pub struct DataExportDto {
     pub manifest: DataExportManifestDto,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiPreferencesDto {
+    pub left_pane_open: bool,
+    pub last_view: String,
+    pub last_task_list_id: String,
+    pub calendar_view_mode: String,
+}
+
 impl TryFrom<UpdateNotificationDisplayModeRequestDto> for NotificationDisplayMode {
     type Error = String;
 
@@ -518,6 +537,17 @@ impl From<CreateDataExportRequestDto> for DataExportCreateDraft {
     fn from(value: CreateDataExportRequestDto) -> Self {
         Self {
             destination_dir: value.destination_dir,
+        }
+    }
+}
+
+impl From<UpdateUiPreferencesRequestDto> for UiPreferencesDraft {
+    fn from(value: UpdateUiPreferencesRequestDto) -> Self {
+        Self {
+            left_pane_open: value.left_pane_open,
+            last_view: value.last_view,
+            last_task_list_id: value.last_task_list_id,
+            calendar_view_mode: value.calendar_view_mode,
         }
     }
 }
@@ -776,6 +806,17 @@ impl From<DataExportRecord> for DataExportDto {
             export_path: value.export_path,
             files: value.files,
             manifest: value.manifest.into(),
+        }
+    }
+}
+
+impl From<UiPreferencesRecord> for UiPreferencesDto {
+    fn from(value: UiPreferencesRecord) -> Self {
+        Self {
+            left_pane_open: value.left_pane_open,
+            last_view: value.last_view,
+            last_task_list_id: value.last_task_list_id,
+            calendar_view_mode: value.calendar_view_mode,
         }
     }
 }

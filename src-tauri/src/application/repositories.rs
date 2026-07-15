@@ -279,6 +279,23 @@ pub struct DataExportRecord {
     pub manifest: DataExportManifestRecord,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiPreferencesRecord {
+    pub left_pane_open: bool,
+    pub last_view: String,
+    pub last_task_list_id: String,
+    pub calendar_view_mode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiPreferencesUpdate {
+    pub left_pane_open: bool,
+    pub last_view: String,
+    pub last_task_list_id: String,
+    pub calendar_view_mode: String,
+    pub now: String,
+}
+
 pub type RepositoryResult<T> = Result<T, String>;
 pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 1;
 
@@ -438,6 +455,15 @@ pub trait DataExportRepository {
     fn create_json_export(&self, input: DataExportCreate) -> RepositoryResult<DataExportRecord>;
 
     fn create_csv_export(&self, input: DataExportCreate) -> RepositoryResult<DataExportRecord>;
+}
+
+pub trait UiPreferenceRepository {
+    fn get_ui_preferences(&self) -> RepositoryResult<UiPreferencesRecord>;
+
+    fn update_ui_preferences(
+        &self,
+        input: UiPreferencesUpdate,
+    ) -> RepositoryResult<UiPreferencesRecord>;
 }
 
 pub fn target_ref(target_type: WorkTargetType, id: String) -> WorkTargetRef {

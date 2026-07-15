@@ -11,6 +11,7 @@ import type {
   TaskRow,
   TaskWithSubtasks,
   TaskListDraft,
+  UiPreferences,
   UpdateSubtaskDraft,
   UpdateTaskDraft,
   WeekCalendarItem,
@@ -34,6 +35,9 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   getActiveTimer: () => invoke<ActiveTimer | null>("get_active_timer"),
   getNotificationDisplayMode: () =>
     invoke<NotificationDisplayMode>("get_notification_display_mode"),
+  getUiPreferences: () => invoke<UiPreferences>("get_ui_preferences"),
+  updateUiPreferences: (input: UiPreferences) =>
+    invoke<UiPreferences>("update_ui_preferences", { request: input }),
   createTask: (input: WorkItemDraft) =>
     invoke<Task>("create_task", { request: input }),
   createTaskList: (input: TaskListDraft) =>

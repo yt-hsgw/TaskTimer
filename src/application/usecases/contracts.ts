@@ -109,6 +109,17 @@ export type DataExportResult = {
   manifest: DataExportManifest;
 };
 
+export type AppViewKind = "list" | "today" | "favorites" | "calendar" | "settings";
+
+export type CalendarViewModePreference = "week" | "day" | "month";
+
+export type UiPreferences = {
+  leftPaneOpen: boolean;
+  lastView: AppViewKind;
+  lastTaskListId: string;
+  calendarViewMode: CalendarViewModePreference;
+};
+
 export type TaskListItem = {
   id: string;
   name: string;
@@ -150,6 +161,8 @@ export type TaskTimerGateway = {
   listWeekCalendarItems(weekStartDate: string): Promise<WeekCalendarItem[]>;
   getActiveTimer(): Promise<ActiveTimer | null>;
   getNotificationDisplayMode(): Promise<NotificationDisplayMode>;
+  getUiPreferences(): Promise<UiPreferences>;
+  updateUiPreferences(input: UiPreferences): Promise<UiPreferences>;
   createTask(input: WorkItemDraft): Promise<Task>;
   createTaskList(input: TaskListDraft): Promise<TaskListItem>;
   updateTaskList(listId: string, input: TaskListDraft): Promise<TaskListItem>;
