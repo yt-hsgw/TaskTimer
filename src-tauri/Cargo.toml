@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "オフライン対応TODO・タイマー管理デスクトップアプリ"
 authors = ["TaskTimer Contributors"]
 edition = "2021"
+default-run = "tasktimer"
 
 [lib]
 name = "tasktimer_lib"
