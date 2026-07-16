@@ -32,7 +32,7 @@ manifestには以下を記録する。
 - `format`: `tasktimer-sqlite-backup`
 - `formatVersion`: バックアップ形式の互換性判断。
 - `appVersion`: 作成元アプリのバージョン。
-- `schemaVersion`: 復元先アプリが理解できるDBスキーマ世代。現在は `1`。
+- `schemaVersion`: 復元先アプリが理解できるDBスキーマ世代。現在は `4`。
 - `createdAt`: 作成日時。
 - `platform`: 作成元OS。
 - `databaseFile`: `tasktimer.sqlite3`

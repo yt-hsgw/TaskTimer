@@ -33,6 +33,8 @@ JSONは1ファイルに `manifest` と以下の配列を含める。
 - `subtasks`
 - `timer_sessions`
 - `timer_pauses`
+- `pomodoro_settings`
+- `pomodoro_sessions`
 - `notification_rules`
 - `recurrence_rules`
 
@@ -44,6 +46,8 @@ CSVは `TaskTimer-export-YYYYMMDD-HHMMSS-csv/` フォルダに以下を出力す
 - `subtasks.csv`
 - `timer_sessions.csv`
 - `timer_pauses.csv`
+- `pomodoro_settings.csv`
+- `pomodoro_sessions.csv`
 - `notification_rules.csv`
 - `recurrence_rules.csv`
 

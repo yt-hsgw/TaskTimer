@@ -3,6 +3,7 @@ use crate::domain::{
         NotificationDeliveryResult, NotificationDisplayMode, NotificationKind,
         NotificationRegistrationStatus,
     },
+    pomodoro::{PomodoroPhase, PomodoroStatus},
     recurrence::RecurrenceFrequency,
     task::WorkStatus,
     timer::{WorkTargetRef, WorkTargetType},
@@ -48,6 +49,48 @@ pub struct ActiveTimer {
     pub paused_at: Option<String>,
     pub deleted_at: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PomodoroSettingsRecord {
+    pub id: String,
+    pub work_seconds: i64,
+    pub short_break_seconds: i64,
+    pub long_break_seconds: i64,
+    pub cycles_until_long_break: i64,
+    pub auto_start_break: bool,
+    pub auto_start_next_work: bool,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PomodoroSettingsUpdate {
+    pub work_seconds: i64,
+    pub short_break_seconds: i64,
+    pub long_break_seconds: i64,
+    pub cycles_until_long_break: i64,
+    pub auto_start_break: bool,
+    pub auto_start_next_work: bool,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivePomodoro {
+    pub id: String,
+    pub target: WorkTargetRef,
+    pub timer_session_id: Option<String>,
+    pub phase: PomodoroPhase,
+    pub status: PomodoroStatus,
+    pub cycle_count: i64,
+    pub phase_started_at: String,
+    pub phase_duration_seconds: i64,
+    pub paused_at: Option<String>,
+    pub paused_total_seconds: i64,
+    pub completed_at: Option<String>,
+    pub cancelled_at: Option<String>,
+    pub deleted_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -338,7 +381,7 @@ pub struct UiPreferencesUpdate {
 }
 
 pub type RepositoryResult<T> = Result<T, String>;
-pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 3;
+pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 4;
 
 pub trait CalendarRepository {
     fn list_calendar_items(
@@ -355,6 +398,23 @@ pub trait CalendarRepository {
 
 pub trait TimerRepository {
     fn get_active_timer(&self) -> RepositoryResult<Option<ActiveTimer>>;
+}
+
+pub trait PomodoroRepository {
+    fn get_pomodoro_settings(&self) -> RepositoryResult<PomodoroSettingsRecord>;
+
+    fn update_pomodoro_settings(
+        &self,
+        input: PomodoroSettingsUpdate,
+    ) -> RepositoryResult<PomodoroSettingsRecord>;
+
+    fn get_active_pomodoro(&self) -> RepositoryResult<Option<ActivePomodoro>>;
+
+    fn start_pomodoro(
+        &self,
+        target: WorkTargetRef,
+        now: String,
+    ) -> RepositoryResult<ActivePomodoro>;
 }
 
 pub trait TaskReadRepository {

@@ -1,5 +1,6 @@
 use crate::domain::{
     notification::{build_notification_content, NotificationDisplayMode},
+    pomodoro::{validate_pomodoro_cycles_until_long_break, validate_pomodoro_duration_seconds},
     recurrence::RecurrenceFrequency,
     task::{
         validate_date_range, validate_due_time_requires_due_date, validate_memo,
@@ -14,16 +15,16 @@ use super::{
     clock::Clock,
     notification::{LocalNotificationGateway, LocalNotificationMessage},
     repositories::{
-        ActiveTimer, DataExportCreate, DataExportRecord, DataExportRepository,
+        ActivePomodoro, ActiveTimer, DataExportCreate, DataExportRecord, DataExportRepository,
         NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationDispatchSummary, NotificationHistoryRepository,
-        NotificationPreferenceRepository, RecurrenceRuleInput, RepositoryResult,
-        SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore,
-        SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord, TagRepository, TagUpdate,
-        TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskRecord,
-        TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository,
-        UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate,
-        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        NotificationPreferenceRepository, PomodoroRepository, PomodoroSettingsRecord,
+        PomodoroSettingsUpdate, RecurrenceRuleInput, RepositoryResult, SqliteBackupCreate,
+        SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore, SqliteRestoreRecord,
+        SubtaskRecord, TagCreate, TagRecord, TagRepository, TagUpdate, TaskListCommandRepository,
+        TaskListCreate, TaskListRecord, TaskListUpdate, TaskRecord, TaskStatusUpdate,
+        TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository, UiPreferencesRecord,
+        UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
 
@@ -103,6 +104,16 @@ pub struct UiPreferencesDraft {
     pub last_view: String,
     pub last_task_list_id: String,
     pub calendar_view_mode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PomodoroSettingsDraft {
+    pub work_seconds: i64,
+    pub short_break_seconds: i64,
+    pub long_break_seconds: i64,
+    pub cycles_until_long_break: i64,
+    pub auto_start_break: bool,
+    pub auto_start_next_work: bool,
 }
 
 pub fn create_task(
@@ -266,11 +277,53 @@ pub fn start_timer(
     clock: &impl Clock,
     target: WorkTargetRef,
 ) -> RepositoryResult<ActiveTimer> {
-    let target = WorkTargetRef {
-        target_type: target.target_type,
-        id: validate_identifier(&target.id, "対象ID")?,
-    };
+    let target = validate_work_target_ref(target)?;
     repository.start_timer(target, clock.now_utc_iso8601())
+}
+
+pub fn get_pomodoro_settings(
+    repository: &impl PomodoroRepository,
+) -> RepositoryResult<PomodoroSettingsRecord> {
+    repository.get_pomodoro_settings()
+}
+
+pub fn update_pomodoro_settings(
+    repository: &impl PomodoroRepository,
+    clock: &impl Clock,
+    draft: PomodoroSettingsDraft,
+) -> RepositoryResult<PomodoroSettingsRecord> {
+    repository.update_pomodoro_settings(PomodoroSettingsUpdate {
+        work_seconds: validate_pomodoro_duration_seconds(draft.work_seconds, "作業時間")?,
+        short_break_seconds: validate_pomodoro_duration_seconds(
+            draft.short_break_seconds,
+            "短い休憩時間",
+        )?,
+        long_break_seconds: validate_pomodoro_duration_seconds(
+            draft.long_break_seconds,
+            "長い休憩時間",
+        )?,
+        cycles_until_long_break: validate_pomodoro_cycles_until_long_break(
+            draft.cycles_until_long_break,
+        )?,
+        auto_start_break: draft.auto_start_break,
+        auto_start_next_work: draft.auto_start_next_work,
+        now: clock.now_utc_iso8601(),
+    })
+}
+
+pub fn get_active_pomodoro(
+    repository: &impl PomodoroRepository,
+) -> RepositoryResult<Option<ActivePomodoro>> {
+    repository.get_active_pomodoro()
+}
+
+pub fn start_pomodoro(
+    repository: &impl PomodoroRepository,
+    clock: &impl Clock,
+    target: WorkTargetRef,
+) -> RepositoryResult<ActivePomodoro> {
+    let target = validate_work_target_ref(target)?;
+    repository.start_pomodoro(target, clock.now_utc_iso8601())
 }
 
 pub fn pause_active_timer(
@@ -649,6 +702,13 @@ fn validate_identifier(value: &str, field_label: &str) -> RepositoryResult<Strin
         return Err(format!("{field_label}は128文字以内で入力してください"));
     }
     Ok(trimmed.to_string())
+}
+
+fn validate_work_target_ref(target: WorkTargetRef) -> RepositoryResult<WorkTargetRef> {
+    Ok(WorkTargetRef {
+        target_type: target.target_type,
+        id: validate_identifier(&target.id, "対象ID")?,
+    })
 }
 
 fn validate_ui_view(value: &str) -> RepositoryResult<String> {

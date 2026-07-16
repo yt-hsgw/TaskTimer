@@ -100,6 +100,31 @@ pub fn get_active_timer(
 }
 
 #[tauri::command]
+pub fn get_pomodoro_settings(
+    database: DatabaseState<'_>,
+) -> Result<super::dto::PomodoroSettingsDto, String> {
+    super::usecases::get_pomodoro_settings(database.inner()).map(Into::into)
+}
+
+#[tauri::command]
+pub fn update_pomodoro_settings(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::UpdatePomodoroSettingsRequestDto,
+) -> Result<super::dto::PomodoroSettingsDto, String> {
+    super::usecases::update_pomodoro_settings(database.inner(), clock.inner(), request.into())
+        .map(Into::into)
+}
+
+#[tauri::command]
+pub fn get_active_pomodoro(
+    database: DatabaseState<'_>,
+) -> Result<Option<super::dto::ActivePomodoroDto>, String> {
+    super::usecases::get_active_pomodoro(database.inner())
+        .map(|active_pomodoro| active_pomodoro.map(Into::into))
+}
+
+#[tauri::command]
 pub fn get_notification_display_mode(database: DatabaseState<'_>) -> Result<String, String> {
     use crate::application::repositories::NotificationPreferenceRepository;
 
@@ -277,6 +302,16 @@ pub fn start_timer(
     request: super::dto::StartTimerRequestDto,
 ) -> Result<super::dto::ActiveTimerDto, String> {
     super::usecases::start_timer(database.inner(), clock.inner(), request.target.try_into()?)
+        .map(Into::into)
+}
+
+#[tauri::command]
+pub fn start_pomodoro(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::StartPomodoroRequestDto,
+) -> Result<super::dto::ActivePomodoroDto, String> {
+    super::usecases::start_pomodoro(database.inner(), clock.inner(), request.target.try_into()?)
         .map(Into::into)
 }
 

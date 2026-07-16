@@ -7,14 +7,14 @@ use crate::domain::{
 
 use super::{
     repositories::{
-        ActiveTimer, DataExportManifestRecord, DataExportRecord, NotificationDeliveryAttemptRecord,
-        NotificationDispatchSummary, RecurrenceRuleRecord, SqliteBackupManifestRecord,
-        SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord, TagRecord, TaskListRecord,
-        TaskRecord, TaskRowRecord, TaskTagRecord, TaskWithSubtasksRecord, UiPreferencesRecord,
-        WeekCalendarItem,
+        ActivePomodoro, ActiveTimer, DataExportManifestRecord, DataExportRecord,
+        NotificationDeliveryAttemptRecord, NotificationDispatchSummary, PomodoroSettingsRecord,
+        RecurrenceRuleRecord, SqliteBackupManifestRecord, SqliteBackupRecord, SqliteRestoreRecord,
+        SubtaskRecord, TagRecord, TaskListRecord, TaskRecord, TaskRowRecord, TaskTagRecord,
+        TaskWithSubtasksRecord, UiPreferencesRecord, WeekCalendarItem,
     },
     usecases::{
-        DataExportCreateDraft, RecurrenceRuleDraft, SqliteBackupCreateDraft,
+        DataExportCreateDraft, PomodoroSettingsDraft, RecurrenceRuleDraft, SqliteBackupCreateDraft,
         SqliteBackupRestoreDraft, TagDraft, TaskListDraft, UiPreferencesDraft, WorkItemDraft,
         WorkItemUpdateDraft,
     },
@@ -145,6 +145,23 @@ pub struct StartTimerRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StartPomodoroRequestDto {
+    pub target: WorkTargetRefDto,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatePomodoroSettingsRequestDto {
+    pub work_seconds: i64,
+    pub short_break_seconds: i64,
+    pub long_break_seconds: i64,
+    pub cycles_until_long_break: i64,
+    pub auto_start_break: bool,
+    pub auto_start_next_work: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompleteTaskRequestDto {
     pub task_id: String,
     pub allow_incomplete_subtasks: bool,
@@ -271,6 +288,39 @@ pub struct ActiveTimerDto {
     pub paused_at: Option<String>,
     pub deleted_at: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PomodoroSettingsDto {
+    pub id: String,
+    pub work_seconds: i64,
+    pub short_break_seconds: i64,
+    pub long_break_seconds: i64,
+    pub cycles_until_long_break: i64,
+    pub auto_start_break: bool,
+    pub auto_start_next_work: bool,
+    pub updated_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivePomodoroDto {
+    pub id: String,
+    pub target: WorkTargetRefDto,
+    pub timer_session_id: Option<String>,
+    pub phase: String,
+    pub status: String,
+    pub cycle_count: i64,
+    pub phase_started_at: String,
+    pub phase_duration_seconds: i64,
+    pub paused_at: Option<String>,
+    pub paused_total_seconds: i64,
+    pub completed_at: Option<String>,
+    pub cancelled_at: Option<String>,
+    pub deleted_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Serialize)]
@@ -637,6 +687,19 @@ impl From<UpdateUiPreferencesRequestDto> for UiPreferencesDraft {
     }
 }
 
+impl From<UpdatePomodoroSettingsRequestDto> for PomodoroSettingsDraft {
+    fn from(value: UpdatePomodoroSettingsRequestDto) -> Self {
+        Self {
+            work_seconds: value.work_seconds,
+            short_break_seconds: value.short_break_seconds,
+            long_break_seconds: value.long_break_seconds,
+            cycles_until_long_break: value.cycles_until_long_break,
+            auto_start_break: value.auto_start_break,
+            auto_start_next_work: value.auto_start_next_work,
+        }
+    }
+}
+
 impl From<WeekCalendarItem> for WeekCalendarItemDto {
     fn from(value: WeekCalendarItem) -> Self {
         Self {
@@ -827,6 +890,46 @@ impl From<ActiveTimer> for ActiveTimerDto {
             paused_at: value.paused_at,
             deleted_at: value.deleted_at,
             created_at: value.created_at,
+        }
+    }
+}
+
+impl From<PomodoroSettingsRecord> for PomodoroSettingsDto {
+    fn from(value: PomodoroSettingsRecord) -> Self {
+        Self {
+            id: value.id,
+            work_seconds: value.work_seconds,
+            short_break_seconds: value.short_break_seconds,
+            long_break_seconds: value.long_break_seconds,
+            cycles_until_long_break: value.cycles_until_long_break,
+            auto_start_break: value.auto_start_break,
+            auto_start_next_work: value.auto_start_next_work,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+impl From<ActivePomodoro> for ActivePomodoroDto {
+    fn from(value: ActivePomodoro) -> Self {
+        Self {
+            id: value.id,
+            target: WorkTargetRefDto {
+                r#type: value.target.target_type.as_str().to_string(),
+                id: value.target.id,
+            },
+            timer_session_id: value.timer_session_id,
+            phase: value.phase.as_str().to_string(),
+            status: value.status.as_str().to_string(),
+            cycle_count: value.cycle_count,
+            phase_started_at: value.phase_started_at,
+            phase_duration_seconds: value.phase_duration_seconds,
+            paused_at: value.paused_at,
+            paused_total_seconds: value.paused_total_seconds,
+            completed_at: value.completed_at,
+            cancelled_at: value.cancelled_at,
+            deleted_at: value.deleted_at,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
         }
     }
 }

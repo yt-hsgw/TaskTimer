@@ -59,7 +59,7 @@ TaskTimer-backup-YYYYMMDD-HHMMSS/
   "format": "tasktimer-sqlite-backup",
   "formatVersion": 1,
   "appVersion": "0.1.0",
-  "schemaVersion": 1,
+  "schemaVersion": 4,
   "createdAt": "2026-07-15T00:00:00+09:00",
   "platform": "windows",
   "databaseFile": "tasktimer.sqlite3",
@@ -67,7 +67,7 @@ TaskTimer-backup-YYYYMMDD-HHMMSS/
 }
 ```
 
-SQLiteバックアップは完全復元用であり、タスク名、サブタスク名、メモ本文、通知ルール、通知失敗履歴、タイマー履歴を含む。
+SQLiteバックアップは完全復元用であり、タスク名、サブタスク名、メモ本文、通知ルール、通知失敗履歴、タイマー履歴、ポモドーロ設定/履歴を含む。
 
 ### JSONエクスポート
 
@@ -88,6 +88,8 @@ TaskTimer-export-YYYYMMDD-HHMMSS.json
 - `subtasks`
 - `timer_sessions`
 - `timer_pauses`
+- `pomodoro_settings`
+- `pomodoro_sessions`
 - `notification_rules`
 - `recurrence_rules`
 
@@ -129,6 +131,8 @@ TaskTimer-export-YYYYMMDD-HHMMSS-csv/
 - `subtasks.csv`
 - `timer_sessions.csv`
 - `timer_pauses.csv`
+- `pomodoro_settings.csv`
+- `pomodoro_sessions.csv`
 - `notification_rules.csv`
 - `recurrence_rules.csv`
 
