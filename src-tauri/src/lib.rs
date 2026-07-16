@@ -13,7 +13,7 @@ use application::commands::{
     reopen_subtask, reopen_task, restore_archived_task, restore_sqlite_backup, resume_active_timer,
     start_timer, stop_active_timer, toggle_task_favorite, update_notification_display_mode,
     update_notifications_enabled, update_subtask, update_tag, update_task, update_task_list,
-    update_ui_preferences,
+    update_task_status, update_ui_preferences,
 };
 use infrastructure::{
     clock::SystemClock, notification::TauriLocalNotificationGateway, sqlite::SqliteDatabase,
@@ -64,6 +64,7 @@ pub fn run() {
             resume_active_timer,
             stop_active_timer,
             complete_task,
+            update_task_status,
             reopen_task,
             complete_subtask,
             reopen_subtask,

@@ -75,6 +75,13 @@ pub struct WorkItemUpdate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskStatusUpdate {
+    pub status: WorkStatus,
+    pub allow_incomplete_subtasks: bool,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecurrenceRuleInput {
     pub frequency: RecurrenceFrequency,
     pub interval: i64,
@@ -395,6 +402,12 @@ pub trait TaskTimerCommandRepository {
         task_id: String,
         allow_incomplete_subtasks: bool,
         now: String,
+    ) -> RepositoryResult<TaskRecord>;
+
+    fn update_task_status(
+        &self,
+        task_id: String,
+        input: TaskStatusUpdate,
     ) -> RepositoryResult<TaskRecord>;
 
     fn reopen_task(&self, task_id: String, now: String) -> RepositoryResult<TaskRecord>;

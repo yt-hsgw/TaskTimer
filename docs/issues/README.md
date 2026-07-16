@@ -47,6 +47,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [039 カレンダー上でタスク期限を調整できるようにする](039-calendar-reschedule.md) / GitHub #83
 - [040 カレンダー上のタスク色を変更できるようにする](040-calendar-list-colors.md) / GitHub #84
 - [041 タスクにタグを付けられるようにする](041-task-tags.md) / GitHub #80
+- [042 かんばん形式の画面を追加する](042-kanban-board.md) / GitHub #81
 
 ## 運用
 

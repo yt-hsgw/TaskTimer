@@ -320,6 +320,22 @@ pub fn complete_task(
 }
 
 #[tauri::command]
+pub fn update_task_status(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::UpdateTaskStatusRequestDto,
+) -> Result<super::dto::TaskDto, String> {
+    super::usecases::update_task_status(
+        database.inner(),
+        clock.inner(),
+        request.task_id,
+        request.status,
+        request.allow_incomplete_subtasks,
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
 pub fn reopen_task(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,
