@@ -162,6 +162,12 @@ pub struct UpdatePomodoroSettingsRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PomodoroSessionRequestDto {
+    pub pomodoro_session_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompleteTaskRequestDto {
     pub task_id: String,
     pub allow_incomplete_subtasks: bool,

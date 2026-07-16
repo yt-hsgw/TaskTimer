@@ -316,6 +316,74 @@ pub fn start_pomodoro(
 }
 
 #[tauri::command]
+pub fn pause_pomodoro(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+) -> Result<super::dto::ActivePomodoroDto, String> {
+    super::usecases::pause_pomodoro(database.inner(), clock.inner()).map(Into::into)
+}
+
+#[tauri::command]
+pub fn resume_pomodoro(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+) -> Result<super::dto::ActivePomodoroDto, String> {
+    super::usecases::resume_pomodoro(database.inner(), clock.inner()).map(Into::into)
+}
+
+#[tauri::command]
+pub fn complete_pomodoro_work_phase(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+) -> Result<super::dto::ActivePomodoroDto, String> {
+    super::usecases::complete_pomodoro_work_phase(database.inner(), clock.inner()).map(Into::into)
+}
+
+#[tauri::command]
+pub fn start_pomodoro_break(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::PomodoroSessionRequestDto,
+) -> Result<super::dto::ActivePomodoroDto, String> {
+    super::usecases::start_pomodoro_break(
+        database.inner(),
+        clock.inner(),
+        request.pomodoro_session_id,
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
+pub fn skip_pomodoro_break(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::PomodoroSessionRequestDto,
+) -> Result<super::dto::ActivePomodoroDto, String> {
+    super::usecases::skip_pomodoro_break(
+        database.inner(),
+        clock.inner(),
+        request.pomodoro_session_id,
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
+pub fn complete_pomodoro_break(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+) -> Result<super::dto::ActivePomodoroDto, String> {
+    super::usecases::complete_pomodoro_break(database.inner(), clock.inner()).map(Into::into)
+}
+
+#[tauri::command]
+pub fn cancel_pomodoro(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+) -> Result<super::dto::ActivePomodoroDto, String> {
+    super::usecases::cancel_pomodoro(database.inner(), clock.inner()).map(Into::into)
+}
+
+#[tauri::command]
 pub fn pause_active_timer(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,
