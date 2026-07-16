@@ -389,6 +389,15 @@ function TaskRowItem({
           {memoPreview ? (
             <span className="task-row-memo">{memoPreview}</span>
           ) : null}
+          {row.tags.length > 0 ? (
+            <span className="task-row-tags" aria-label="タグ">
+              {row.tags.map((tag) => (
+                <span className="task-tag-chip" key={tag.id}>
+                  {tag.name}
+                </span>
+              ))}
+            </span>
+          ) : null}
           {hasProgress ? (
             <span className="task-progress">
               <span className="task-progress-bar">

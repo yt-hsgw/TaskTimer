@@ -8,6 +8,7 @@ const TIME_FORMAT: &[time::format_description::FormatItem<'_>] =
     format_description!("[hour]:[minute]");
 const MEMO_MAX_CHARS: usize = 10_000;
 const TASK_LIST_NAME_MAX_CHARS: usize = 80;
+const TAG_NAME_MAX_CHARS: usize = 40;
 
 pub const DEFAULT_TASK_LIST_ID: &str = "default";
 pub const DEFAULT_TASK_LIST_NAME: &str = "タスク";
@@ -138,6 +139,22 @@ pub fn validate_task_list_color_token(value: &str) -> Result<String, String> {
     }
 
     Err("リスト色は許可済みの色から選択してください".to_string())
+}
+
+pub fn validate_tag_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("タグ名は必須です".to_string());
+    }
+    if trimmed.chars().count() > TAG_NAME_MAX_CHARS {
+        return Err(format!(
+            "タグ名は{TAG_NAME_MAX_CHARS}文字以内で入力してください"
+        ));
+    }
+    if trimmed.chars().any(char::is_control) {
+        return Err("タグ名に制御文字は使用できません".to_string());
+    }
+    Ok(trimmed.to_string())
 }
 
 pub fn assert_timer_startable(status: &WorkStatus) -> Result<(), String> {

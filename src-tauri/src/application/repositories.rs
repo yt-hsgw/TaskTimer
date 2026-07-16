@@ -95,6 +95,18 @@ pub struct TaskListUpdate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagCreate {
+    pub name: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagUpdate {
+    pub name: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecurrenceRuleRecord {
     pub id: String,
     pub target: WorkTargetRef,
@@ -119,6 +131,22 @@ pub struct TaskListRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskTagRecord {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagRecord {
+    pub id: String,
+    pub name: String,
+    pub sort_order: i64,
+    pub task_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskRecord {
     pub id: String,
     pub list_id: String,
@@ -136,6 +164,7 @@ pub struct TaskRecord {
     pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    pub tags: Vec<TaskTagRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -181,6 +210,7 @@ pub struct TaskRowRecord {
     pub subtask_total_count: i64,
     pub completed_subtask_count: i64,
     pub active_timer_target: Option<WorkTargetRef>,
+    pub tags: Vec<TaskTagRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -301,7 +331,7 @@ pub struct UiPreferencesUpdate {
 }
 
 pub type RepositoryResult<T> = Result<T, String>;
-pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 3;
 
 pub trait CalendarRepository {
     fn list_calendar_items(
@@ -399,6 +429,30 @@ pub trait TaskListCommandRepository {
     ) -> RepositoryResult<TaskListRecord>;
 
     fn delete_task_list(&self, list_id: String, now: String) -> RepositoryResult<()>;
+}
+
+pub trait TagRepository {
+    fn list_tags(&self) -> RepositoryResult<Vec<TagRecord>>;
+
+    fn create_tag(&self, input: TagCreate) -> RepositoryResult<TagRecord>;
+
+    fn update_tag(&self, tag_id: String, input: TagUpdate) -> RepositoryResult<TagRecord>;
+
+    fn delete_tag(&self, tag_id: String, now: String) -> RepositoryResult<()>;
+
+    fn attach_tag_to_task(
+        &self,
+        task_id: String,
+        tag_id: String,
+        now: String,
+    ) -> RepositoryResult<TaskTagRecord>;
+
+    fn detach_tag_from_task(
+        &self,
+        task_id: String,
+        tag_id: String,
+        now: String,
+    ) -> RepositoryResult<()>;
 }
 
 pub trait NotificationPreferenceRepository {

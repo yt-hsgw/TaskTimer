@@ -1,5 +1,6 @@
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import type {
+  TagItem,
   TaskWithSubtasks,
   TaskListItem,
   WorkItemDraft,
@@ -20,6 +21,7 @@ type TaskDetailPaneProps = {
   selectedSubtaskId: string | null;
   activeTimer: ActiveTimer | null;
   taskLists: TaskListItem[];
+  tags: TagItem[];
   displayMode: NotificationDisplayMode;
   isMutating: boolean;
   onClose(): void;
@@ -39,6 +41,8 @@ type TaskDetailPaneProps = {
   onToggleSubtaskCompletion(subtask: Subtask): Promise<boolean>;
   onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
   onDeleteSubtask(subtask: Subtask): Promise<boolean>;
+  onAttachTagToTask(taskId: string, tagId: string): Promise<boolean>;
+  onDetachTagFromTask(taskId: string, tagId: string): Promise<boolean>;
 };
 
 type DetailFormDraft = {
@@ -87,6 +91,7 @@ export function TaskDetailPane({
   selectedSubtaskId,
   activeTimer,
   taskLists,
+  tags,
   displayMode,
   isMutating,
   onClose,
@@ -103,6 +108,8 @@ export function TaskDetailPane({
   onToggleSubtaskCompletion,
   onDeleteTask,
   onDeleteSubtask,
+  onAttachTagToTask,
+  onDetachTagFromTask,
 }: TaskDetailPaneProps) {
   const selectedSubtask = useMemo(
     () =>
@@ -143,6 +150,7 @@ export function TaskDetailPane({
     dueTime: "",
     memo: "",
   });
+  const [selectedTagId, setSelectedTagId] = useState("");
   const [openSections, setOpenSections] = useState<
     Record<DetailSectionKey, boolean>
   >({
@@ -155,6 +163,10 @@ export function TaskDetailPane({
     [task.subtasks],
   );
   const dueChipLabel = formatDueChipLabel(detailItem.dueDate, detailItem.dueTime);
+  const availableTags = useMemo(
+    () => tags.filter((tag) => !task.tags.some((taskTag) => taskTag.id === tag.id)),
+    [tags, task.tags],
+  );
 
   useEffect(() => {
     setDraft(toDetailFormDraft(detailItem, task.listId));
@@ -183,7 +195,14 @@ export function TaskDetailPane({
       dueTime: "",
       memo: "",
     });
+    setSelectedTagId("");
   }, [task.id]);
+
+  useEffect(() => {
+    if (selectedTagId && !availableTags.some((tag) => tag.id === selectedTagId)) {
+      setSelectedTagId("");
+    }
+  }, [availableTags, selectedTagId]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -240,6 +259,17 @@ export function TaskDetailPane({
     const updated = await updateCurrentItem(nextDraft);
     if (updated) {
       setIsDuePopoverOpen(false);
+    }
+  }
+
+  async function handleAttachTag(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedTagId) {
+      return;
+    }
+    const attached = await onAttachTagToTask(task.id, selectedTagId);
+    if (attached) {
+      setSelectedTagId("");
     }
   }
 
@@ -368,6 +398,68 @@ export function TaskDetailPane({
           <span>繰り返し</span>
           <strong>{formatRecurrenceFromItem(detailItem)}</strong>
         </div>
+      </section>
+
+      <section className="detail-tags-card" aria-label="タグ">
+        <div className="detail-tags-heading">
+          <span>タグ</span>
+          {selectedSubtask ? <small>親タスクから継承</small> : null}
+        </div>
+        {task.tags.length > 0 ? (
+          <div className="detail-tag-list">
+            {task.tags.map((tag) => (
+              <span className="detail-tag-chip" key={tag.id}>
+                {tag.name}
+                {!selectedSubtask ? (
+                  <button
+                    type="button"
+                    aria-label={`${tag.name}タグを外す`}
+                    title="タグを外す"
+                    disabled={isMutating}
+                    onClick={() => void onDetachTagFromTask(task.id, tag.id)}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="detail-section-description">
+            {selectedSubtask
+              ? "親タスクにタグはありません。"
+              : "このタスクにタグはありません。"}
+          </p>
+        )}
+        {!selectedSubtask ? (
+          <form className="detail-tag-form" onSubmit={handleAttachTag}>
+            <select
+              value={selectedTagId}
+              disabled={isMutating || availableTags.length === 0}
+              onChange={(event) => setSelectedTagId(event.target.value)}
+            >
+              <option value="">
+                {tags.length === 0
+                  ? "左ペインでタグを作成"
+                  : availableTags.length === 0
+                    ? "追加できるタグはありません"
+                    : "タグを選択"}
+              </option>
+              {availableTags.map((tag) => (
+                <option value={tag.id} key={tag.id}>
+                  {tag.name}
+                </option>
+              ))}
+            </select>
+            <button
+              className="secondary-button"
+              type="submit"
+              disabled={isMutating || !selectedTagId}
+            >
+              追加
+            </button>
+          </form>
+        ) : null}
       </section>
 
       {detailMemo ? (

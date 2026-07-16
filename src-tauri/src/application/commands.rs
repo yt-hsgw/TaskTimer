@@ -60,6 +60,12 @@ pub fn list_task_lists(
 }
 
 #[tauri::command]
+pub fn list_tags(database: DatabaseState<'_>) -> Result<Vec<super::dto::TagDto>, String> {
+    super::usecases::list_tags(database.inner())
+        .map(|tags| tags.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
 pub fn list_task_rows(
     database: DatabaseState<'_>,
     list_id: Option<String>,
@@ -171,6 +177,64 @@ pub fn delete_task_list(
     request: super::dto::DeleteTaskListRequestDto,
 ) -> Result<(), String> {
     super::usecases::delete_task_list(database.inner(), clock.inner(), request.list_id)
+}
+
+#[tauri::command]
+pub fn create_tag(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::CreateTagRequestDto,
+) -> Result<super::dto::TagDto, String> {
+    super::usecases::create_tag(database.inner(), clock.inner(), request.into()).map(Into::into)
+}
+
+#[tauri::command]
+pub fn update_tag(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::UpdateTagRequestDto,
+) -> Result<super::dto::TagDto, String> {
+    let tag_id = request.tag_id.clone();
+    super::usecases::update_tag(database.inner(), clock.inner(), tag_id, request.into())
+        .map(Into::into)
+}
+
+#[tauri::command]
+pub fn delete_tag(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::DeleteTagRequestDto,
+) -> Result<(), String> {
+    super::usecases::delete_tag(database.inner(), clock.inner(), request.tag_id)
+}
+
+#[tauri::command]
+pub fn attach_tag_to_task(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::AttachTaskTagRequestDto,
+) -> Result<super::dto::TaskTagDto, String> {
+    super::usecases::attach_tag_to_task(
+        database.inner(),
+        clock.inner(),
+        request.task_id,
+        request.tag_id,
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
+pub fn detach_tag_from_task(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::DetachTaskTagRequestDto,
+) -> Result<(), String> {
+    super::usecases::detach_tag_from_task(
+        database.inner(),
+        clock.inner(),
+        request.task_id,
+        request.tag_id,
+    )
 }
 
 #[tauri::command]

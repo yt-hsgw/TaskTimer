@@ -16,6 +16,15 @@ CREATE TABLE task_lists (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE tags (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL CHECK (length(trim(name)) > 0 AND length(name) <= 40),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE tasks (
   id TEXT PRIMARY KEY,
   list_id TEXT NOT NULL DEFAULT 'default',
@@ -47,6 +56,16 @@ CREATE TABLE tasks (
     OR due_date IS NULL
     OR due_date >= planned_start_date
   )
+);
+
+CREATE TABLE task_tags (
+  task_id TEXT NOT NULL,
+  tag_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  deleted_at TEXT NULL,
+  PRIMARY KEY (task_id, tag_id),
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE RESTRICT,
+  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE RESTRICT
 );
 
 CREATE TABLE subtasks (
@@ -215,6 +234,22 @@ WHERE deleted_at IS NULL;
 
 CREATE INDEX tasks_due_time_idx
 ON tasks (due_date, due_time)
+WHERE deleted_at IS NULL;
+
+CREATE UNIQUE INDEX tags_active_name_unique_idx
+ON tags (lower(name))
+WHERE deleted_at IS NULL;
+
+CREATE INDEX tags_order_idx
+ON tags (sort_order, created_at)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX task_tags_task_idx
+ON task_tags (task_id, created_at)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX task_tags_tag_idx
+ON task_tags (tag_id, task_id)
 WHERE deleted_at IS NULL;
 
 CREATE INDEX subtasks_task_status_idx

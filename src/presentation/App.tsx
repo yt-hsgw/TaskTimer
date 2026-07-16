@@ -4,6 +4,7 @@ import type {
   NotificationDeliveryAttempt,
   NotificationDispatchSummary,
   RecurrenceRuleDraft,
+  TagItem,
   TaskListColorToken,
   TaskListItem,
   TaskRow,
@@ -38,6 +39,7 @@ export function App() {
   const [tasks, setTasks] = useState<TaskWithSubtasks[]>([]);
   const [taskRows, setTaskRows] = useState<TaskRow[]>([]);
   const [taskLists, setTaskLists] = useState<TaskListItem[]>([]);
+  const [tags, setTags] = useState<TagItem[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedSubtaskId, setSelectedSubtaskId] = useState<string | null>(null);
   const [items, setItems] = useState<WeekCalendarItem[]>([]);
@@ -107,6 +109,13 @@ export function App() {
     return taskLists.find((list) => list.id === activeView.listId) ?? null;
   }, [activeView, taskLists]);
 
+  const activeTag = useMemo(() => {
+    if (activeView.kind !== "tag") {
+      return null;
+    }
+    return tags.find((tag) => tag.id === activeView.tagId) ?? null;
+  }, [activeView, tags]);
+
   const calendarRange = useMemo(
     () => getCalendarQueryRange(calendarViewMode, calendarAnchorDate),
     [calendarAnchorDate, calendarViewMode],
@@ -118,6 +127,11 @@ export function App() {
     }
     if (activeView.kind === "favorites") {
       return tasks.filter((task) => task.isFavorite);
+    }
+    if (activeView.kind === "tag") {
+      return tasks.filter((task) =>
+        task.tags.some((tag) => tag.id === activeView.tagId),
+      );
     }
     if (activeView.kind === "list") {
       return tasks.filter((task) => task.listId === activeView.listId);
@@ -131,6 +145,11 @@ export function App() {
     }
     if (activeView.kind === "favorites") {
       return taskRows.filter((task) => task.isFavorite);
+    }
+    if (activeView.kind === "tag") {
+      return taskRows.filter((task) =>
+        task.tags.some((tag) => tag.id === activeView.tagId),
+      );
     }
     if (activeView.kind === "list") {
       return taskRows.filter((task) => task.listId === activeView.listId);
@@ -170,6 +189,7 @@ export function App() {
         nextTasks,
         nextTaskRows,
         nextTaskLists,
+        nextTags,
         nextItems,
         nextActiveTimer,
         nextDisplayMode,
@@ -179,6 +199,7 @@ export function App() {
           tauriTaskTimerGateway.listTasks(),
           tauriTaskTimerGateway.listTaskRows(listId),
           tauriTaskTimerGateway.listTaskLists(),
+          tauriTaskTimerGateway.listTags(),
           tauriTaskTimerGateway.listCalendarItems(
             calendarRange.startDate,
             calendarRange.endDate,
@@ -191,6 +212,7 @@ export function App() {
       setTasks(nextTasks);
       setTaskRows(nextTaskRows);
       setTaskLists(nextTaskLists);
+      setTags(nextTags);
       setItems(nextItems);
       setActiveTimer(nextActiveTimer);
       setDisplayMode(nextDisplayMode);
@@ -524,6 +546,54 @@ export function App() {
         }
       }),
     [activeView, clearDetailSelection, runMutation],
+  );
+
+  const handleCreateTag = useCallback(
+    (name: string) =>
+      runMutation(async () => {
+        const tag = await tauriTaskTimerGateway.createTag({ name });
+        setActiveView({ kind: "tag", tagId: tag.id });
+        clearDetailSelection();
+      }),
+    [clearDetailSelection, runMutation],
+  );
+
+  const handleRenameTag = useCallback(
+    (tagId: string, name: string) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.updateTag(tagId, { name });
+      }),
+    [runMutation],
+  );
+
+  const handleDeleteTag = useCallback(
+    (tagId: string) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.deleteTag(tagId);
+        if (activeView.kind === "tag" && activeView.tagId === tagId) {
+          setActiveView({ kind: "list", listId: DEFAULT_TASK_LIST_ID });
+          clearDetailSelection();
+        }
+      }),
+    [activeView, clearDetailSelection, runMutation],
+  );
+
+  const handleAttachTagToTask = useCallback(
+    (taskId: string, tagId: string) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.attachTagToTask(taskId, tagId);
+        return taskId;
+      }),
+    [runMutation],
+  );
+
+  const handleDetachTagFromTask = useCallback(
+    (taskId: string, tagId: string) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.detachTagFromTask(taskId, tagId);
+        return taskId;
+      }),
+    [runMutation],
   );
 
   const handleCreateSubtask = useCallback(
@@ -1000,19 +1070,24 @@ export function App() {
           todayCount={todayCount}
           isOpen={isNavigationOpen}
           taskLists={taskLists}
+          tags={tags}
           isMutating={isMutating}
           onSelectView={handleSelectView}
           onCreateTaskList={handleCreateTaskList}
           onRenameTaskList={handleRenameTaskList}
           onUpdateTaskListColor={handleUpdateTaskListColor}
           onDeleteTaskList={handleDeleteTaskList}
+          onCreateTag={handleCreateTag}
+          onRenameTag={handleRenameTag}
+          onDeleteTag={handleDeleteTag}
           onToggle={() => setIsNavigationOpen((current) => !current)}
         />
 
         <section className="workspace-main" aria-label="現在のビュー">
           {activeView.kind === "list" ||
           activeView.kind === "today" ||
-          activeView.kind === "favorites" ? (
+          activeView.kind === "favorites" ||
+          activeView.kind === "tag" ? (
             <div
               className={`task-workspace ${
                 selectedTask ? "is-detail-open" : ""
@@ -1028,14 +1103,18 @@ export function App() {
                     ? "今日"
                     : activeView.kind === "favorites"
                       ? "お気に入り"
-                      : activeTaskList?.name ?? "タスク"
+                      : activeView.kind === "tag"
+                        ? activeTag?.name ?? "タグ"
+                        : activeTaskList?.name ?? "タスク"
                 }
                 emptyMessage={
                   activeView.kind === "today"
                     ? "今日が期限のタスクはありません。"
                     : activeView.kind === "favorites"
                       ? "お気に入りにしたタスクはまだありません。"
-                      : "まだタスクはありません。"
+                      : activeView.kind === "tag"
+                        ? "このタグが付いたタスクはありません。"
+                        : "まだタスクはありません。"
                 }
                 showTaskForm={activeView.kind === "list"}
                 isLoading={isLoading}
@@ -1055,6 +1134,7 @@ export function App() {
                   selectedSubtaskId={selectedSubtaskId}
                   activeTimer={activeTimer}
                   taskLists={taskLists}
+                  tags={tags}
                   displayMode={displayMode}
                   isMutating={isMutating}
                   onClose={closeDetailPane}
@@ -1073,6 +1153,8 @@ export function App() {
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
+                  onAttachTagToTask={handleAttachTagToTask}
+                  onDetachTagFromTask={handleDetachTagFromTask}
                 />
               ) : null}
             </div>
@@ -1108,6 +1190,7 @@ export function App() {
                   selectedSubtaskId={selectedSubtaskId}
                   activeTimer={activeTimer}
                   taskLists={taskLists}
+                  tags={tags}
                   displayMode={displayMode}
                   isMutating={isMutating}
                   onClose={closeDetailPane}
@@ -1126,6 +1209,8 @@ export function App() {
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
+                  onAttachTagToTask={handleAttachTagToTask}
+                  onDetachTagFromTask={handleDetachTagFromTask}
                 />
               ) : null}
             </div>
@@ -1160,11 +1245,20 @@ function getTaskPanelEyebrow(activeView: AppView) {
   if (activeView.kind === "favorites") {
     return "お気に入り";
   }
+  if (activeView.kind === "tag") {
+    return "タグ";
+  }
   return "リスト";
 }
 
 function appViewFromPreferences(preferences: UiPreferences): AppView {
   if (preferences.lastView === "list") {
+    return {
+      kind: "list",
+      listId: normalizeTaskListId(preferences.lastTaskListId),
+    };
+  }
+  if (preferences.lastView === "tag") {
     return {
       kind: "list",
       listId: normalizeTaskListId(preferences.lastTaskListId),
@@ -1186,7 +1280,7 @@ function uiPreferencesFromState({
 }): UiPreferences {
   return {
     leftPaneOpen: isNavigationOpen,
-    lastView: activeView.kind,
+    lastView: activeView.kind === "tag" ? "list" : activeView.kind,
     lastTaskListId:
       activeView.kind === "list"
         ? normalizeTaskListId(activeView.listId)

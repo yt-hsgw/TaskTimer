@@ -27,6 +27,10 @@ export type TaskListDraft = {
   colorToken?: TaskListColorToken | null;
 };
 
+export type TagDraft = {
+  name: string;
+};
+
 export type TaskListColorToken =
   | "green"
   | "blue"
@@ -119,7 +123,13 @@ export type DataExportResult = {
   manifest: DataExportManifest;
 };
 
-export type AppViewKind = "list" | "today" | "favorites" | "calendar" | "settings";
+export type AppViewKind =
+  | "list"
+  | "today"
+  | "favorites"
+  | "tag"
+  | "calendar"
+  | "settings";
 
 export type CalendarViewModePreference = "week" | "day" | "month";
 
@@ -142,6 +152,20 @@ export type TaskListItem = {
   updatedAt: string;
 };
 
+export type TaskTag = {
+  id: string;
+  name: string;
+};
+
+export type TagItem = {
+  id: string;
+  name: string;
+  sortOrder: number;
+  taskCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type TaskRow = {
   id: string;
   listId: string;
@@ -160,12 +184,14 @@ export type TaskRow = {
   completedSubtaskCount: number;
   activeTimerTarget: WorkTargetRef | null;
   isTimerActive: boolean;
+  tags: TaskTag[];
 };
 
 export type TaskTimerGateway = {
   healthCheck(): Promise<string>;
   listTasks(): Promise<TaskWithSubtasks[]>;
   listTaskLists(): Promise<TaskListItem[]>;
+  listTags(): Promise<TagItem[]>;
   listTaskRows(listId?: string | null): Promise<TaskRow[]>;
   listArchivedTaskRows(): Promise<TaskRow[]>;
   listCalendarItems(startDate: string, endDate: string): Promise<WeekCalendarItem[]>;
@@ -178,6 +204,11 @@ export type TaskTimerGateway = {
   createTaskList(input: TaskListDraft): Promise<TaskListItem>;
   updateTaskList(listId: string, input: TaskListDraft): Promise<TaskListItem>;
   deleteTaskList(listId: string): Promise<void>;
+  createTag(input: TagDraft): Promise<TagItem>;
+  updateTag(tagId: string, input: TagDraft): Promise<TagItem>;
+  deleteTag(tagId: string): Promise<void>;
+  attachTagToTask(taskId: string, tagId: string): Promise<TaskTag>;
+  detachTagFromTask(taskId: string, tagId: string): Promise<void>;
   createSubtask(input: CreateSubtaskDraft): Promise<Subtask>;
   updateTask(input: UpdateTaskDraft): Promise<Task>;
   updateSubtask(input: UpdateSubtaskDraft): Promise<Subtask>;

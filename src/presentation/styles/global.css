@@ -807,6 +807,88 @@ button {
   overflow-wrap: anywhere;
 }
 
+.detail-tags-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.detail-tags-heading {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.detail-tags-heading span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.detail-tags-heading small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.detail-tag-list,
+.task-row-tags {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.detail-tag-chip,
+.task-tag-chip {
+  align-items: center;
+  background: #eef4fb;
+  border: 1px solid #c4d5ec;
+  border-radius: 999px;
+  color: #315d79;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  gap: 4px;
+  line-height: 1.2;
+  max-width: 100%;
+  min-height: 22px;
+  overflow-wrap: anywhere;
+  padding: 3px 8px;
+}
+
+.detail-tag-chip button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: inline-flex;
+  font-weight: 900;
+  height: 16px;
+  justify-content: center;
+  padding: 0;
+  width: 16px;
+}
+
+.detail-tag-form {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.detail-tag-form select {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  min-height: 36px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
 .detail-memo-card {
   background: #ffffff;
   border: 1px solid var(--line);
