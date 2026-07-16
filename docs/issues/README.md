@@ -48,6 +48,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [040 カレンダー上のタスク色を変更できるようにする](040-calendar-list-colors.md) / GitHub #84
 - [041 タスクにタグを付けられるようにする](041-task-tags.md) / GitHub #80
 - [042 かんばん形式の画面を追加する](042-kanban-board.md) / GitHub #81
+- [043 ポモドーロタイマーを設計・実装する](043-pomodoro-timer.md) / GitHub #107
 
 ## 運用
 
