@@ -208,7 +208,7 @@ Read Model計測結果:
 | 2026-07-16 | Darwin 25.5.0 arm64 / Apple M1 | `a3580d9` + PR差分 | smoke 50/200/500 | `npm run perf:measure -- --db tmp/perf/tasktimer-smoke.sqlite3 --threshold-ms 100 --fail-on-warning` | 0 | 最大1ms。 |
 | 2026-07-16 | Darwin 25.5.0 arm64 / Apple M1 | `a3580d9` + PR差分 | standard 5k/20k/50k | `npm run perf:measure -- --fail-on-warning` | 0 | 最大56ms。Windows GUI描画は未計測。 |
 | 2026-07-16 | GitHub-hosted Windows runner / Windows Server 2025 | PR #104 | smoke 50/200/500 | `大量データ性能検証` PR trigger | 0 | 最大1ms。 |
-| 2026-07-16 | GitHub-hosted Windows runner | 未実施 | standard 5k/20k/50k | `大量データ性能検証` workflow / `profile=standard` / `fail_on_warning=true` | 未実施 | workflow追加後、main上で手動実行して結果を追記する。 |
+| 2026-07-16 | GitHub-hosted Windows runner / Windows Server 2025 | `321caed` | standard 5k/20k/50k | `大量データ性能検証` workflow / run `29511423778` / `profile=standard` / `fail_on_warning=true` | 0 | 最大67ms。`calendar_week_2026-07-13` が最大。Windows GUI描画は未計測。 |
 
 ## SQL確認
 
