@@ -37,6 +37,22 @@ erDiagram
     datetime updated_at
   }
 
+  TAG {
+    string id PK
+    string name
+    int sort_order
+    datetime deleted_at
+    datetime created_at
+    datetime updated_at
+  }
+
+  TASK_TAG {
+    string task_id FK
+    string tag_id FK
+    datetime created_at
+    datetime deleted_at
+  }
+
   TIMER_SESSION {
     string id PK
     string target_type
@@ -105,6 +121,8 @@ erDiagram
   }
 
   TASK_LIST ||--o{ TASK : 含む
+  TASK ||--o{ TASK_TAG : 持つ
+  TAG ||--o{ TASK_TAG : 割り当て
   TASK ||--o{ SUBTASK : 持つ
   TIMER_SESSION ||--o{ TIMER_PAUSE : 持つ
 ```
@@ -166,7 +184,19 @@ erDiagram
 - タスク削除時は、タスク、子サブタスク、タイマーセッション、通知ルールを同一トランザクションでソフト削除する。
 - タスク削除時に対象タスクまたは子サブタスクでタイマー開始中の場合、そのタイマーセッションもソフト削除して通常のアクティブタイマー検索から除外する。
 - お気に入り状態はタスク単位で保持する。
+- タグは親タスク単位で複数付与できる。
 - 完了済みタスクは完了セクションへ表示されるが、データ上は `status` と `completed_at` を正とする。
+
+### Tag
+
+タスクを横断分類するラベルを表す。
+
+ルール:
+
+- タグ名はtrim後に必須、最大40文字、制御文字不可。
+- アクティブなタグ名は大文字小文字を区別せず一意にする。
+- タグ削除時はタグと `task_tags` 関連だけをソフト削除し、タスク、サブタスク、タイマー履歴、通知ルールは削除しない。
+- サブタスクはMVPでは直接タグを持たず、詳細UIでは親タスクのタグを継承表示する。
 
 ### Subtask
 

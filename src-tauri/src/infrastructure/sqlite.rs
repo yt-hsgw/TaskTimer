@@ -8,7 +8,7 @@ use std::{
     time::Duration as StdDuration,
 };
 
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
+use rusqlite::{params, params_from_iter, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use time::{
@@ -25,9 +25,10 @@ use crate::{
         NotificationHistoryRepository, NotificationJob, NotificationPreferenceRepository,
         RecurrenceRuleInput, RecurrenceRuleRecord, RepositoryResult, SqliteBackupCreate,
         SqliteBackupManifestRecord, SqliteBackupRecord, SqliteBackupRepository,
-        SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TaskListCommandRepository,
-        TaskListCreate, TaskListRecord, TaskListUpdate, TaskReadRepository, TaskRecord,
-        TaskRowRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
+        SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord,
+        TagRepository, TagUpdate, TaskListCommandRepository, TaskListCreate, TaskListRecord,
+        TaskListUpdate, TaskReadRepository, TaskRecord, TaskRowRecord, TaskTagRecord,
+        TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
         UiPreferenceRepository, UiPreferencesRecord, UiPreferencesUpdate, WeekCalendarItem,
         WorkItemCreate, WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
@@ -162,6 +163,8 @@ impl ExportManifestFile {
 struct JsonExportFile {
     manifest: ExportManifestFile,
     task_lists: Vec<ExportTaskListRow>,
+    tags: Vec<ExportTagRow>,
+    task_tags: Vec<ExportTaskTagRow>,
     tasks: Vec<ExportTaskRow>,
     subtasks: Vec<ExportSubtaskRow>,
     timer_sessions: Vec<ExportTimerSessionRow>,
@@ -173,6 +176,8 @@ struct JsonExportFile {
 #[derive(Debug, Clone)]
 struct ExportDataset {
     task_lists: Vec<ExportTaskListRow>,
+    tags: Vec<ExportTagRow>,
+    task_tags: Vec<ExportTaskTagRow>,
     tasks: Vec<ExportTaskRow>,
     subtasks: Vec<ExportSubtaskRow>,
     timer_sessions: Vec<ExportTimerSessionRow>,
@@ -189,6 +194,22 @@ struct ExportTaskListRow {
     sort_order: i64,
     created_at: String,
     updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportTagRow {
+    id: String,
+    name: String,
+    sort_order: i64,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportTaskTagRow {
+    task_id: String,
+    tag_id: String,
+    created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -572,6 +593,8 @@ impl DataExportRepository for SqliteDatabase {
         let export_file = JsonExportFile {
             manifest: manifest.clone(),
             task_lists: dataset.task_lists,
+            tags: dataset.tags,
+            task_tags: dataset.task_tags,
             tasks: dataset.tasks,
             subtasks: dataset.subtasks,
             timer_sessions: dataset.timer_sessions,
@@ -988,6 +1011,46 @@ impl TaskListCommandRepository for SqliteDatabase {
 
     fn delete_task_list(&self, list_id: String, now: String) -> RepositoryResult<()> {
         self.with_transaction(|transaction| soft_delete_task_list(transaction, &list_id, &now))
+    }
+}
+
+impl TagRepository for SqliteDatabase {
+    fn list_tags(&self) -> RepositoryResult<Vec<TagRecord>> {
+        self.with_connection(select_tags)
+    }
+
+    fn create_tag(&self, input: TagCreate) -> RepositoryResult<TagRecord> {
+        self.with_transaction(|transaction| insert_tag(transaction, input))
+    }
+
+    fn update_tag(&self, tag_id: String, input: TagUpdate) -> RepositoryResult<TagRecord> {
+        self.with_transaction(|transaction| update_tag_detail(transaction, &tag_id, input))
+    }
+
+    fn delete_tag(&self, tag_id: String, now: String) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| soft_delete_tag(transaction, &tag_id, &now))
+    }
+
+    fn attach_tag_to_task(
+        &self,
+        task_id: String,
+        tag_id: String,
+        now: String,
+    ) -> RepositoryResult<TaskTagRecord> {
+        self.with_transaction(|transaction| {
+            attach_tag_to_task_row(transaction, &task_id, &tag_id, &now)
+        })
+    }
+
+    fn detach_tag_from_task(
+        &self,
+        task_id: String,
+        tag_id: String,
+        now: String,
+    ) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| {
+            detach_tag_from_task_row(transaction, &task_id, &tag_id, &now)
+        })
     }
 }
 
@@ -1500,6 +1563,178 @@ fn soft_delete_task_list(
     }
 
     Ok(())
+}
+
+fn select_tags(connection: &Connection) -> RepositoryResult<Vec<TagRecord>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT tags.id,
+                   tags.name,
+                   tags.sort_order,
+                   tags.created_at,
+                   tags.updated_at,
+                   COUNT(tasks.id) AS task_count
+            FROM tags
+            LEFT JOIN task_tags
+              ON task_tags.tag_id = tags.id
+             AND task_tags.deleted_at IS NULL
+            LEFT JOIN tasks
+              ON tasks.id = task_tags.task_id
+             AND tasks.deleted_at IS NULL
+             AND tasks.status <> 'archived'
+            WHERE tags.deleted_at IS NULL
+            GROUP BY tags.id,
+                     tags.name,
+                     tags.sort_order,
+                     tags.created_at,
+                     tags.updated_at
+            ORDER BY tags.sort_order ASC, tags.created_at ASC
+            ",
+        )
+        .map_err(|error| format!("タグ一覧クエリを準備できません: {error}"))?;
+
+    let rows = statement
+        .query_map([], |row| {
+            Ok(TagRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                sort_order: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+                task_count: row.get(5)?,
+            })
+        })
+        .map_err(|error| format!("タグ一覧を取得できません: {error}"))?;
+
+    rows.map(|row| row.map_err(|error| format!("タグ行を読めません: {error}")))
+        .collect()
+}
+
+fn insert_tag(transaction: &Transaction<'_>, input: TagCreate) -> RepositoryResult<TagRecord> {
+    ensure_unique_tag_name(transaction, &input.name, None)?;
+
+    let id = Uuid::new_v4().to_string();
+    let sort_order = next_tag_sort_order(transaction)?;
+    transaction
+        .execute(
+            "
+            INSERT INTO tags (id, name, sort_order, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?4)
+            ",
+            params![id, input.name, sort_order, input.now],
+        )
+        .map_err(|error| format!("タグを作成できません: {error}"))?;
+
+    select_tag_by_id(transaction, &id)
+}
+
+fn update_tag_detail(
+    transaction: &Transaction<'_>,
+    tag_id: &str,
+    input: TagUpdate,
+) -> RepositoryResult<TagRecord> {
+    ensure_tag_exists(transaction, tag_id)?;
+    ensure_unique_tag_name(transaction, &input.name, Some(tag_id))?;
+
+    let updated = transaction
+        .execute(
+            "
+            UPDATE tags
+            SET name = ?1,
+                updated_at = ?2
+            WHERE id = ?3
+              AND deleted_at IS NULL
+            ",
+            params![input.name, input.now, tag_id],
+        )
+        .map_err(|error| format!("タグを更新できません: {error}"))?;
+    if updated != 1 {
+        return Err("更新対象のタグが存在しません".to_string());
+    }
+
+    select_tag_by_id(transaction, tag_id)
+}
+
+fn soft_delete_tag(transaction: &Transaction<'_>, tag_id: &str, now: &str) -> RepositoryResult<()> {
+    ensure_tag_exists(transaction, tag_id)?;
+
+    transaction
+        .execute(
+            "
+            UPDATE task_tags
+            SET deleted_at = ?1
+            WHERE tag_id = ?2
+              AND deleted_at IS NULL
+            ",
+            params![now, tag_id],
+        )
+        .map_err(|error| format!("タグ関連を削除できません: {error}"))?;
+
+    let updated = transaction
+        .execute(
+            "
+            UPDATE tags
+            SET deleted_at = ?1,
+                updated_at = ?1
+            WHERE id = ?2
+              AND deleted_at IS NULL
+            ",
+            params![now, tag_id],
+        )
+        .map_err(|error| format!("タグを削除できません: {error}"))?;
+    if updated != 1 {
+        return Err("削除対象のタグが存在しません".to_string());
+    }
+
+    Ok(())
+}
+
+fn attach_tag_to_task_row(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    tag_id: &str,
+    now: &str,
+) -> RepositoryResult<TaskTagRecord> {
+    ensure_task_exists(transaction, task_id)?;
+    ensure_tag_exists(transaction, tag_id)?;
+
+    transaction
+        .execute(
+            "
+            INSERT INTO task_tags (task_id, tag_id, created_at, deleted_at)
+            VALUES (?1, ?2, ?3, NULL)
+            ON CONFLICT(task_id, tag_id) DO UPDATE SET deleted_at = NULL
+            ",
+            params![task_id, tag_id, now],
+        )
+        .map_err(|error| format!("タスクへタグを追加できません: {error}"))?;
+
+    select_task_tag_by_id(transaction, tag_id)
+}
+
+fn detach_tag_from_task_row(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    tag_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    ensure_task_exists(transaction, task_id)?;
+    ensure_tag_exists(transaction, tag_id)?;
+
+    transaction
+        .execute(
+            "
+            UPDATE task_tags
+            SET deleted_at = ?1
+            WHERE task_id = ?2
+              AND tag_id = ?3
+              AND deleted_at IS NULL
+            ",
+            params![now, task_id, tag_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("タスクからタグを外せません: {error}"))
 }
 
 fn update_subtask_detail(
@@ -2250,8 +2485,11 @@ fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec
         .query_map(params![limit], map_task_row)
         .map_err(|error| format!("タスク一覧を取得できません: {error}"))?;
 
-    rows.map(|row| row.map_err(|error| format!("タスク行を読めません: {error}")))
-        .collect()
+    let mut tasks = rows
+        .map(|row| row.map_err(|error| format!("タスク行を読めません: {error}")))
+        .collect::<RepositoryResult<Vec<_>>>()?;
+    attach_tags_to_tasks(connection, &mut tasks)?;
+    Ok(tasks)
 }
 
 fn select_task_lists(connection: &Connection) -> RepositoryResult<Vec<TaskListRecord>> {
@@ -2443,8 +2681,11 @@ fn select_task_rows(
         )
         .map_err(|error| format!("タスク行Read Modelを取得できません: {error}"))?;
 
-    rows.map(|row| row.map_err(|error| format!("タスク行Read Modelを読めません: {error}")))
-        .collect()
+    let mut task_rows = rows
+        .map(|row| row.map_err(|error| format!("タスク行Read Modelを読めません: {error}")))
+        .collect::<RepositoryResult<Vec<_>>>()?;
+    attach_tags_to_task_rows(connection, &mut task_rows)?;
+    Ok(task_rows)
 }
 
 fn select_subtasks_for_task_list(
@@ -2496,6 +2737,83 @@ fn select_subtasks_for_task_list(
 
     rows.map(|row| row.map_err(|error| format!("サブタスク行を読めません: {error}")))
         .collect()
+}
+
+fn attach_tags_to_tasks(connection: &Connection, tasks: &mut [TaskRecord]) -> RepositoryResult<()> {
+    let task_ids = tasks.iter().map(|task| task.id.clone()).collect::<Vec<_>>();
+    let mut tags_by_task_id = select_task_tags_by_task_ids(connection, task_ids)?;
+    for task in tasks {
+        task.tags = tags_by_task_id.remove(&task.id).unwrap_or_default();
+    }
+    Ok(())
+}
+
+fn attach_tags_to_task_rows(
+    connection: &Connection,
+    task_rows: &mut [TaskRowRecord],
+) -> RepositoryResult<()> {
+    let task_ids = task_rows
+        .iter()
+        .map(|task| task.id.clone())
+        .collect::<Vec<_>>();
+    let mut tags_by_task_id = select_task_tags_by_task_ids(connection, task_ids)?;
+    for task_row in task_rows {
+        task_row.tags = tags_by_task_id.remove(&task_row.id).unwrap_or_default();
+    }
+    Ok(())
+}
+
+fn select_task_tags_by_task_ids(
+    connection: &Connection,
+    mut task_ids: Vec<String>,
+) -> RepositoryResult<HashMap<String, Vec<TaskTagRecord>>> {
+    task_ids.sort();
+    task_ids.dedup();
+    if task_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let placeholders = (1..=task_ids.len())
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "
+        SELECT task_tags.task_id,
+               tags.id,
+               tags.name
+        FROM task_tags
+        INNER JOIN tags
+          ON tags.id = task_tags.tag_id
+         AND tags.deleted_at IS NULL
+        WHERE task_tags.deleted_at IS NULL
+          AND task_tags.task_id IN ({placeholders})
+        ORDER BY task_tags.task_id ASC,
+                 tags.sort_order ASC,
+                 tags.created_at ASC
+        "
+    );
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| format!("タスクタグクエリを準備できません: {error}"))?;
+    let rows = statement
+        .query_map(params_from_iter(task_ids.iter()), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                TaskTagRecord {
+                    id: row.get(1)?,
+                    name: row.get(2)?,
+                },
+            ))
+        })
+        .map_err(|error| format!("タスクタグを取得できません: {error}"))?;
+
+    let mut tags_by_task_id: HashMap<String, Vec<TaskTagRecord>> = HashMap::new();
+    for row in rows {
+        let (task_id, tag) = row.map_err(|error| format!("タスクタグ行を読めません: {error}"))?;
+        tags_by_task_id.entry(task_id).or_default().push(tag);
+    }
+    Ok(tags_by_task_id)
 }
 
 fn build_task_tree(
@@ -2606,6 +2924,119 @@ fn ensure_unique_task_list_name(
     Ok(())
 }
 
+fn select_tag_by_id(connection: &Connection, tag_id: &str) -> RepositoryResult<TagRecord> {
+    connection
+        .query_row(
+            "
+            SELECT tags.id,
+                   tags.name,
+                   tags.sort_order,
+                   tags.created_at,
+                   tags.updated_at,
+                   COUNT(tasks.id) AS task_count
+            FROM tags
+            LEFT JOIN task_tags
+              ON task_tags.tag_id = tags.id
+             AND task_tags.deleted_at IS NULL
+            LEFT JOIN tasks
+              ON tasks.id = task_tags.task_id
+             AND tasks.deleted_at IS NULL
+             AND tasks.status <> 'archived'
+            WHERE tags.id = ?1
+              AND tags.deleted_at IS NULL
+            GROUP BY tags.id,
+                     tags.name,
+                     tags.sort_order,
+                     tags.created_at,
+                     tags.updated_at
+            ",
+            params![tag_id],
+            |row| {
+                Ok(TagRecord {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    sort_order: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                    task_count: row.get(5)?,
+                })
+            },
+        )
+        .map_err(|error| format!("タグを取得できません: {error}"))
+}
+
+fn select_task_tag_by_id(connection: &Connection, tag_id: &str) -> RepositoryResult<TaskTagRecord> {
+    connection
+        .query_row(
+            "
+            SELECT id, name
+            FROM tags
+            WHERE id = ?1
+              AND deleted_at IS NULL
+            ",
+            params![tag_id],
+            |row| {
+                Ok(TaskTagRecord {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                })
+            },
+        )
+        .map_err(|error| format!("タスクタグを取得できません: {error}"))
+}
+
+fn ensure_tag_exists(connection: &Connection, tag_id: &str) -> RepositoryResult<()> {
+    let exists: bool = connection
+        .query_row(
+            "
+            SELECT EXISTS(
+              SELECT 1
+              FROM tags
+              WHERE id = ?1
+                AND deleted_at IS NULL
+            )
+            ",
+            params![tag_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("タグを確認できません: {error}"))?;
+
+    if exists {
+        Ok(())
+    } else {
+        Err("タグが存在しません".to_string())
+    }
+}
+
+fn ensure_unique_tag_name(
+    connection: &Connection,
+    name: &str,
+    except_id: Option<&str>,
+) -> RepositoryResult<()> {
+    let existing_id = connection
+        .query_row(
+            "
+            SELECT id
+            FROM tags
+            WHERE lower(name) = lower(?1)
+              AND deleted_at IS NULL
+            LIMIT 1
+            ",
+            params![name],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("タグ名の重複を確認できません: {error}"))?;
+
+    if let Some(existing_id) = existing_id {
+        if except_id != Some(existing_id.as_str()) {
+            return Err("同じ名前のタグがすでに存在します".to_string());
+        }
+    }
+
+    Ok(())
+}
+
 fn ensure_subtask_exists(connection: &Connection, subtask_id: &str) -> RepositoryResult<()> {
     let exists: bool = connection
         .query_row(
@@ -2679,7 +3110,19 @@ fn soft_delete_task_graph(
     soft_delete_timer_sessions_for_task_graph(transaction, task_id, now)?;
     soft_delete_timer_pauses_for_task_graph(transaction, task_id, now)?;
     soft_delete_notification_rules_for_task_graph(transaction, task_id, now)?;
-    soft_delete_recurrence_rules_for_task_graph(transaction, task_id, now)
+    soft_delete_recurrence_rules_for_task_graph(transaction, task_id, now)?;
+    transaction
+        .execute(
+            "
+            UPDATE task_tags
+            SET deleted_at = ?1
+            WHERE task_id = ?2
+              AND deleted_at IS NULL
+            ",
+            params![now, task_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("タスクのタグ関連を削除できません: {error}"))
 }
 
 fn soft_delete_subtask_graph(
@@ -2937,6 +3380,20 @@ fn next_task_list_sort_order(connection: &Connection) -> RepositoryResult<i64> {
         .map_err(|error| format!("タスクリストの並び順を取得できません: {error}"))
 }
 
+fn next_tag_sort_order(connection: &Connection) -> RepositoryResult<i64> {
+    connection
+        .query_row(
+            "
+            SELECT COALESCE(MAX(sort_order), -1) + 1
+            FROM tags
+            WHERE deleted_at IS NULL
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("タグの並び順を取得できません: {error}"))
+}
+
 fn next_subtask_sort_order(connection: &Connection, task_id: &str) -> RepositoryResult<i64> {
     connection
         .query_row(
@@ -3069,7 +3526,7 @@ fn mark_target_in_progress(
 }
 
 fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<TaskRecord> {
-    connection
+    let mut task = connection
         .query_row(
             "
             SELECT id, list_id, title, status, is_favorite,
@@ -3113,11 +3570,14 @@ fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<Task
             params![id],
             map_task_row,
         )
-        .map_err(|error| format!("タスクを取得できません: {error}"))
+        .map_err(|error| format!("タスクを取得できません: {error}"))?;
+    let mut tags = select_task_tags_by_task_ids(connection, vec![id.to_string()])?;
+    task.tags = tags.remove(id).unwrap_or_default();
+    Ok(task)
 }
 
 fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<TaskRecord> {
-    connection
+    let mut task = connection
         .query_row(
             "
             SELECT id, list_id, title, status, is_favorite,
@@ -3162,7 +3622,10 @@ fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryRe
             params![id],
             map_task_row,
         )
-        .map_err(|error| format!("タスクを取得できません: {error}"))
+        .map_err(|error| format!("タスクを取得できません: {error}"))?;
+    let mut tags = select_task_tags_by_task_ids(connection, vec![id.to_string()])?;
+    task.tags = tags.remove(id).unwrap_or_default();
+    Ok(task)
 }
 
 fn select_subtask_by_id(connection: &Connection, id: &str) -> RepositoryResult<SubtaskRecord> {
@@ -3281,6 +3744,7 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
         deleted_at: row.get(12)?,
         created_at: row.get(13)?,
         updated_at: row.get(14)?,
+        tags: Vec::new(),
     })
 }
 
@@ -3354,6 +3818,7 @@ fn map_task_read_model_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRowR
         subtask_total_count: row.get(13)?,
         completed_subtask_count: row.get(14)?,
         active_timer_target,
+        tags: Vec::new(),
     })
 }
 
@@ -3578,6 +4043,7 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
     run_timer_recurrence_migration(connection)?;
     run_due_time_migration(connection)?;
     run_ui_read_model_migration(connection)?;
+    run_tag_migration(connection)?;
     run_notification_preference_migration(connection)?;
     run_notification_delivery_attempt_migration(connection)
 }
@@ -3617,6 +4083,49 @@ fn run_notification_preference_migration(connection: &Connection) -> RepositoryR
         "notifications_enabled",
         "ALTER TABLE notification_preferences ADD COLUMN notifications_enabled INTEGER NOT NULL DEFAULT 1 CHECK (notifications_enabled IN (0, 1))",
     )
+}
+
+fn run_tag_migration(connection: &Connection) -> RepositoryResult<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS tags (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL CHECK (length(trim(name)) > 0 AND length(name) <= 40),
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              deleted_at TEXT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS task_tags (
+              task_id TEXT NOT NULL,
+              tag_id TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              deleted_at TEXT NULL,
+              PRIMARY KEY (task_id, tag_id),
+              FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE RESTRICT,
+              FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE RESTRICT
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS tags_active_name_unique_idx
+            ON tags (lower(name))
+            WHERE deleted_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS tags_order_idx
+            ON tags (sort_order, created_at)
+            WHERE deleted_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS task_tags_task_idx
+            ON task_tags (task_id, created_at)
+            WHERE deleted_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS task_tags_tag_idx
+            ON task_tags (tag_id, task_id)
+            WHERE deleted_at IS NULL;
+            ",
+        )
+        .map_err(|error| format!("タグ用テーブルを作成できません: {error}"))
 }
 
 fn run_notification_delivery_attempt_migration(connection: &Connection) -> RepositoryResult<()> {
@@ -4143,6 +4652,38 @@ fn write_csv_export_files(
             .collect(),
     )?;
     write_csv_file(
+        &export_dir.join("tags.csv"),
+        &["id", "name", "sort_order", "created_at", "updated_at"],
+        dataset
+            .tags
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.name.clone(),
+                    row.sort_order.to_string(),
+                    row.created_at.clone(),
+                    row.updated_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
+        &export_dir.join("task_tags.csv"),
+        &["task_id", "tag_id", "created_at"],
+        dataset
+            .task_tags
+            .iter()
+            .map(|row| {
+                vec![
+                    row.task_id.clone(),
+                    row.tag_id.clone(),
+                    row.created_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
         &export_dir.join("tasks.csv"),
         &[
             "id",
@@ -4345,6 +4886,8 @@ fn csv_export_file_names() -> Vec<&'static str> {
     vec![
         CSV_EXPORT_MANIFEST_FILE,
         "task_lists.csv",
+        "tags.csv",
+        "task_tags.csv",
         "tasks.csv",
         "subtasks.csv",
         "timer_sessions.csv",
@@ -4411,6 +4954,8 @@ fn option_i64_text(value: Option<i64>) -> String {
 fn select_export_dataset(connection: &Connection) -> RepositoryResult<ExportDataset> {
     Ok(ExportDataset {
         task_lists: select_export_task_lists(connection)?,
+        tags: select_export_tags(connection)?,
+        task_tags: select_export_task_tags(connection)?,
         tasks: select_export_tasks(connection)?,
         subtasks: select_export_subtasks(connection)?,
         timer_sessions: select_export_timer_sessions(connection)?,
@@ -4444,6 +4989,60 @@ fn select_export_task_lists(connection: &Connection) -> RepositoryResult<Vec<Exp
         })
         .map_err(|error| format!("エクスポート用リストを取得できません: {error}"))?;
     collect_export_rows(rows, "エクスポート用リストを読めません")
+}
+
+fn select_export_tags(connection: &Connection) -> RepositoryResult<Vec<ExportTagRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, name, sort_order, created_at, updated_at
+            FROM tags
+            WHERE deleted_at IS NULL
+            ORDER BY sort_order, created_at, id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用タグ取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportTagRow {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                sort_order: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用タグを取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用タグを読めません")
+}
+
+fn select_export_task_tags(connection: &Connection) -> RepositoryResult<Vec<ExportTaskTagRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT task_tags.task_id, task_tags.tag_id, task_tags.created_at
+            FROM task_tags
+            INNER JOIN tasks
+              ON tasks.id = task_tags.task_id
+             AND tasks.deleted_at IS NULL
+            INNER JOIN tags
+              ON tags.id = task_tags.tag_id
+             AND tags.deleted_at IS NULL
+            WHERE task_tags.deleted_at IS NULL
+            ORDER BY task_tags.task_id, task_tags.created_at, task_tags.tag_id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用タスクタグ取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportTaskTagRow {
+                task_id: row.get(0)?,
+                tag_id: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用タスクタグを取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用タスクタグを読めません")
 }
 
 fn select_export_tasks(connection: &Connection) -> RepositoryResult<Vec<ExportTaskRow>> {
@@ -4921,7 +5520,7 @@ mod tests {
             clock::Clock,
             notification::{LocalNotificationGateway, LocalNotificationMessage},
             repositories::{
-                NotificationHistoryRepository, NotificationPreferenceRepository,
+                NotificationHistoryRepository, NotificationPreferenceRepository, TagRepository,
                 TaskReadRepository, UiPreferenceRepository,
             },
             usecases,
@@ -5889,10 +6488,20 @@ mod tests {
             },
         )
         .expect("create task");
+        let tag = usecases::create_tag(
+            &database,
+            &clock,
+            usecases::TagDraft {
+                name: "移行確認".to_string(),
+            },
+        )
+        .expect("create tag");
+        usecases::attach_tag_to_task(&database, &clock, task.id.clone(), tag.id.clone())
+            .expect("attach tag");
         usecases::create_subtask(
             &database,
             &clock,
-            task.id,
+            task.id.clone(),
             usecases::WorkItemDraft {
                 list_id: None,
                 title: "サブタスク".to_string(),
@@ -5927,6 +6536,9 @@ mod tests {
         assert_eq!(json["manifest"]["containsPersonalData"], true);
         assert_eq!(json["tasks"][0]["title"], "=SUM(1,2)");
         assert_eq!(json["tasks"][0]["memo"], "1行目,2行目\n\"引用\"");
+        assert_eq!(json["tags"][0]["name"], "移行確認");
+        assert_eq!(json["task_tags"][0]["task_id"], task.id);
+        assert_eq!(json["task_tags"][0]["tag_id"], tag.id);
         assert_eq!(json["subtasks"][0]["title"], "サブタスク");
 
         fs::remove_dir_all(data_dir).expect("cleanup data");
@@ -5957,12 +6569,22 @@ mod tests {
             },
         )
         .expect("create task");
+        let tag = usecases::create_tag(
+            &database,
+            &start_clock,
+            usecases::TagDraft {
+                name: "+tag".to_string(),
+            },
+        )
+        .expect("create tag");
+        usecases::attach_tag_to_task(&database, &start_clock, task.id.clone(), tag.id.clone())
+            .expect("attach tag");
         usecases::start_timer(
             &database,
             &start_clock,
             WorkTargetRef {
                 target_type: WorkTargetType::Task,
-                id: task.id,
+                id: task.id.clone(),
             },
         )
         .expect("start timer");
@@ -5985,6 +6607,11 @@ mod tests {
             .join(CSV_EXPORT_MANIFEST_FILE)
             .is_file());
         assert!(export.files.iter().any(|path| path.ends_with("tasks.csv")));
+        assert!(export.files.iter().any(|path| path.ends_with("tags.csv")));
+        assert!(export
+            .files
+            .iter()
+            .any(|path| path.ends_with("task_tags.csv")));
         assert!(export
             .files
             .iter()
@@ -5992,12 +6619,122 @@ mod tests {
 
         let tasks_csv = fs::read_to_string(PathBuf::from(&export.export_path).join("tasks.csv"))
             .expect("read tasks csv");
+        let tags_csv = fs::read_to_string(PathBuf::from(&export.export_path).join("tags.csv"))
+            .expect("read tags csv");
+        let task_tags_csv =
+            fs::read_to_string(PathBuf::from(&export.export_path).join("task_tags.csv"))
+                .expect("read task tags csv");
         assert!(tasks_csv.starts_with("id,list_id,title,status,is_favorite"));
         assert!(tasks_csv.contains("\"'=SUM(1,2)\""));
         assert!(tasks_csv.contains("\"カンマ, 改行\n\"\"引用符\"\"\""));
+        assert!(tags_csv.contains("'+tag"));
+        assert!(task_tags_csv.contains(&task.id));
+        assert!(task_tags_csv.contains(&tag.id));
 
         fs::remove_dir_all(data_dir).expect("cleanup data");
         fs::remove_dir_all(export_root).expect("cleanup export");
+    }
+
+    #[test]
+    fn task_tags_are_visible_and_tag_delete_keeps_task_and_timer_history() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-16T00:00:00Z",
+        };
+        let stop_clock = FixedClock {
+            now: "2026-07-16T00:15:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &clock, draft("タグ対象")).expect("create task");
+        let tag = usecases::create_tag(
+            &database,
+            &clock,
+            usecases::TagDraft {
+                name: "案件A".to_string(),
+            },
+        )
+        .expect("create tag");
+
+        usecases::attach_tag_to_task(&database, &clock, task.id.clone(), tag.id.clone())
+            .expect("attach tag");
+        usecases::start_timer(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id.clone(),
+            },
+        )
+        .expect("start timer");
+        usecases::stop_active_timer(&database, &stop_clock).expect("stop timer");
+
+        let rows = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("task rows");
+        assert_eq!(rows[0].tags[0].name, "案件A");
+        let tasks = database
+            .list_tasks_with_subtasks(200)
+            .expect("tasks with subtasks");
+        assert_eq!(tasks[0].task.tags[0].id, tag.id);
+        assert_eq!(database.list_tags().expect("list tags")[0].task_count, 1);
+
+        usecases::delete_tag(&database, &clock, tag.id.clone()).expect("delete tag");
+
+        let rows_after_delete = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("task rows after tag delete");
+        assert_eq!(rows_after_delete.len(), 1);
+        assert!(rows_after_delete[0].tags.is_empty());
+        assert!(database
+            .list_tags()
+            .expect("list tags after delete")
+            .is_empty());
+
+        let timer_count: i64 = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "
+                        SELECT COUNT(*)
+                        FROM timer_sessions
+                        WHERE target_type = 'task'
+                          AND target_id = ?1
+                          AND deleted_at IS NULL
+                        ",
+                        params![task.id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("timer count: {error}"))
+            })
+            .expect("timer count");
+        assert_eq!(timer_count, 1);
+    }
+
+    #[test]
+    fn create_tag_rejects_duplicate_name_case_insensitively() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-16T00:00:00Z",
+        };
+
+        usecases::create_tag(
+            &database,
+            &clock,
+            usecases::TagDraft {
+                name: "Project".to_string(),
+            },
+        )
+        .expect("create tag");
+
+        let result = usecases::create_tag(
+            &database,
+            &clock,
+            usecases::TagDraft {
+                name: "project".to_string(),
+            },
+        );
+
+        assert!(result.expect_err("duplicate tag").contains("同じ名前"));
     }
 
     #[test]

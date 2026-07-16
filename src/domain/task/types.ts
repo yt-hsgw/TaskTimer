@@ -6,6 +6,11 @@ export const DEFAULT_TASK_LIST_NAME = "タスク";
 export type WorkStatus = "todo" | "in_progress" | "done" | "archived";
 export type WorkTargetType = "task" | "subtask";
 
+export type TaskTag = {
+  id: string;
+  name: string;
+};
+
 export type Task = {
   id: string;
   listId: string;
@@ -23,6 +28,7 @@ export type Task = {
   deletedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  tags: TaskTag[];
 };
 
 export type Subtask = {

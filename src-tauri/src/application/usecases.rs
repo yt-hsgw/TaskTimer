@@ -3,9 +3,9 @@ use crate::domain::{
     recurrence::RecurrenceFrequency,
     task::{
         validate_date_range, validate_due_time_requires_due_date, validate_memo,
-        validate_optional_date, validate_optional_time, validate_task_list_color_token,
-        validate_task_list_name, validate_title, DEFAULT_TASK_LIST_COLOR_TOKEN,
-        DEFAULT_TASK_LIST_ID,
+        validate_optional_date, validate_optional_time, validate_tag_name,
+        validate_task_list_color_token, validate_task_list_name, validate_title,
+        DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID,
     },
     timer::WorkTargetRef,
 };
@@ -19,10 +19,10 @@ use super::{
         NotificationDispatchSummary, NotificationHistoryRepository,
         NotificationPreferenceRepository, RecurrenceRuleInput, RepositoryResult,
         SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore,
-        SqliteRestoreRecord, SubtaskRecord, TaskListCommandRepository, TaskListCreate,
-        TaskListRecord, TaskListUpdate, TaskRecord, TaskTimerCommandRepository,
-        UiPreferenceRepository, UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate,
-        WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord, TagRepository, TagUpdate,
+        TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskRecord,
+        TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository, UiPreferencesRecord,
+        UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
 
@@ -73,6 +73,11 @@ pub struct RecurrenceRuleDraft {
 pub struct TaskListDraft {
     pub name: String,
     pub color_token: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagDraft {
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,6 +156,68 @@ pub fn delete_task_list(
 ) -> RepositoryResult<()> {
     let list_id = validate_identifier(&list_id, "リストID")?;
     repository.delete_task_list(list_id, clock.now_utc_iso8601())
+}
+
+pub fn list_tags(repository: &impl TagRepository) -> RepositoryResult<Vec<TagRecord>> {
+    repository.list_tags()
+}
+
+pub fn create_tag(
+    repository: &impl TagRepository,
+    clock: &impl Clock,
+    draft: TagDraft,
+) -> RepositoryResult<TagRecord> {
+    repository.create_tag(TagCreate {
+        name: validate_tag_name(&draft.name)?,
+        now: clock.now_utc_iso8601(),
+    })
+}
+
+pub fn update_tag(
+    repository: &impl TagRepository,
+    clock: &impl Clock,
+    tag_id: String,
+    draft: TagDraft,
+) -> RepositoryResult<TagRecord> {
+    let tag_id = validate_identifier(&tag_id, "タグID")?;
+    repository.update_tag(
+        tag_id,
+        TagUpdate {
+            name: validate_tag_name(&draft.name)?,
+            now: clock.now_utc_iso8601(),
+        },
+    )
+}
+
+pub fn delete_tag(
+    repository: &impl TagRepository,
+    clock: &impl Clock,
+    tag_id: String,
+) -> RepositoryResult<()> {
+    let tag_id = validate_identifier(&tag_id, "タグID")?;
+    repository.delete_tag(tag_id, clock.now_utc_iso8601())
+}
+
+pub fn attach_tag_to_task(
+    repository: &impl TagRepository,
+    clock: &impl Clock,
+    task_id: String,
+    tag_id: String,
+) -> RepositoryResult<TaskTagRecord> {
+    let task_id = validate_identifier(&task_id, "タスクID")?;
+    let tag_id = validate_identifier(&tag_id, "タグID")?;
+    repository.attach_tag_to_task(task_id, tag_id, clock.now_utc_iso8601())
+}
+
+pub fn detach_tag_from_task(
+    repository: &impl TagRepository,
+    clock: &impl Clock,
+    task_id: String,
+    tag_id: String,
+) -> RepositoryResult<()> {
+    let task_id = validate_identifier(&task_id, "タスクID")?;
+    let tag_id = validate_identifier(&tag_id, "タグID")?;
+    repository.detach_tag_from_task(task_id, tag_id, clock.now_utc_iso8601())
 }
 
 pub fn create_subtask(

@@ -12,6 +12,15 @@ CREATE TABLE IF NOT EXISTS task_lists (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS tags (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL CHECK (length(trim(name)) > 0 AND length(name) <= 40),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   list_id TEXT NOT NULL DEFAULT 'default',
@@ -43,6 +52,16 @@ CREATE TABLE IF NOT EXISTS tasks (
     OR due_date IS NULL
     OR due_date >= planned_start_date
   )
+);
+
+CREATE TABLE IF NOT EXISTS task_tags (
+  task_id TEXT NOT NULL,
+  tag_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  deleted_at TEXT NULL,
+  PRIMARY KEY (task_id, tag_id),
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE RESTRICT,
+  FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS subtasks (
@@ -199,4 +218,20 @@ WHERE deleted_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS subtasks_calendar_idx
 ON subtasks (planned_start_date, due_date)
+WHERE deleted_at IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS tags_active_name_unique_idx
+ON tags (lower(name))
+WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS tags_order_idx
+ON tags (sort_order, created_at)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS task_tags_task_idx
+ON task_tags (task_id, created_at)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS task_tags_tag_idx
+ON task_tags (tag_id, task_id)
 WHERE deleted_at IS NULL;

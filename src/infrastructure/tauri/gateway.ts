@@ -6,6 +6,9 @@ import type {
   NotificationDispatchSummary,
   SqliteBackupResult,
   SqliteRestoreResult,
+  TagDraft,
+  TagItem,
+  TaskTag,
   TaskTimerGateway,
   TaskListItem,
   TaskRow,
@@ -25,6 +28,7 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   healthCheck: () => invoke<string>("health_check"),
   listTasks: () => invoke<TaskWithSubtasks[]>("list_tasks"),
   listTaskLists: () => invoke<TaskListItem[]>("list_task_lists"),
+  listTags: () => invoke<TagItem[]>("list_tags"),
   listTaskRows: (listId?: string | null) =>
     invoke<TaskRow[]>("list_task_rows", { listId: listId ?? null }),
   listArchivedTaskRows: () => invoke<TaskRow[]>("list_archived_task_rows"),
@@ -46,6 +50,15 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<TaskListItem>("update_task_list", { request: { ...input, listId } }),
   deleteTaskList: (listId: string) =>
     invoke<void>("delete_task_list", { request: { listId } }),
+  createTag: (input: TagDraft) => invoke<TagItem>("create_tag", { request: input }),
+  updateTag: (tagId: string, input: TagDraft) =>
+    invoke<TagItem>("update_tag", { request: { ...input, tagId } }),
+  deleteTag: (tagId: string) =>
+    invoke<void>("delete_tag", { request: { tagId } }),
+  attachTagToTask: (taskId: string, tagId: string) =>
+    invoke<TaskTag>("attach_tag_to_task", { request: { taskId, tagId } }),
+  detachTagFromTask: (taskId: string, tagId: string) =>
+    invoke<void>("detach_tag_from_task", { request: { taskId, tagId } }),
   createSubtask: (input: CreateSubtaskDraft) =>
     invoke<Subtask>("create_subtask", { request: input }),
   updateTask: (input: UpdateTaskDraft) =>

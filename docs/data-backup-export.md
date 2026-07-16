@@ -25,7 +25,7 @@ flowchart TD
 
 | 対象 | 扱い | 理由 |
 | --- | --- | --- |
-| `tasktimer.sqlite3` | フルバックアップ対象 | タスク、サブタスク、タイマー履歴、通知ルール、通知設定、UI設定の正。 |
+| `tasktimer.sqlite3` | フルバックアップ対象 | タスク、サブタスク、タグ、タイマー履歴、通知ルール、通知設定、UI設定の正。 |
 | `backup-manifest.json` | バックアップ作成時に同梱 | アプリバージョン、スキーマ確認結果、作成日時、プラットフォームを記録する。 |
 | Release version | manifestに記録 | 復元時の互換性判断に使う。 |
 | OS通知の登録状態 | DB内の通知ルールを正とする | OS側登録そのものは復元せず、復元後にアプリ側で再同期する。 |
@@ -82,6 +82,8 @@ TaskTimer-export-YYYYMMDD-HHMMSS.json
 トップレベル項目:
 
 - `task_lists`
+- `tags`
+- `task_tags`
 - `tasks`
 - `subtasks`
 - `timer_sessions`
@@ -121,6 +123,8 @@ TaskTimer-export-YYYYMMDD-HHMMSS-csv/
 
 - `export-manifest.json`
 - `task_lists.csv`: `id`, `name`, `color_token`, `sort_order`, `created_at`, `updated_at`
+- `tags.csv`: `id`, `name`, `sort_order`, `created_at`, `updated_at`
+- `task_tags.csv`: `task_id`, `tag_id`, `created_at`
 - `tasks.csv`
 - `subtasks.csv`
 - `timer_sessions.csv`

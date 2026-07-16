@@ -9,12 +9,13 @@ use super::{
     repositories::{
         ActiveTimer, DataExportManifestRecord, DataExportRecord, NotificationDeliveryAttemptRecord,
         NotificationDispatchSummary, RecurrenceRuleRecord, SqliteBackupManifestRecord,
-        SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord, TaskListRecord, TaskRecord,
-        TaskRowRecord, TaskWithSubtasksRecord, UiPreferencesRecord, WeekCalendarItem,
+        SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord, TagRecord, TaskListRecord,
+        TaskRecord, TaskRowRecord, TaskTagRecord, TaskWithSubtasksRecord, UiPreferencesRecord,
+        WeekCalendarItem,
     },
     usecases::{
         DataExportCreateDraft, RecurrenceRuleDraft, SqliteBackupCreateDraft,
-        SqliteBackupRestoreDraft, TaskListDraft, UiPreferencesDraft, WorkItemDraft,
+        SqliteBackupRestoreDraft, TagDraft, TaskListDraft, UiPreferencesDraft, WorkItemDraft,
         WorkItemUpdateDraft,
     },
 };
@@ -67,6 +68,39 @@ pub struct UpdateTaskListRequestDto {
 #[serde(rename_all = "camelCase")]
 pub struct DeleteTaskListRequestDto {
     pub list_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateTagRequestDto {
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTagRequestDto {
+    pub tag_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteTagRequestDto {
+    pub tag_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachTaskTagRequestDto {
+    pub task_id: String,
+    pub tag_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetachTaskTagRequestDto {
+    pub task_id: String,
+    pub tag_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -245,6 +279,24 @@ pub struct RecurrenceRuleDto {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskTagDto {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagDto {
+    pub id: String,
+    pub name: String,
+    pub sort_order: i64,
+    pub task_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskDto {
     pub id: String,
     pub list_id: String,
@@ -262,6 +314,7 @@ pub struct TaskDto {
     pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    pub tags: Vec<TaskTagDto>,
 }
 
 #[derive(Serialize)]
@@ -304,6 +357,7 @@ pub struct TaskWithSubtasksDto {
     pub created_at: String,
     pub updated_at: String,
     pub subtasks: Vec<SubtaskDto>,
+    pub tags: Vec<TaskTagDto>,
 }
 
 #[derive(Serialize)]
@@ -340,6 +394,7 @@ pub struct TaskRowDto {
     pub completed_subtask_count: i64,
     pub active_timer_target: Option<WorkTargetRefDto>,
     pub is_timer_active: bool,
+    pub tags: Vec<TaskTagDto>,
 }
 
 #[derive(Serialize)]
@@ -518,6 +573,18 @@ impl From<UpdateTaskListRequestDto> for TaskListDraft {
     }
 }
 
+impl From<CreateTagRequestDto> for TagDraft {
+    fn from(value: CreateTagRequestDto) -> Self {
+        Self { name: value.name }
+    }
+}
+
+impl From<UpdateTagRequestDto> for TagDraft {
+    fn from(value: UpdateTagRequestDto) -> Self {
+        Self { name: value.name }
+    }
+}
+
 impl From<RecurrenceRuleRequestDto> for RecurrenceRuleDraft {
     fn from(value: RecurrenceRuleRequestDto) -> Self {
         Self {
@@ -600,6 +667,29 @@ impl From<TaskRecord> for TaskDto {
             deleted_at: value.deleted_at,
             created_at: value.created_at,
             updated_at: value.updated_at,
+            tags: value.tags.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<TaskTagRecord> for TaskTagDto {
+    fn from(value: TaskTagRecord) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+        }
+    }
+}
+
+impl From<TagRecord> for TagDto {
+    fn from(value: TagRecord) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            sort_order: value.sort_order,
+            task_count: value.task_count,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
         }
     }
 }
@@ -646,6 +736,7 @@ impl From<TaskWithSubtasksRecord> for TaskWithSubtasksDto {
             created_at: value.task.created_at,
             updated_at: value.task.updated_at,
             subtasks: value.subtasks.into_iter().map(Into::into).collect(),
+            tags: value.task.tags.into_iter().map(Into::into).collect(),
         }
     }
 }
@@ -709,6 +800,7 @@ impl From<TaskRowRecord> for TaskRowDto {
             completed_subtask_count: value.completed_subtask_count,
             active_timer_target,
             is_timer_active,
+            tags: value.tags.into_iter().map(Into::into).collect(),
         }
     }
 }
