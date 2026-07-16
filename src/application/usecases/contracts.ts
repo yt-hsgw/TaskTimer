@@ -123,6 +123,12 @@ export type ActivePomodoro = {
   updatedAt: string;
 };
 
+export type PomodoroExpirySyncResult = {
+  expiredPomodoro: ActivePomodoro | null;
+  activePomodoro: ActivePomodoro | null;
+  notificationSummary: NotificationDispatchSummary;
+};
+
 export type SqliteBackupManifest = {
   format: string;
   formatVersion: number;
@@ -240,6 +246,7 @@ export type TaskTimerGateway = {
   listWeekCalendarItems(weekStartDate: string): Promise<WeekCalendarItem[]>;
   getActiveTimer(): Promise<ActiveTimer | null>;
   getActivePomodoro(): Promise<ActivePomodoro | null>;
+  syncExpiredPomodoro(): Promise<PomodoroExpirySyncResult>;
   getPomodoroSettings(): Promise<PomodoroSettings>;
   updatePomodoroSettings(input: PomodoroSettingsDraft): Promise<PomodoroSettings>;
   getNotificationDisplayMode(): Promise<NotificationDisplayMode>;

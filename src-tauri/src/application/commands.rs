@@ -125,6 +125,20 @@ pub fn get_active_pomodoro(
 }
 
 #[tauri::command]
+pub fn sync_expired_pomodoro(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    notification_gateway: NotificationGatewayState<'_>,
+) -> Result<super::dto::PomodoroExpirySyncDto, String> {
+    super::usecases::sync_expired_pomodoro(
+        database.inner(),
+        notification_gateway.inner(),
+        clock.inner(),
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
 pub fn get_notification_display_mode(database: DatabaseState<'_>) -> Result<String, String> {
     use crate::application::repositories::NotificationPreferenceRepository;
 

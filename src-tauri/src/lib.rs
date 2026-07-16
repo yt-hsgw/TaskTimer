@@ -14,9 +14,9 @@ use application::commands::{
     list_week_calendar_items, pause_active_timer, pause_pomodoro, reopen_subtask, reopen_task,
     restore_archived_task, restore_sqlite_backup, resume_active_timer, resume_pomodoro,
     skip_pomodoro_break, start_pomodoro, start_pomodoro_break, start_timer, stop_active_timer,
-    toggle_task_favorite, update_notification_display_mode, update_notifications_enabled,
-    update_pomodoro_settings, update_subtask, update_tag, update_task, update_task_list,
-    update_task_status, update_ui_preferences,
+    sync_expired_pomodoro, toggle_task_favorite, update_notification_display_mode,
+    update_notifications_enabled, update_pomodoro_settings, update_subtask, update_tag,
+    update_task, update_task_list, update_task_status, update_ui_preferences,
 };
 use infrastructure::{
     clock::SystemClock, notification::TauriLocalNotificationGateway, sqlite::SqliteDatabase,
@@ -48,6 +48,7 @@ pub fn run() {
             get_pomodoro_settings,
             update_pomodoro_settings,
             get_active_pomodoro,
+            sync_expired_pomodoro,
             get_notification_display_mode,
             get_notifications_enabled,
             get_ui_preferences,

@@ -94,6 +94,13 @@ pub struct ActivePomodoro {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PomodoroExpiry {
+    pub expired_pomodoro: ActivePomodoro,
+    pub active_pomodoro: Option<ActivePomodoro>,
+    pub target_title: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItemCreate {
     pub list_id: String,
     pub title: String,
@@ -437,6 +444,8 @@ pub trait PomodoroRepository {
     fn complete_pomodoro_break(&self, now: String) -> RepositoryResult<ActivePomodoro>;
 
     fn cancel_pomodoro(&self, now: String) -> RepositoryResult<ActivePomodoro>;
+
+    fn sync_expired_pomodoro(&self, now: String) -> RepositoryResult<Option<PomodoroExpiry>>;
 }
 
 pub trait TaskReadRepository {

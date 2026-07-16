@@ -331,6 +331,14 @@ pub struct ActivePomodoroDto {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PomodoroExpirySyncDto {
+    pub expired_pomodoro: Option<ActivePomodoroDto>,
+    pub active_pomodoro: Option<ActivePomodoroDto>,
+    pub notification_summary: NotificationDispatchSummaryDto,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RecurrenceRuleDto {
     pub id: String,
     pub target: WorkTargetRefDto,
@@ -936,6 +944,16 @@ impl From<ActivePomodoro> for ActivePomodoroDto {
             deleted_at: value.deleted_at,
             created_at: value.created_at,
             updated_at: value.updated_at,
+        }
+    }
+}
+
+impl From<super::usecases::PomodoroExpirySyncResult> for PomodoroExpirySyncDto {
+    fn from(value: super::usecases::PomodoroExpirySyncResult) -> Self {
+        Self {
+            expired_pomodoro: value.expired_pomodoro.map(Into::into),
+            active_pomodoro: value.active_pomodoro.map(Into::into),
+            notification_summary: value.notification_summary.into(),
         }
     }
 }
