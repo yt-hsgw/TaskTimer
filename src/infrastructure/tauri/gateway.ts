@@ -4,6 +4,8 @@ import type {
   DataExportResult,
   NotificationDeliveryAttempt,
   NotificationDispatchSummary,
+  PomodoroSettings,
+  PomodoroSettingsDraft,
   SqliteBackupResult,
   SqliteRestoreResult,
   TagDraft,
@@ -37,6 +39,9 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   listWeekCalendarItems: (weekStartDate) =>
     invoke<WeekCalendarItem[]>("list_week_calendar_items", { weekStartDate }),
   getActiveTimer: () => invoke<ActiveTimer | null>("get_active_timer"),
+  getPomodoroSettings: () => invoke<PomodoroSettings>("get_pomodoro_settings"),
+  updatePomodoroSettings: (input: PomodoroSettingsDraft) =>
+    invoke<PomodoroSettings>("update_pomodoro_settings", { request: input }),
   getNotificationDisplayMode: () =>
     invoke<NotificationDisplayMode>("get_notification_display_mode"),
   getUiPreferences: () => invoke<UiPreferences>("get_ui_preferences"),

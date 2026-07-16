@@ -3,6 +3,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type {
   NotificationDeliveryAttempt,
   NotificationDispatchSummary,
+  PomodoroSettings,
+  PomodoroSettingsDraft,
   RecurrenceRuleDraft,
   TagItem,
   TaskListColorToken,
@@ -57,6 +59,8 @@ export function App() {
   const [displayMode, setDisplayMode] =
     useState<NotificationDisplayMode>("title_only");
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [pomodoroSettings, setPomodoroSettings] =
+    useState<PomodoroSettings | null>(null);
   const [notificationSummary, setNotificationSummary] =
     useState<NotificationDispatchSummary | null>(null);
   const [notificationFailureHistory, setNotificationFailureHistory] = useState<
@@ -194,6 +198,7 @@ export function App() {
         nextTags,
         nextItems,
         nextActiveTimer,
+        nextPomodoroSettings,
         nextDisplayMode,
         nextNotificationsEnabled,
       ] =
@@ -207,6 +212,7 @@ export function App() {
             calendarRange.endDate,
           ),
           tauriTaskTimerGateway.getActiveTimer(),
+          tauriTaskTimerGateway.getPomodoroSettings(),
           tauriTaskTimerGateway.getNotificationDisplayMode(),
           tauriTaskTimerGateway.getNotificationsEnabled(),
         ]);
@@ -217,6 +223,7 @@ export function App() {
       setTags(nextTags);
       setItems(nextItems);
       setActiveTimer(nextActiveTimer);
+      setPomodoroSettings(nextPomodoroSettings);
       setDisplayMode(nextDisplayMode);
       setNotificationsEnabled(nextNotificationsEnabled);
       setNotificationSummary(
@@ -800,6 +807,14 @@ export function App() {
     [runMutation],
   );
 
+  const handleUpdatePomodoroSettings = useCallback(
+    (input: PomodoroSettingsDraft) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.updatePomodoroSettings(input);
+      }),
+    [runMutation],
+  );
+
   const handleRetryNotifications = useCallback(
     () =>
       runMutation(async () => {
@@ -1300,11 +1315,13 @@ export function App() {
             <SettingsPanel
               displayMode={displayMode}
               notificationsEnabled={notificationsEnabled}
+              pomodoroSettings={pomodoroSettings}
               isMutating={isMutating}
               notificationSummary={notificationSummary}
               notificationFailureHistory={notificationFailureHistory}
               onUpdateDisplayMode={handleUpdateNotificationDisplayMode}
               onUpdateNotificationsEnabled={handleUpdateNotificationsEnabled}
+              onUpdatePomodoroSettings={handleUpdatePomodoroSettings}
               onRetryNotifications={handleRetryNotifications}
               onCreateSqliteBackup={handleCreateSqliteBackup}
               onRestoreSqliteBackup={handleRestoreSqliteBackup}

@@ -82,6 +82,26 @@ export type NotificationDeliveryAttempt = {
   attemptCount: number;
 };
 
+export type PomodoroSettings = {
+  id: string;
+  workSeconds: number;
+  shortBreakSeconds: number;
+  longBreakSeconds: number;
+  cyclesUntilLongBreak: number;
+  autoStartBreak: boolean;
+  autoStartNextWork: boolean;
+  updatedAt: string;
+};
+
+export type PomodoroSettingsDraft = {
+  workSeconds: number;
+  shortBreakSeconds: number;
+  longBreakSeconds: number;
+  cyclesUntilLongBreak: number;
+  autoStartBreak: boolean;
+  autoStartNextWork: boolean;
+};
+
 export type SqliteBackupManifest = {
   format: string;
   formatVersion: number;
@@ -198,6 +218,8 @@ export type TaskTimerGateway = {
   listCalendarItems(startDate: string, endDate: string): Promise<WeekCalendarItem[]>;
   listWeekCalendarItems(weekStartDate: string): Promise<WeekCalendarItem[]>;
   getActiveTimer(): Promise<ActiveTimer | null>;
+  getPomodoroSettings(): Promise<PomodoroSettings>;
+  updatePomodoroSettings(input: PomodoroSettingsDraft): Promise<PomodoroSettings>;
   getNotificationDisplayMode(): Promise<NotificationDisplayMode>;
   getUiPreferences(): Promise<UiPreferences>;
   updateUiPreferences(input: UiPreferences): Promise<UiPreferences>;
