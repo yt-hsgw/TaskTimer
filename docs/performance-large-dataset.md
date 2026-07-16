@@ -63,6 +63,46 @@ npm run perf:seed -- \
   --days 180
 ```
 
+## Read Model計測
+
+生成したDBに対して、主要Read Model相当のSQLiteクエリを実行時間付きで確認する。
+
+標準データ:
+
+```bash
+npm run perf:measure
+```
+
+スモークデータ:
+
+```bash
+npm run perf:measure -- \
+  --db tmp/perf/tasktimer-smoke.sqlite3 \
+  --threshold-ms 100
+```
+
+CIや厳密な確認で、しきい値超過を失敗扱いにする場合:
+
+```bash
+npm run perf:measure -- --fail-on-warning
+```
+
+計測対象:
+
+| 対象 | 意図 |
+| --- | --- |
+| `task_lists_with_counts` | 左ペインのリスト件数集計。 |
+| `initial_task_tree_200` | 起動時に詳細選択へ使う上限付きタスクツリー取得。 |
+| `task_rows_default_list` | 標準リストの中央一覧Read Model。 |
+| `task_rows_all_lists` | 今日/お気に入りなど横断ビューへ影響する一覧Read Model。 |
+| `calendar_week_2026-07-13` | 週カレンダー範囲取得。 |
+| `calendar_month_2026-07` | 月カレンダー範囲取得。 |
+| `active_timer_lookup` | 単一アクティブタイマー復元。 |
+| `notification_dispatch_candidates` | 期限通知dispatch候補の上限付き取得。 |
+| `task_detail_subtasks` | 右詳細ペインで使う対象タスク配下のサブタスク取得。 |
+
+この計測はDB読み取り時間だけを確認する。React描画、Tauri IPC、OS通知権限、実機GPU/ディスク差はWindows実機の手動計測で確認する。
+
 ## アプリへの配置
 
 既存DBを必ずバックアップしてから検証DBへ差し替える。実業務データをIssue、PR、Release artifactへ添付しない。
@@ -101,13 +141,14 @@ macOSで補助確認する場合の配置先:
 ```mermaid
 flowchart TD
   A["検証DBを生成"] --> B["既存DBをバックアップ"]
-  B --> C["tasktimer.sqlite3 を差し替え"]
-  C --> D["TaskTimerを起動"]
-  D --> E["主要ビューを順に操作"]
-  E --> F["期待値を超えた操作を記録"]
-  F --> G{"操作不能または大幅遅延あり?"}
-  G -- "あり" --> H["再現手順と改善Issueを作成"]
-  G -- "なし" --> I["#72へ結果を記録"]
+  B --> C["perf:measureでRead Model時間を確認"]
+  C --> D["tasktimer.sqlite3 を差し替え"]
+  D --> E["TaskTimerを起動"]
+  E --> F["主要ビューを順に操作"]
+  F --> G["期待値を超えた操作を記録"]
+  G --> H{"操作不能または大幅遅延あり?"}
+  H -- "あり" --> I["再現手順と改善Issueを作成"]
+  H -- "なし" --> J["#72へ結果を記録"]
 ```
 
 ## 計測対象と期待値
@@ -126,11 +167,25 @@ flowchart TD
 | 右詳細ペイン | タスク、サブタスクを選択する | 1秒以内に詳細が表示される |
 | サブタスク展開 | サブタスクありタスクを展開/折りたたみ | 1秒以内に反応する |
 
+DB読み取りの期待値:
+
+| 対象 | 期待値 |
+| --- | --- |
+| `perf:measure` 標準データ | 各Read Model相当クエリが250ms以内、超過時はWARNとして記録する。 |
+| `perf:measure` スモークデータ | 各Read Model相当クエリが100ms以内。 |
+
 ## 記録テンプレート
 
 | 日時 | OS/端末 | TaskTimer commit | データ規模 | 対象 | 操作時間 | 結果 | メモ |
 | --- | --- | --- | --- | --- | ---: | --- | --- |
 | 2026-07-14 | Windows 11 / CPU / RAM | `<commit>` | 5k/20k/50k | タスク一覧 | 未計測 | 未実施 |  |
+
+Read Model計測結果:
+
+| 日時 | OS/端末 | TaskTimer commit | データ規模 | コマンド | WARN件数 | メモ |
+| --- | --- | --- | --- | --- | ---: | --- |
+| 2026-07-16 | Darwin 25.5.0 arm64 / Apple M1 | `dc1114f` + PR差分 | smoke 50/200/500 | `npm run perf:measure -- --db tmp/perf/tasktimer-smoke.sqlite3 --threshold-ms 100 --fail-on-warning` | 0 | 最大0ms。 |
+| 2026-07-16 | Darwin 25.5.0 arm64 / Apple M1 | `dc1114f` + PR差分 | standard 5k/20k/50k | `npm run perf:measure -- --fail-on-warning` | 0 | 最大61ms。Windows GUI描画は未計測。 |
 
 ## SQL確認
 
@@ -161,6 +216,8 @@ WHERE deleted_at IS NULL
 ## 設計判断
 
 - 検証データは本番スキーマへ直接投入するが、通常Use Caseのトランザクション境界は変更しない。
+- Read Model計測は検証用binで実行し、Application Use CaseやRepository実装の状態変更境界は変更しない。
+- `perf:seed` は初期マイグレーションSQLを直接使ったあと、UI Read Model用インデックスを検証DBへ作成する。
 - 生成データは合成文字列のみとし、個人のタスク名、メモ本文、SQLite DBを公開場所へ添付しない。
 - アプリ実行時の外部通信、分析SDK、新しいTauri権限は追加しない。
 - 右詳細ペインのタイマー履歴は、今後表示件数を増やす場合でも上限またはページングを前提にする。

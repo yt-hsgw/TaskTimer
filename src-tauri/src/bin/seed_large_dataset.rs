@@ -83,6 +83,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut connection = Connection::open(&config.out)?;
     connection.pragma_update(None, "foreign_keys", "ON")?;
     connection.execute_batch(INITIAL_SCHEMA)?;
+    create_performance_indexes(&connection)?;
 
     seed_database(&mut connection, &config)?;
     connection.execute_batch("PRAGMA optimize;")?;
@@ -341,6 +342,37 @@ fn seed_database(connection: &mut Connection, config: &Config) -> Result<(), Box
     }
 
     transaction.commit()?;
+    Ok(())
+}
+
+fn create_performance_indexes(connection: &Connection) -> Result<(), Box<dyn Error>> {
+    connection.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS task_lists_order_idx
+        ON task_lists (sort_order, created_at)
+        WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS tasks_list_status_idx
+        ON tasks (list_id, status, sort_order, created_at)
+        WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS tasks_favorite_idx
+        ON tasks (is_favorite, sort_order, created_at)
+        WHERE deleted_at IS NULL AND is_favorite = 1;
+
+        CREATE INDEX IF NOT EXISTS tasks_due_time_idx
+        ON tasks (due_date, due_time)
+        WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS subtasks_task_status_idx
+        ON subtasks (task_id, status)
+        WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS subtasks_due_time_idx
+        ON subtasks (due_date, due_time)
+        WHERE deleted_at IS NULL;
+        ",
+    )?;
     Ok(())
 }
 

@@ -14,6 +14,8 @@ const runtimeSourceTargets = [
 const runtimeSourceExclusions = new Set([
   // 開発・検証用CLI。Tauriアプリ本体には組み込まれず、合成データ生成結果だけを標準出力へ表示する。
   "src-tauri/src/bin/seed_large_dataset.rs",
+  // 開発・検証用CLI。Tauriアプリ本体には組み込まれず、合成DBのRead Model計測結果だけを標準出力へ表示する。
+  "src-tauri/src/bin/measure_large_dataset.rs",
 ]);
 
 const jsForbiddenPatterns = [
