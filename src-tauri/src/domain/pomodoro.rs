@@ -83,3 +83,11 @@ pub fn validate_pomodoro_cycles_until_long_break(value: i64) -> Result<i64, Stri
     }
     Ok(value)
 }
+
+pub fn next_break_phase(completed_work_count: i64, cycles_until_long_break: i64) -> PomodoroPhase {
+    if completed_work_count > 0 && completed_work_count % cycles_until_long_break == 0 {
+        PomodoroPhase::LongBreak
+    } else {
+        PomodoroPhase::ShortBreak
+    }
+}

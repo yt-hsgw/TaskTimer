@@ -299,7 +299,10 @@ erDiagram
 - `status` は `running`, `paused`, `completed`, `cancelled`。
 - `running` または `paused` のポモドーロはアプリ全体で最大1件。
 - 作業フェーズは `timer_sessions` を同一トランザクションで作成し、実作業時間履歴として扱う。
+- 作業フェーズ完了時は `timer_sessions.elapsed_seconds` を確定し、`cycle_count` を1加算する。
 - 休憩フェーズは `timer_sessions` に保存しない。
+- 休憩フェーズの一時停止秒数は `pomodoro_sessions.paused_total_seconds` を正とする。
+- 休憩スキップ時は開始中の休憩を `cancelled` にし、次の作業フェーズを新しい `timer_sessions` として開始する。
 - 対象削除時はソフト削除し、アクティブポモドーロ検索から除外する。
 
 ### NotificationRule
@@ -390,6 +393,7 @@ erDiagram
 
 - 作業/休憩秒数と長休憩までの作業回数が許容範囲内である。
 - 作業フェーズだけが `timer_sessions` と紐づく。
+- 完了済み作業フェーズの `cycle_count` に応じて短休憩/長休憩を判定する。
 - 通常タイマーとポモドーロを合わせて単一アクティブ制約を満たす。
 - 対象削除時にポモドーロセッションが孤立しない。
 

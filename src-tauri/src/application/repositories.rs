@@ -415,6 +415,28 @@ pub trait PomodoroRepository {
         target: WorkTargetRef,
         now: String,
     ) -> RepositoryResult<ActivePomodoro>;
+
+    fn pause_pomodoro(&self, now: String) -> RepositoryResult<ActivePomodoro>;
+
+    fn resume_pomodoro(&self, now: String) -> RepositoryResult<ActivePomodoro>;
+
+    fn complete_pomodoro_work_phase(&self, now: String) -> RepositoryResult<ActivePomodoro>;
+
+    fn start_pomodoro_break(
+        &self,
+        pomodoro_session_id: String,
+        now: String,
+    ) -> RepositoryResult<ActivePomodoro>;
+
+    fn skip_pomodoro_break(
+        &self,
+        pomodoro_session_id: String,
+        now: String,
+    ) -> RepositoryResult<ActivePomodoro>;
+
+    fn complete_pomodoro_break(&self, now: String) -> RepositoryResult<ActivePomodoro>;
+
+    fn cancel_pomodoro(&self, now: String) -> RepositoryResult<ActivePomodoro>;
 }
 
 pub trait TaskReadRepository {

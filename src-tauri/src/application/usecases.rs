@@ -326,6 +326,59 @@ pub fn start_pomodoro(
     repository.start_pomodoro(target, clock.now_utc_iso8601())
 }
 
+pub fn pause_pomodoro(
+    repository: &impl PomodoroRepository,
+    clock: &impl Clock,
+) -> RepositoryResult<ActivePomodoro> {
+    repository.pause_pomodoro(clock.now_utc_iso8601())
+}
+
+pub fn resume_pomodoro(
+    repository: &impl PomodoroRepository,
+    clock: &impl Clock,
+) -> RepositoryResult<ActivePomodoro> {
+    repository.resume_pomodoro(clock.now_utc_iso8601())
+}
+
+pub fn complete_pomodoro_work_phase(
+    repository: &impl PomodoroRepository,
+    clock: &impl Clock,
+) -> RepositoryResult<ActivePomodoro> {
+    repository.complete_pomodoro_work_phase(clock.now_utc_iso8601())
+}
+
+pub fn start_pomodoro_break(
+    repository: &impl PomodoroRepository,
+    clock: &impl Clock,
+    pomodoro_session_id: String,
+) -> RepositoryResult<ActivePomodoro> {
+    let pomodoro_session_id = validate_identifier(&pomodoro_session_id, "ポモドーロセッションID")?;
+    repository.start_pomodoro_break(pomodoro_session_id, clock.now_utc_iso8601())
+}
+
+pub fn skip_pomodoro_break(
+    repository: &impl PomodoroRepository,
+    clock: &impl Clock,
+    pomodoro_session_id: String,
+) -> RepositoryResult<ActivePomodoro> {
+    let pomodoro_session_id = validate_identifier(&pomodoro_session_id, "ポモドーロセッションID")?;
+    repository.skip_pomodoro_break(pomodoro_session_id, clock.now_utc_iso8601())
+}
+
+pub fn complete_pomodoro_break(
+    repository: &impl PomodoroRepository,
+    clock: &impl Clock,
+) -> RepositoryResult<ActivePomodoro> {
+    repository.complete_pomodoro_break(clock.now_utc_iso8601())
+}
+
+pub fn cancel_pomodoro(
+    repository: &impl PomodoroRepository,
+    clock: &impl Clock,
+) -> RepositoryResult<ActivePomodoro> {
+    repository.cancel_pomodoro(clock.now_utc_iso8601())
+}
+
 pub fn pause_active_timer(
     repository: &impl TaskTimerCommandRepository,
     clock: &impl Clock,

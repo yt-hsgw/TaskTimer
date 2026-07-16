@@ -39,9 +39,10 @@ use crate::{
             NotificationRegistrationStatus,
         },
         pomodoro::{
-            PomodoroPhase, PomodoroStatus, DEFAULT_POMODORO_CYCLES_UNTIL_LONG_BREAK,
-            DEFAULT_POMODORO_LONG_BREAK_SECONDS, DEFAULT_POMODORO_SETTINGS_ID,
-            DEFAULT_POMODORO_SHORT_BREAK_SECONDS, DEFAULT_POMODORO_WORK_SECONDS,
+            next_break_phase, PomodoroPhase, PomodoroStatus,
+            DEFAULT_POMODORO_CYCLES_UNTIL_LONG_BREAK, DEFAULT_POMODORO_LONG_BREAK_SECONDS,
+            DEFAULT_POMODORO_SETTINGS_ID, DEFAULT_POMODORO_SHORT_BREAK_SECONDS,
+            DEFAULT_POMODORO_WORK_SECONDS,
         },
         recurrence::RecurrenceFrequency,
         task::{
@@ -545,6 +546,352 @@ impl PomodoroRepository for SqliteDatabase {
 
             mark_target_in_progress(transaction, &target, &now)?;
             select_active_pomodoro_by_id(transaction, &pomodoro_id)
+        })
+    }
+
+    fn pause_pomodoro(&self, now: String) -> RepositoryResult<ActivePomodoro> {
+        self.with_transaction(|transaction| {
+            let active = select_active_pomodoro(transaction)?
+                .ok_or_else(|| "開始中のポモドーロがありません".to_string())?;
+            if active.status == PomodoroStatus::Paused {
+                return Ok(active);
+            }
+
+            match &active.phase {
+                PomodoroPhase::Work => {
+                    let timer_id = active
+                        .timer_session_id
+                        .as_deref()
+                        .ok_or_else(|| "作業フェーズにタイマー履歴がありません".to_string())?;
+                    let active_timer = select_active_timer_by_id(transaction, timer_id)?;
+                    if active_timer.paused_at.is_none() {
+                        transaction
+                            .execute(
+                                "
+                                INSERT INTO timer_pauses (
+                                  id, timer_session_id, paused_at, created_at
+                                )
+                                VALUES (?1, ?2, ?3, ?3)
+                                ",
+                                params![Uuid::new_v4().to_string(), timer_id, now],
+                            )
+                            .map_err(|error| {
+                                format!("ポモドーロ用タイマーを一時停止できません: {error}")
+                            })?;
+                    }
+                    pause_pomodoro_for_timer(transaction, timer_id, &now)?;
+                }
+                PomodoroPhase::ShortBreak | PomodoroPhase::LongBreak => {
+                    let updated = transaction
+                        .execute(
+                            "
+                            UPDATE pomodoro_sessions
+                            SET status = 'paused',
+                                paused_at = ?1,
+                                updated_at = ?1
+                            WHERE id = ?2
+                              AND status = 'running'
+                              AND deleted_at IS NULL
+                            ",
+                            params![now, active.id.as_str()],
+                        )
+                        .map_err(|error| format!("ポモドーロ休憩を一時停止できません: {error}"))?;
+                    if updated != 1 {
+                        return Err("開始中のポモドーロ休憩を一時停止できませんでした".to_string());
+                    }
+                }
+            }
+
+            select_active_pomodoro_by_id(transaction, &active.id)
+        })
+    }
+
+    fn resume_pomodoro(&self, now: String) -> RepositoryResult<ActivePomodoro> {
+        self.with_transaction(|transaction| {
+            let active = select_active_pomodoro(transaction)?
+                .ok_or_else(|| "開始中のポモドーロがありません".to_string())?;
+            if active.status == PomodoroStatus::Running {
+                return Ok(active);
+            }
+
+            match &active.phase {
+                PomodoroPhase::Work => {
+                    let timer_id = active
+                        .timer_session_id
+                        .as_deref()
+                        .ok_or_else(|| "作業フェーズにタイマー履歴がありません".to_string())?;
+                    let updated = transaction
+                        .execute(
+                            "
+                            UPDATE timer_pauses
+                            SET resumed_at = ?1
+                            WHERE timer_session_id = ?2
+                              AND resumed_at IS NULL
+                              AND deleted_at IS NULL
+                            ",
+                            params![now, timer_id],
+                        )
+                        .map_err(|error| {
+                            format!("ポモドーロ用タイマーを再開できません: {error}")
+                        })?;
+                    if updated != 1 {
+                        return Err(
+                            "一時停止中のポモドーロ用タイマーを再開できませんでした".to_string()
+                        );
+                    }
+                    resume_pomodoro_for_timer(transaction, timer_id, &now)?;
+                }
+                PomodoroPhase::ShortBreak | PomodoroPhase::LongBreak => {
+                    let paused_at = active.paused_at.as_deref().ok_or_else(|| {
+                        "一時停止中のポモドーロ休憩を取得できませんでした".to_string()
+                    })?;
+                    let paused_seconds = calculate_duration_seconds(paused_at, &now)?;
+                    let updated = transaction
+                        .execute(
+                            "
+                            UPDATE pomodoro_sessions
+                            SET status = 'running',
+                                paused_at = NULL,
+                                paused_total_seconds = paused_total_seconds + ?1,
+                                updated_at = ?2
+                            WHERE id = ?3
+                              AND status = 'paused'
+                              AND deleted_at IS NULL
+                            ",
+                            params![paused_seconds, now, active.id.as_str()],
+                        )
+                        .map_err(|error| format!("ポモドーロ休憩を再開できません: {error}"))?;
+                    if updated != 1 {
+                        return Err("一時停止中のポモドーロ休憩を再開できませんでした".to_string());
+                    }
+                }
+            }
+
+            select_active_pomodoro_by_id(transaction, &active.id)
+        })
+    }
+
+    fn complete_pomodoro_work_phase(&self, now: String) -> RepositoryResult<ActivePomodoro> {
+        self.with_transaction(|transaction| {
+            let active = select_active_pomodoro(transaction)?
+                .ok_or_else(|| "開始中のポモドーロがありません".to_string())?;
+            if active.phase != PomodoroPhase::Work {
+                return Err("作業フェーズのポモドーロだけ完了できます".to_string());
+            }
+
+            let paused_seconds = stop_work_timer_for_pomodoro(transaction, &active, &now)?;
+            let completed_cycle_count = active.cycle_count + 1;
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE pomodoro_sessions
+                    SET status = 'completed',
+                        cycle_count = ?1,
+                        paused_at = NULL,
+                        paused_total_seconds = ?2,
+                        completed_at = ?3,
+                        updated_at = ?3
+                    WHERE id = ?4
+                      AND status IN ('running', 'paused')
+                      AND deleted_at IS NULL
+                    ",
+                    params![
+                        completed_cycle_count,
+                        paused_seconds,
+                        now,
+                        active.id.as_str()
+                    ],
+                )
+                .map_err(|error| format!("ポモドーロ作業フェーズを完了できません: {error}"))?;
+            if updated != 1 {
+                return Err("開始中のポモドーロ作業フェーズを完了できませんでした".to_string());
+            }
+
+            select_pomodoro_session_by_id(transaction, &active.id)
+        })
+    }
+
+    fn start_pomodoro_break(
+        &self,
+        pomodoro_session_id: String,
+        now: String,
+    ) -> RepositoryResult<ActivePomodoro> {
+        self.with_transaction(|transaction| {
+            let work_session = select_pomodoro_session_by_id(transaction, &pomodoro_session_id)?;
+            if work_session.phase != PomodoroPhase::Work
+                || work_session.status != PomodoroStatus::Completed
+            {
+                return Err(
+                    "完了済みのポモドーロ作業フェーズから休憩を開始してください".to_string()
+                );
+            }
+            ensure_pomodoro_target_available(transaction, &work_session.target)?;
+            ensure_no_active_timer(transaction)?;
+            ensure_no_active_pomodoro(transaction)?;
+
+            let settings = select_pomodoro_settings(transaction)?;
+            let phase =
+                next_break_phase(work_session.cycle_count, settings.cycles_until_long_break);
+            let phase_duration_seconds = pomodoro_phase_duration_seconds(&settings, &phase);
+            let pomodoro_id = Uuid::new_v4().to_string();
+            transaction
+                .execute(
+                    "
+                    INSERT INTO pomodoro_sessions (
+                      id, target_type, target_id, timer_session_id, phase, status,
+                      cycle_count, phase_started_at, phase_duration_seconds,
+                      paused_total_seconds, created_at, updated_at
+                    )
+                    VALUES (?1, ?2, ?3, NULL, ?4, 'running', ?5, ?6, ?7, 0, ?6, ?6)
+                    ",
+                    params![
+                        pomodoro_id,
+                        work_session.target.target_type.as_str(),
+                        work_session.target.id,
+                        phase.as_str(),
+                        work_session.cycle_count,
+                        now,
+                        phase_duration_seconds
+                    ],
+                )
+                .map_err(|error| format!("ポモドーロ休憩を開始できません: {error}"))?;
+
+            select_active_pomodoro_by_id(transaction, &pomodoro_id)
+        })
+    }
+
+    fn skip_pomodoro_break(
+        &self,
+        pomodoro_session_id: String,
+        now: String,
+    ) -> RepositoryResult<ActivePomodoro> {
+        self.with_transaction(|transaction| {
+            let source = select_pomodoro_session_by_id(transaction, &pomodoro_session_id)?;
+            let target = source.target.clone();
+            let next_cycle_count = source.cycle_count;
+
+            match (&source.phase, &source.status) {
+                (PomodoroPhase::Work, PomodoroStatus::Completed)
+                | (PomodoroPhase::ShortBreak, PomodoroStatus::Running)
+                | (PomodoroPhase::ShortBreak, PomodoroStatus::Paused)
+                | (PomodoroPhase::ShortBreak, PomodoroStatus::Completed)
+                | (PomodoroPhase::LongBreak, PomodoroStatus::Running)
+                | (PomodoroPhase::LongBreak, PomodoroStatus::Paused)
+                | (PomodoroPhase::LongBreak, PomodoroStatus::Completed) => {}
+                _ => {
+                    return Err(
+                        "完了済み作業フェーズ、または休憩フェーズから次の作業を開始してください"
+                            .to_string(),
+                    );
+                }
+            }
+
+            let status = find_target_status(transaction, &target)?.ok_or_else(|| {
+                "ポモドーロ対象のタスクまたはサブタスクが存在しません".to_string()
+            })?;
+            assert_timer_startable(&status)?;
+            ensure_no_active_timer(transaction)?;
+            ensure_no_active_pomodoro_except(transaction, &source.id)?;
+
+            if source.phase != PomodoroPhase::Work && source.status != PomodoroStatus::Completed {
+                let paused_seconds = accumulated_pomodoro_pause_seconds(&source, &now)?;
+                let updated = transaction
+                    .execute(
+                        "
+                        UPDATE pomodoro_sessions
+                        SET status = 'cancelled',
+                            paused_at = NULL,
+                            paused_total_seconds = ?1,
+                            cancelled_at = ?2,
+                            updated_at = ?2
+                        WHERE id = ?3
+                          AND status IN ('running', 'paused')
+                          AND deleted_at IS NULL
+                        ",
+                        params![paused_seconds, now, source.id.as_str()],
+                    )
+                    .map_err(|error| format!("ポモドーロ休憩をスキップできません: {error}"))?;
+                if updated != 1 {
+                    return Err("開始中のポモドーロ休憩をスキップできませんでした".to_string());
+                }
+            }
+
+            let settings = select_pomodoro_settings(transaction)?;
+            insert_pomodoro_work_phase(
+                transaction,
+                &target,
+                next_cycle_count,
+                &now,
+                settings.work_seconds,
+            )
+        })
+    }
+
+    fn complete_pomodoro_break(&self, now: String) -> RepositoryResult<ActivePomodoro> {
+        self.with_transaction(|transaction| {
+            let active = select_active_pomodoro(transaction)?
+                .ok_or_else(|| "開始中のポモドーロがありません".to_string())?;
+            if active.phase == PomodoroPhase::Work {
+                return Err("休憩フェーズのポモドーロだけ完了できます".to_string());
+            }
+
+            let paused_seconds = accumulated_pomodoro_pause_seconds(&active, &now)?;
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE pomodoro_sessions
+                    SET status = 'completed',
+                        paused_at = NULL,
+                        paused_total_seconds = ?1,
+                        completed_at = ?2,
+                        updated_at = ?2
+                    WHERE id = ?3
+                      AND status IN ('running', 'paused')
+                      AND deleted_at IS NULL
+                    ",
+                    params![paused_seconds, now, active.id.as_str()],
+                )
+                .map_err(|error| format!("ポモドーロ休憩を完了できません: {error}"))?;
+            if updated != 1 {
+                return Err("開始中のポモドーロ休憩を完了できませんでした".to_string());
+            }
+
+            select_pomodoro_session_by_id(transaction, &active.id)
+        })
+    }
+
+    fn cancel_pomodoro(&self, now: String) -> RepositoryResult<ActivePomodoro> {
+        self.with_transaction(|transaction| {
+            let active = select_active_pomodoro(transaction)?
+                .ok_or_else(|| "開始中のポモドーロがありません".to_string())?;
+            let paused_seconds = match &active.phase {
+                PomodoroPhase::Work => stop_work_timer_for_pomodoro(transaction, &active, &now)?,
+                PomodoroPhase::ShortBreak | PomodoroPhase::LongBreak => {
+                    accumulated_pomodoro_pause_seconds(&active, &now)?
+                }
+            };
+
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE pomodoro_sessions
+                    SET status = 'cancelled',
+                        paused_at = NULL,
+                        paused_total_seconds = ?1,
+                        cancelled_at = ?2,
+                        updated_at = ?2
+                    WHERE id = ?3
+                      AND status IN ('running', 'paused')
+                      AND deleted_at IS NULL
+                    ",
+                    params![paused_seconds, now, active.id.as_str()],
+                )
+                .map_err(|error| format!("ポモドーロをキャンセルできません: {error}"))?;
+            if updated != 1 {
+                return Err("開始中のポモドーロをキャンセルできませんでした".to_string());
+            }
+
+            select_pomodoro_session_by_id(transaction, &active.id)
         })
     }
 }
@@ -3617,6 +3964,33 @@ fn ensure_no_active_pomodoro(connection: &Connection) -> RepositoryResult<()> {
     }
 }
 
+fn ensure_no_active_pomodoro_except(
+    connection: &Connection,
+    allowed_id: &str,
+) -> RepositoryResult<()> {
+    let active_id: Option<String> = connection
+        .query_row(
+            "
+            SELECT id
+            FROM pomodoro_sessions
+            WHERE status IN ('running', 'paused')
+              AND deleted_at IS NULL
+            LIMIT 1
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("アクティブポモドーロを確認できません: {error}"))?;
+
+    match active_id {
+        Some(active_id) if active_id != allowed_id => {
+            Err("すでに開始中のポモドーロがあります".to_string())
+        }
+        _ => Ok(()),
+    }
+}
+
 fn next_task_sort_order(connection: &Connection, list_id: &str) -> RepositoryResult<i64> {
     connection
         .query_row(
@@ -4377,6 +4751,39 @@ fn select_active_pomodoro_by_id(
         .map_err(|error| format!("開始したポモドーロを取得できません: {error}"))
 }
 
+fn select_pomodoro_session_by_id(
+    connection: &Connection,
+    id: &str,
+) -> RepositoryResult<ActivePomodoro> {
+    connection
+        .query_row(
+            "
+            SELECT id,
+                   target_type,
+                   target_id,
+                   timer_session_id,
+                   phase,
+                   status,
+                   cycle_count,
+                   phase_started_at,
+                   phase_duration_seconds,
+                   paused_at,
+                   paused_total_seconds,
+                   completed_at,
+                   cancelled_at,
+                   deleted_at,
+                   created_at,
+                   updated_at
+            FROM pomodoro_sessions
+            WHERE id = ?1
+              AND deleted_at IS NULL
+            ",
+            params![id],
+            map_active_pomodoro_row,
+        )
+        .map_err(|error| format!("ポモドーロセッションを取得できません: {error}"))
+}
+
 fn map_active_pomodoro_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActivePomodoro> {
     let target_type_text: String = row.get(1)?;
     let target_type = WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?;
@@ -4399,6 +4806,134 @@ fn map_active_pomodoro_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActivePo
         created_at: row.get(14)?,
         updated_at: row.get(15)?,
     })
+}
+
+fn ensure_pomodoro_target_available(
+    connection: &Connection,
+    target: &WorkTargetRef,
+) -> RepositoryResult<()> {
+    let status = find_target_status(connection, target)?
+        .ok_or_else(|| "ポモドーロ対象のタスクまたはサブタスクが存在しません".to_string())?;
+    if status == WorkStatus::Archived {
+        return Err("アーカイブ済みのタスクではポモドーロを継続できません".to_string());
+    }
+
+    Ok(())
+}
+
+fn pomodoro_phase_duration_seconds(
+    settings: &PomodoroSettingsRecord,
+    phase: &PomodoroPhase,
+) -> i64 {
+    match phase {
+        PomodoroPhase::Work => settings.work_seconds,
+        PomodoroPhase::ShortBreak => settings.short_break_seconds,
+        PomodoroPhase::LongBreak => settings.long_break_seconds,
+    }
+}
+
+fn accumulated_pomodoro_pause_seconds(
+    pomodoro: &ActivePomodoro,
+    now: &str,
+) -> RepositoryResult<i64> {
+    let open_pause_seconds = pomodoro
+        .paused_at
+        .as_deref()
+        .map(|paused_at| calculate_duration_seconds(paused_at, now))
+        .transpose()?
+        .unwrap_or(0);
+
+    Ok(pomodoro.paused_total_seconds + open_pause_seconds)
+}
+
+fn stop_work_timer_for_pomodoro(
+    transaction: &Transaction<'_>,
+    pomodoro: &ActivePomodoro,
+    now: &str,
+) -> RepositoryResult<i64> {
+    if pomodoro.phase != PomodoroPhase::Work {
+        return Err("作業フェーズ以外は作業タイマーを停止できません".to_string());
+    }
+    let timer_id = pomodoro
+        .timer_session_id
+        .as_deref()
+        .ok_or_else(|| "作業フェーズにタイマー履歴がありません".to_string())?;
+    let active_timer = select_active_timer_by_id(transaction, timer_id)?;
+    close_open_pause_for_timer(transaction, timer_id, now)?;
+    let paused_seconds = total_pause_seconds(transaction, timer_id, now)?;
+    let (stopped_at, elapsed_seconds) =
+        calculate_stop_values(&active_timer.started_at, now, paused_seconds)?;
+
+    let updated = transaction
+        .execute(
+            "
+            UPDATE timer_sessions
+            SET stopped_at = ?1,
+                elapsed_seconds = ?2
+            WHERE id = ?3
+              AND stopped_at IS NULL
+              AND deleted_at IS NULL
+            ",
+            params![stopped_at, elapsed_seconds, timer_id],
+        )
+        .map_err(|error| format!("ポモドーロ用タイマーを停止できません: {error}"))?;
+    if updated != 1 {
+        return Err("開始中のポモドーロ用タイマーを停止できませんでした".to_string());
+    }
+
+    Ok(paused_seconds)
+}
+
+fn insert_pomodoro_work_phase(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    cycle_count: i64,
+    now: &str,
+    work_seconds: i64,
+) -> RepositoryResult<ActivePomodoro> {
+    let timer_id = Uuid::new_v4().to_string();
+    transaction
+        .execute(
+            "
+            INSERT INTO timer_sessions (
+              id, target_type, target_id, started_at, created_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?4)
+            ",
+            params![
+                timer_id,
+                target.target_type.as_str(),
+                target.id.as_str(),
+                now
+            ],
+        )
+        .map_err(|error| format!("ポモドーロ用タイマーを開始できません: {error}"))?;
+
+    let pomodoro_id = Uuid::new_v4().to_string();
+    transaction
+        .execute(
+            "
+            INSERT INTO pomodoro_sessions (
+              id, target_type, target_id, timer_session_id, phase, status,
+              cycle_count, phase_started_at, phase_duration_seconds,
+              paused_total_seconds, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, 'work', 'running', ?5, ?6, ?7, 0, ?6, ?6)
+            ",
+            params![
+                pomodoro_id,
+                target.target_type.as_str(),
+                target.id.as_str(),
+                timer_id,
+                cycle_count,
+                now,
+                work_seconds
+            ],
+        )
+        .map_err(|error| format!("ポモドーロ作業フェーズを開始できません: {error}"))?;
+
+    mark_target_in_progress(transaction, target, now)?;
+    select_active_pomodoro_by_id(transaction, &pomodoro_id)
 }
 
 fn close_open_pause_for_timer(
@@ -7024,6 +7559,323 @@ mod tests {
         assert_eq!(status, PomodoroStatus::Cancelled.as_str());
         assert_eq!(cancelled_at, "2026-07-06T00:07:00Z");
         assert_eq!(paused_total_seconds, 180);
+    }
+
+    #[test]
+    fn pomodoro_work_can_pause_resume_complete_and_start_short_break() {
+        let database = in_memory_database();
+        let start_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let pause_clock = FixedClock {
+            now: "2026-07-06T00:05:00Z",
+        };
+        let resume_clock = FixedClock {
+            now: "2026-07-06T00:07:00Z",
+        };
+        let complete_clock = FixedClock {
+            now: "2026-07-06T00:12:00Z",
+        };
+        let break_clock = FixedClock {
+            now: "2026-07-06T00:12:30Z",
+        };
+        let task =
+            usecases::create_task(&database, &start_clock, draft("ポモドーロ完了")).expect("task");
+        let pomodoro = usecases::start_pomodoro(
+            &database,
+            &start_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start pomodoro");
+        let timer_id = pomodoro.timer_session_id.clone().expect("work phase timer");
+
+        let paused =
+            usecases::pause_pomodoro(&database, &pause_clock).expect("pause pomodoro work");
+        assert_eq!(paused.status, PomodoroStatus::Paused);
+        assert_eq!(paused.paused_at.as_deref(), Some("2026-07-06T00:05:00Z"));
+
+        let resumed =
+            usecases::resume_pomodoro(&database, &resume_clock).expect("resume pomodoro work");
+        assert_eq!(resumed.status, PomodoroStatus::Running);
+        assert_eq!(resumed.paused_at, None);
+        assert_eq!(resumed.paused_total_seconds, 120);
+
+        let completed = usecases::complete_pomodoro_work_phase(&database, &complete_clock)
+            .expect("complete pomodoro work");
+        let stopped_timer = database
+            .with_connection(|connection| select_timer_by_id(connection, &timer_id))
+            .expect("stopped pomodoro timer");
+        assert_eq!(completed.status, PomodoroStatus::Completed);
+        assert_eq!(completed.phase, PomodoroPhase::Work);
+        assert_eq!(completed.cycle_count, 1);
+        assert_eq!(completed.paused_total_seconds, 120);
+        assert_eq!(
+            completed.completed_at.as_deref(),
+            Some("2026-07-06T00:12:00Z")
+        );
+        assert_eq!(stopped_timer.elapsed_seconds, Some(600));
+        assert!(database.get_active_timer().expect("active timer").is_none());
+        assert!(usecases::get_active_pomodoro(&database)
+            .expect("active pomodoro")
+            .is_none());
+
+        let break_session = usecases::start_pomodoro_break(&database, &break_clock, completed.id)
+            .expect("start break");
+        assert_eq!(break_session.phase, PomodoroPhase::ShortBreak);
+        assert_eq!(break_session.status, PomodoroStatus::Running);
+        assert_eq!(break_session.cycle_count, 1);
+        assert_eq!(
+            break_session.phase_duration_seconds,
+            DEFAULT_POMODORO_SHORT_BREAK_SECONDS
+        );
+        assert_eq!(break_session.timer_session_id, None);
+        assert!(database.get_active_timer().expect("active timer").is_none());
+    }
+
+    #[test]
+    fn pomodoro_uses_long_break_after_configured_cycle_count() {
+        let database = in_memory_database();
+        let settings_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        usecases::update_pomodoro_settings(
+            &database,
+            &settings_clock,
+            usecases::PomodoroSettingsDraft {
+                work_seconds: 60,
+                short_break_seconds: 60,
+                long_break_seconds: 120,
+                cycles_until_long_break: 2,
+                auto_start_break: false,
+                auto_start_next_work: false,
+            },
+        )
+        .expect("settings");
+        let task =
+            usecases::create_task(&database, &settings_clock, draft("長い休憩")).expect("task");
+
+        usecases::start_pomodoro(
+            &database,
+            &settings_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start first work");
+        let first_completed = usecases::complete_pomodoro_work_phase(
+            &database,
+            &FixedClock {
+                now: "2026-07-06T00:01:00Z",
+            },
+        )
+        .expect("complete first work");
+        usecases::skip_pomodoro_break(
+            &database,
+            &FixedClock {
+                now: "2026-07-06T00:01:30Z",
+            },
+            first_completed.id,
+        )
+        .expect("skip first break");
+        let second_completed = usecases::complete_pomodoro_work_phase(
+            &database,
+            &FixedClock {
+                now: "2026-07-06T00:02:30Z",
+            },
+        )
+        .expect("complete second work");
+
+        let break_session = usecases::start_pomodoro_break(
+            &database,
+            &FixedClock {
+                now: "2026-07-06T00:03:00Z",
+            },
+            second_completed.id,
+        )
+        .expect("start long break");
+
+        assert_eq!(break_session.phase, PomodoroPhase::LongBreak);
+        assert_eq!(break_session.cycle_count, 2);
+        assert_eq!(break_session.phase_duration_seconds, 120);
+    }
+
+    #[test]
+    fn pomodoro_break_pause_resume_and_complete_tracks_pause_seconds() {
+        let database = in_memory_database();
+        let start_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task = usecases::create_task(&database, &start_clock, draft("休憩完了")).expect("task");
+        usecases::start_pomodoro(
+            &database,
+            &start_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start work");
+        let completed_work = usecases::complete_pomodoro_work_phase(
+            &database,
+            &FixedClock {
+                now: "2026-07-06T00:25:00Z",
+            },
+        )
+        .expect("complete work");
+        usecases::start_pomodoro_break(
+            &database,
+            &FixedClock {
+                now: "2026-07-06T00:25:00Z",
+            },
+            completed_work.id,
+        )
+        .expect("start break");
+
+        let paused = usecases::pause_pomodoro(
+            &database,
+            &FixedClock {
+                now: "2026-07-06T00:26:00Z",
+            },
+        )
+        .expect("pause break");
+        assert_eq!(paused.status, PomodoroStatus::Paused);
+        assert_eq!(paused.paused_at.as_deref(), Some("2026-07-06T00:26:00Z"));
+
+        let resumed = usecases::resume_pomodoro(
+            &database,
+            &FixedClock {
+                now: "2026-07-06T00:28:00Z",
+            },
+        )
+        .expect("resume break");
+        assert_eq!(resumed.status, PomodoroStatus::Running);
+        assert_eq!(resumed.paused_total_seconds, 120);
+
+        let completed_break = usecases::complete_pomodoro_break(
+            &database,
+            &FixedClock {
+                now: "2026-07-06T00:30:00Z",
+            },
+        )
+        .expect("complete break");
+
+        assert_eq!(completed_break.status, PomodoroStatus::Completed);
+        assert_eq!(completed_break.phase, PomodoroPhase::ShortBreak);
+        assert_eq!(completed_break.paused_total_seconds, 120);
+        assert!(usecases::get_active_pomodoro(&database)
+            .expect("active pomodoro")
+            .is_none());
+        assert!(database.get_active_timer().expect("active timer").is_none());
+    }
+
+    #[test]
+    fn pomodoro_skip_break_cancels_break_and_starts_next_work() {
+        let database = in_memory_database();
+        let start_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &start_clock, draft("休憩スキップ")).expect("task");
+        usecases::start_pomodoro(
+            &database,
+            &start_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start work");
+        let completed_work = usecases::complete_pomodoro_work_phase(
+            &database,
+            &FixedClock {
+                now: "2026-07-06T00:25:00Z",
+            },
+        )
+        .expect("complete work");
+        let break_session = usecases::start_pomodoro_break(
+            &database,
+            &FixedClock {
+                now: "2026-07-06T00:25:00Z",
+            },
+            completed_work.id,
+        )
+        .expect("start break");
+
+        let next_work = usecases::skip_pomodoro_break(
+            &database,
+            &FixedClock {
+                now: "2026-07-06T00:26:00Z",
+            },
+            break_session.id.clone(),
+        )
+        .expect("skip break");
+        let skipped_break = database
+            .with_connection(|connection| {
+                select_pomodoro_session_by_id(connection, &break_session.id)
+            })
+            .expect("skipped break");
+        let active_timer = database
+            .get_active_timer()
+            .expect("active timer")
+            .expect("next work timer");
+
+        assert_eq!(skipped_break.status, PomodoroStatus::Cancelled);
+        assert_eq!(
+            skipped_break.cancelled_at.as_deref(),
+            Some("2026-07-06T00:26:00Z")
+        );
+        assert_eq!(next_work.phase, PomodoroPhase::Work);
+        assert_eq!(next_work.status, PomodoroStatus::Running);
+        assert_eq!(next_work.cycle_count, 1);
+        assert_eq!(
+            next_work.timer_session_id.as_deref(),
+            Some(active_timer.id.as_str())
+        );
+    }
+
+    #[test]
+    fn cancel_pomodoro_work_cancels_session_and_stops_timer() {
+        let database = in_memory_database();
+        let start_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let cancel_clock = FixedClock {
+            now: "2026-07-06T00:03:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &start_clock, draft("キャンセル")).expect("task");
+        let pomodoro = usecases::start_pomodoro(
+            &database,
+            &start_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start pomodoro");
+        let timer_id = pomodoro.timer_session_id.clone().expect("work phase timer");
+
+        let cancelled =
+            usecases::cancel_pomodoro(&database, &cancel_clock).expect("cancel pomodoro");
+        let stopped_timer = database
+            .with_connection(|connection| select_timer_by_id(connection, &timer_id))
+            .expect("stopped timer");
+
+        assert_eq!(cancelled.status, PomodoroStatus::Cancelled);
+        assert_eq!(cancelled.phase, PomodoroPhase::Work);
+        assert_eq!(
+            cancelled.cancelled_at.as_deref(),
+            Some("2026-07-06T00:03:00Z")
+        );
+        assert_eq!(stopped_timer.elapsed_seconds, Some(180));
+        assert!(usecases::get_active_pomodoro(&database)
+            .expect("active pomodoro")
+            .is_none());
+        assert!(database.get_active_timer().expect("active timer").is_none());
     }
 
     #[test]
