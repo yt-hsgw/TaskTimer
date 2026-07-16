@@ -102,6 +102,27 @@ export type PomodoroSettingsDraft = {
   autoStartNextWork: boolean;
 };
 
+export type PomodoroPhase = "work" | "short_break" | "long_break";
+export type PomodoroStatus = "running" | "paused" | "completed" | "cancelled";
+
+export type ActivePomodoro = {
+  id: string;
+  target: WorkTargetRef;
+  timerSessionId: string | null;
+  phase: PomodoroPhase;
+  status: PomodoroStatus;
+  cycleCount: number;
+  phaseStartedAt: string;
+  phaseDurationSeconds: number;
+  pausedAt: string | null;
+  pausedTotalSeconds: number;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type SqliteBackupManifest = {
   format: string;
   formatVersion: number;
@@ -218,6 +239,7 @@ export type TaskTimerGateway = {
   listCalendarItems(startDate: string, endDate: string): Promise<WeekCalendarItem[]>;
   listWeekCalendarItems(weekStartDate: string): Promise<WeekCalendarItem[]>;
   getActiveTimer(): Promise<ActiveTimer | null>;
+  getActivePomodoro(): Promise<ActivePomodoro | null>;
   getPomodoroSettings(): Promise<PomodoroSettings>;
   updatePomodoroSettings(input: PomodoroSettingsDraft): Promise<PomodoroSettings>;
   getNotificationDisplayMode(): Promise<NotificationDisplayMode>;
@@ -236,6 +258,14 @@ export type TaskTimerGateway = {
   updateTask(input: UpdateTaskDraft): Promise<Task>;
   updateSubtask(input: UpdateSubtaskDraft): Promise<Subtask>;
   startTimer(target: WorkTargetRef): Promise<ActiveTimer>;
+  startPomodoro(target: WorkTargetRef): Promise<ActivePomodoro>;
+  pausePomodoro(): Promise<ActivePomodoro>;
+  resumePomodoro(): Promise<ActivePomodoro>;
+  completePomodoroWorkPhase(): Promise<ActivePomodoro>;
+  startPomodoroBreak(pomodoroSessionId: string): Promise<ActivePomodoro>;
+  skipPomodoroBreak(pomodoroSessionId: string): Promise<ActivePomodoro>;
+  completePomodoroBreak(): Promise<ActivePomodoro>;
+  cancelPomodoro(): Promise<ActivePomodoro>;
   pauseActiveTimer(): Promise<ActiveTimer>;
   resumeActiveTimer(): Promise<ActiveTimer>;
   stopActiveTimer(): Promise<TimerSession>;
