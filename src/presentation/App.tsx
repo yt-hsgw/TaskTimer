@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
+  ActivePomodoro,
   NotificationDeliveryAttempt,
   NotificationDispatchSummary,
   PomodoroSettings,
@@ -48,6 +49,9 @@ export function App() {
   const [selectedSubtaskId, setSelectedSubtaskId] = useState<string | null>(null);
   const [items, setItems] = useState<WeekCalendarItem[]>([]);
   const [activeTimer, setActiveTimer] = useState<ActiveTimer | null>(null);
+  const [activePomodoro, setActivePomodoro] = useState<ActivePomodoro | null>(
+    null,
+  );
   const [activeView, setActiveView] = useState<AppView>({
     kind: "list",
     listId: DEFAULT_TASK_LIST_ID,
@@ -198,6 +202,7 @@ export function App() {
         nextTags,
         nextItems,
         nextActiveTimer,
+        nextActivePomodoro,
         nextPomodoroSettings,
         nextDisplayMode,
         nextNotificationsEnabled,
@@ -212,6 +217,7 @@ export function App() {
             calendarRange.endDate,
           ),
           tauriTaskTimerGateway.getActiveTimer(),
+          tauriTaskTimerGateway.getActivePomodoro(),
           tauriTaskTimerGateway.getPomodoroSettings(),
           tauriTaskTimerGateway.getNotificationDisplayMode(),
           tauriTaskTimerGateway.getNotificationsEnabled(),
@@ -223,6 +229,7 @@ export function App() {
       setTags(nextTags);
       setItems(nextItems);
       setActiveTimer(nextActiveTimer);
+      setActivePomodoro(nextActivePomodoro);
       setPomodoroSettings(nextPomodoroSettings);
       setDisplayMode(nextDisplayMode);
       setNotificationsEnabled(nextNotificationsEnabled);
@@ -643,6 +650,107 @@ export function App() {
       runMutation(async () => {
         await tauriTaskTimerGateway.startTimer(target);
         return target.type === "task" ? target.id : undefined;
+      }),
+    [runMutation],
+  );
+
+  const handleStartPomodoro = useCallback(
+    (target: WorkTargetRef) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.startPomodoro(target);
+        return target.type === "task" ? target.id : undefined;
+      }),
+    [runMutation],
+  );
+
+  const handlePausePomodoro = useCallback(
+    () =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.pausePomodoro();
+      }),
+    [runMutation],
+  );
+
+  const handleResumePomodoro = useCallback(
+    () =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.resumePomodoro();
+      }),
+    [runMutation],
+  );
+
+  const handleCompletePomodoroWork = useCallback(
+    () =>
+      runMutation(async () => {
+        const completed =
+          await tauriTaskTimerGateway.completePomodoroWorkPhase();
+        return completed.target.type === "task" ? completed.target.id : undefined;
+      }),
+    [runMutation],
+  );
+
+  const handleCompletePomodoroWorkAndStartBreak = useCallback(
+    () =>
+      runMutation(async () => {
+        const completed =
+          await tauriTaskTimerGateway.completePomodoroWorkPhase();
+        const nextBreak = await tauriTaskTimerGateway.startPomodoroBreak(
+          completed.id,
+        );
+        return nextBreak.target.type === "task" ? nextBreak.target.id : undefined;
+      }),
+    [runMutation],
+  );
+
+  const handleCompletePomodoroWorkAndStartNext = useCallback(
+    () =>
+      runMutation(async () => {
+        const completed =
+          await tauriTaskTimerGateway.completePomodoroWorkPhase();
+        const nextWork = await tauriTaskTimerGateway.skipPomodoroBreak(
+          completed.id,
+        );
+        return nextWork.target.type === "task" ? nextWork.target.id : undefined;
+      }),
+    [runMutation],
+  );
+
+  const handleSkipPomodoroBreak = useCallback(
+    (pomodoroSessionId: string) =>
+      runMutation(async () => {
+        const nextWork =
+          await tauriTaskTimerGateway.skipPomodoroBreak(pomodoroSessionId);
+        return nextWork.target.type === "task" ? nextWork.target.id : undefined;
+      }),
+    [runMutation],
+  );
+
+  const handleCompletePomodoroBreak = useCallback(
+    () =>
+      runMutation(async () => {
+        const completed = await tauriTaskTimerGateway.completePomodoroBreak();
+        return completed.target.type === "task" ? completed.target.id : undefined;
+      }),
+    [runMutation],
+  );
+
+  const handleCompletePomodoroBreakAndStartNext = useCallback(
+    () =>
+      runMutation(async () => {
+        const completed = await tauriTaskTimerGateway.completePomodoroBreak();
+        const nextWork = await tauriTaskTimerGateway.skipPomodoroBreak(
+          completed.id,
+        );
+        return nextWork.target.type === "task" ? nextWork.target.id : undefined;
+      }),
+    [runMutation],
+  );
+
+  const handleCancelPomodoro = useCallback(
+    () =>
+      runMutation(async () => {
+        const cancelled = await tauriTaskTimerGateway.cancelPomodoro();
+        return cancelled.target.type === "task" ? cancelled.target.id : undefined;
       }),
     [runMutation],
   );
@@ -1180,6 +1288,7 @@ export function App() {
                   task={selectedTask}
                   selectedSubtaskId={selectedSubtaskId}
                   activeTimer={activeTimer}
+                  activePomodoro={activePomodoro}
                   taskLists={taskLists}
                   tags={tags}
                   displayMode={displayMode}
@@ -1196,6 +1305,22 @@ export function App() {
                   onPauseTimer={handlePauseTimer}
                   onResumeTimer={handleResumeTimer}
                   onStopTimer={handleStopTimer}
+                  onStartPomodoro={handleStartPomodoro}
+                  onPausePomodoro={handlePausePomodoro}
+                  onResumePomodoro={handleResumePomodoro}
+                  onCompletePomodoroWork={handleCompletePomodoroWork}
+                  onCompletePomodoroWorkAndStartBreak={
+                    handleCompletePomodoroWorkAndStartBreak
+                  }
+                  onCompletePomodoroWorkAndStartNext={
+                    handleCompletePomodoroWorkAndStartNext
+                  }
+                  onSkipPomodoroBreak={handleSkipPomodoroBreak}
+                  onCompletePomodoroBreak={handleCompletePomodoroBreak}
+                  onCompletePomodoroBreakAndStartNext={
+                    handleCompletePomodoroBreakAndStartNext
+                  }
+                  onCancelPomodoro={handleCancelPomodoro}
                   onToggleTaskCompletion={handleToggleTaskCompletion}
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
@@ -1228,6 +1353,7 @@ export function App() {
                   task={selectedTask}
                   selectedSubtaskId={selectedSubtaskId}
                   activeTimer={activeTimer}
+                  activePomodoro={activePomodoro}
                   taskLists={taskLists}
                   tags={tags}
                   displayMode={displayMode}
@@ -1244,6 +1370,22 @@ export function App() {
                   onPauseTimer={handlePauseTimer}
                   onResumeTimer={handleResumeTimer}
                   onStopTimer={handleStopTimer}
+                  onStartPomodoro={handleStartPomodoro}
+                  onPausePomodoro={handlePausePomodoro}
+                  onResumePomodoro={handleResumePomodoro}
+                  onCompletePomodoroWork={handleCompletePomodoroWork}
+                  onCompletePomodoroWorkAndStartBreak={
+                    handleCompletePomodoroWorkAndStartBreak
+                  }
+                  onCompletePomodoroWorkAndStartNext={
+                    handleCompletePomodoroWorkAndStartNext
+                  }
+                  onSkipPomodoroBreak={handleSkipPomodoroBreak}
+                  onCompletePomodoroBreak={handleCompletePomodoroBreak}
+                  onCompletePomodoroBreakAndStartNext={
+                    handleCompletePomodoroBreakAndStartNext
+                  }
+                  onCancelPomodoro={handleCancelPomodoro}
                   onToggleTaskCompletion={handleToggleTaskCompletion}
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
@@ -1284,6 +1426,7 @@ export function App() {
                   task={selectedTask}
                   selectedSubtaskId={selectedSubtaskId}
                   activeTimer={activeTimer}
+                  activePomodoro={activePomodoro}
                   taskLists={taskLists}
                   tags={tags}
                   displayMode={displayMode}
@@ -1300,6 +1443,22 @@ export function App() {
                   onPauseTimer={handlePauseTimer}
                   onResumeTimer={handleResumeTimer}
                   onStopTimer={handleStopTimer}
+                  onStartPomodoro={handleStartPomodoro}
+                  onPausePomodoro={handlePausePomodoro}
+                  onResumePomodoro={handleResumePomodoro}
+                  onCompletePomodoroWork={handleCompletePomodoroWork}
+                  onCompletePomodoroWorkAndStartBreak={
+                    handleCompletePomodoroWorkAndStartBreak
+                  }
+                  onCompletePomodoroWorkAndStartNext={
+                    handleCompletePomodoroWorkAndStartNext
+                  }
+                  onSkipPomodoroBreak={handleSkipPomodoroBreak}
+                  onCompletePomodoroBreak={handleCompletePomodoroBreak}
+                  onCompletePomodoroBreakAndStartNext={
+                    handleCompletePomodoroBreakAndStartNext
+                  }
+                  onCancelPomodoro={handleCancelPomodoro}
                   onToggleTaskCompletion={handleToggleTaskCompletion}
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}

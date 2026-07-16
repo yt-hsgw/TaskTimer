@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ActivePomodoro,
   CreateSubtaskDraft,
   DataExportResult,
   NotificationDeliveryAttempt,
@@ -39,6 +40,7 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   listWeekCalendarItems: (weekStartDate) =>
     invoke<WeekCalendarItem[]>("list_week_calendar_items", { weekStartDate }),
   getActiveTimer: () => invoke<ActiveTimer | null>("get_active_timer"),
+  getActivePomodoro: () => invoke<ActivePomodoro | null>("get_active_pomodoro"),
   getPomodoroSettings: () => invoke<PomodoroSettings>("get_pomodoro_settings"),
   updatePomodoroSettings: (input: PomodoroSettingsDraft) =>
     invoke<PomodoroSettings>("update_pomodoro_settings", { request: input }),
@@ -72,6 +74,22 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<Subtask>("update_subtask", { request: input }),
   startTimer: (target: WorkTargetRef) =>
     invoke<ActiveTimer>("start_timer", { request: { target } }),
+  startPomodoro: (target: WorkTargetRef) =>
+    invoke<ActivePomodoro>("start_pomodoro", { request: { target } }),
+  pausePomodoro: () => invoke<ActivePomodoro>("pause_pomodoro"),
+  resumePomodoro: () => invoke<ActivePomodoro>("resume_pomodoro"),
+  completePomodoroWorkPhase: () =>
+    invoke<ActivePomodoro>("complete_pomodoro_work_phase"),
+  startPomodoroBreak: (pomodoroSessionId: string) =>
+    invoke<ActivePomodoro>("start_pomodoro_break", {
+      request: { pomodoroSessionId },
+    }),
+  skipPomodoroBreak: (pomodoroSessionId: string) =>
+    invoke<ActivePomodoro>("skip_pomodoro_break", {
+      request: { pomodoroSessionId },
+    }),
+  completePomodoroBreak: () => invoke<ActivePomodoro>("complete_pomodoro_break"),
+  cancelPomodoro: () => invoke<ActivePomodoro>("cancel_pomodoro"),
   pauseActiveTimer: () => invoke<ActiveTimer>("pause_active_timer"),
   resumeActiveTimer: () => invoke<ActiveTimer>("resume_active_timer"),
   stopActiveTimer: () => invoke<TimerSession>("stop_active_timer"),

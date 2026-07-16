@@ -1408,6 +1408,89 @@ button {
   gap: 6px;
 }
 
+.pomodoro-card {
+  background: #f8fafb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.pomodoro-card.is-work {
+  background: var(--soft-green);
+  border-color: #c9d9d2;
+}
+
+.pomodoro-card.is-short_break,
+.pomodoro-card.is-long_break {
+  background: var(--soft-blue);
+  border-color: #c4d5ec;
+}
+
+.pomodoro-card.is-muted {
+  opacity: 0.72;
+}
+
+.pomodoro-card-header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.pomodoro-card-header div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pomodoro-card-header span,
+.pomodoro-meta span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pomodoro-card-header strong {
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.pomodoro-countdown {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pomodoro-meta {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pomodoro-meta span {
+  background: rgb(255 255 255 / 62%);
+  border: 1px solid rgb(120 138 148 / 22%);
+  border-radius: 6px;
+  min-width: 0;
+  padding: 6px 7px;
+}
+
+.pomodoro-actions {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+}
+
+.pomodoro-actions button {
+  min-width: 0;
+  white-space: normal;
+}
+
 .round-check-row {
   align-items: center;
   color: var(--muted);
