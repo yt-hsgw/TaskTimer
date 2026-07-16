@@ -1,0 +1,142 @@
+name: 大量データ性能検証
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/performance-large-dataset.yml"
+      - "src-tauri/src/bin/seed_large_dataset.rs"
+      - "src-tauri/src/bin/measure_large_dataset.rs"
+      - "src-tauri/migrations/0001_initial.sql"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "検証データ規模"
+        required: true
+        type: choice
+        default: "standard"
+        options:
+          - "smoke"
+          - "standard"
+      fail_on_warning:
+        description: "しきい値超過を失敗扱いにする"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  read-model:
+    name: Windows Read Model計測
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PERF_PROFILE: ${{ inputs.profile }}
+      FAIL_ON_WARNING: ${{ inputs.fail_on_warning }}
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v5
+
+      - name: Node.jsを準備
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Rustを準備
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Rustビルドキャッシュを復元
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: performance-large-dataset-rust
+          workspaces: |
+            src-tauri -> target
+
+      - name: Node依存関係をインストール
+        run: npm ci
+
+      - name: 検証DBを生成
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:PERF_PROFILE)) {
+            $env:PERF_PROFILE = "smoke"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:FAIL_ON_WARNING)) {
+            $env:FAIL_ON_WARNING = "true"
+          }
+
+          if ($env:PERF_PROFILE -eq "standard") {
+            $db = "tmp/perf/tasktimer-large.sqlite3"
+            $seedArgs = @("--force", "--out", $db)
+          } else {
+            $db = "tmp/perf/tasktimer-smoke.sqlite3"
+            $seedArgs = @(
+              "--force",
+              "--out", $db,
+              "--tasks", "50",
+              "--subtasks", "200",
+              "--timers", "500",
+              "--lists", "4"
+            )
+          }
+
+          "PERF_DB=$db" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & npm run perf:seed -- @seedArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "perf:seed failed with exit code $LASTEXITCODE."
+          }
+
+      - name: Read Modelを計測
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:PERF_PROFILE)) {
+            $env:PERF_PROFILE = "smoke"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:FAIL_ON_WARNING)) {
+            $env:FAIL_ON_WARNING = "true"
+          }
+
+          $threshold = if ($env:PERF_PROFILE -eq "standard") { "250" } else { "100" }
+          $measureArgs = @("--db", $env:PERF_DB, "--threshold-ms", $threshold)
+          if ($env:FAIL_ON_WARNING -eq "true") {
+            $measureArgs += "--fail-on-warning"
+          }
+
+          $output = & npm run perf:measure -- @measureArgs 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath "tmp/perf/perf-measure-output.txt"
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## 大量データ性能検証"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- OS: Windows runner"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- profile: $env:PERF_PROFILE"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- DB: $env:PERF_DB"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- threshold: ${threshold}ms"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- fail_on_warning: $env:FAIL_ON_WARNING"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```text'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ($output -join [Environment]::NewLine)
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
+
+          if ($exitCode -ne 0) {
+            throw "perf:measure failed with exit code $exitCode."
+          }
+
+      - name: 計測ログを保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-read-model-measurement
+          path: tmp/perf/perf-measure-output.txt
+          if-no-files-found: ignore
+          retention-days: 14
