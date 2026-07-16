@@ -27,8 +27,8 @@ use crate::{
         SqliteBackupManifestRecord, SqliteBackupRecord, SqliteBackupRepository,
         SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord,
         TagRepository, TagUpdate, TaskListCommandRepository, TaskListCreate, TaskListRecord,
-        TaskListUpdate, TaskReadRepository, TaskRecord, TaskRowRecord, TaskTagRecord,
-        TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
+        TaskListUpdate, TaskReadRepository, TaskRecord, TaskRowRecord, TaskStatusUpdate,
+        TaskTagRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
         UiPreferenceRepository, UiPreferencesRecord, UiPreferencesUpdate, WeekCalendarItem,
         WorkItemCreate, WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
@@ -66,6 +66,7 @@ const UI_PREF_CALENDAR_VIEW_MODE: &str = "calendar_view_mode";
 const UI_VIEW_LIST: &str = "list";
 const UI_VIEW_TODAY: &str = "today";
 const UI_VIEW_FAVORITES: &str = "favorites";
+const UI_VIEW_BOARD: &str = "board";
 const UI_VIEW_CALENDAR: &str = "calendar";
 const UI_VIEW_SETTINGS: &str = "settings";
 const UI_VIEW_LEGACY_TASKS: &str = "tasks";
@@ -814,6 +815,51 @@ impl TaskTimerCommandRepository for SqliteDatabase {
                     params![now, task_id],
                 )
                 .map_err(|error| format!("タスクを完了できません: {error}"))?;
+
+            select_existing_task_by_id(transaction, &task_id)
+        })
+    }
+
+    fn update_task_status(
+        &self,
+        task_id: String,
+        input: TaskStatusUpdate,
+    ) -> RepositoryResult<TaskRecord> {
+        self.with_transaction(|transaction| {
+            let task = select_existing_task_by_id(transaction, &task_id)?;
+            if task.status == WorkStatus::Archived {
+                return Err("アーカイブ済みタスクの状態はかんばんから変更できません".to_string());
+            }
+            if task.status == input.status {
+                return Ok(task);
+            }
+
+            if input.status == WorkStatus::Done {
+                assert_completable(&task.status)?;
+                let incomplete_subtasks = count_incomplete_subtasks(transaction, &task_id)?;
+                if incomplete_subtasks > 0 && !input.allow_incomplete_subtasks {
+                    return Err(format!(
+                        "未完了のサブタスクが{incomplete_subtasks}件あります。確認後に完了してください"
+                    ));
+                }
+            }
+
+            transaction
+                .execute(
+                    "
+                    UPDATE tasks
+                    SET status = ?1,
+                        completed_at = CASE
+                          WHEN ?1 = 'done' THEN COALESCE(completed_at, ?2)
+                          ELSE NULL
+                        END,
+                        updated_at = ?2
+                    WHERE id = ?3
+                      AND deleted_at IS NULL
+                    ",
+                    params![input.status.as_str(), input.now, task_id],
+                )
+                .map_err(|error| format!("タスク状態を更新できません: {error}"))?;
 
             select_existing_task_by_id(transaction, &task_id)
         })
@@ -2409,6 +2455,7 @@ fn normalize_ui_view(value: Option<&String>) -> String {
         Some(UI_VIEW_LIST | UI_VIEW_LEGACY_TASKS) => UI_VIEW_LIST.to_string(),
         Some(UI_VIEW_TODAY) => UI_VIEW_TODAY.to_string(),
         Some(UI_VIEW_FAVORITES) => UI_VIEW_FAVORITES.to_string(),
+        Some(UI_VIEW_BOARD) => UI_VIEW_BOARD.to_string(),
         Some(UI_VIEW_CALENDAR) => UI_VIEW_CALENDAR.to_string(),
         Some(UI_VIEW_SETTINGS) => UI_VIEW_SETTINGS.to_string(),
         _ => UI_VIEW_LIST.to_string(),
@@ -5702,14 +5749,14 @@ mod tests {
             &clock,
             usecases::UiPreferencesDraft {
                 left_pane_open: false,
-                last_view: UI_VIEW_CALENDAR.to_string(),
+                last_view: UI_VIEW_BOARD.to_string(),
                 last_task_list_id: "custom-list".to_string(),
                 calendar_view_mode: CALENDAR_VIEW_MONTH.to_string(),
             },
         )
         .expect("update ui preferences");
         assert!(!updated.left_pane_open);
-        assert_eq!(updated.last_view, UI_VIEW_CALENDAR);
+        assert_eq!(updated.last_view, UI_VIEW_BOARD);
         assert_eq!(updated.last_task_list_id, "custom-list");
         assert_eq!(updated.calendar_view_mode, CALENDAR_VIEW_MONTH);
 
@@ -7184,6 +7231,73 @@ mod tests {
         assert_eq!(reopened.updated_at, "2026-07-06T00:10:00Z");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].status, WorkStatus::Todo);
+        assert_eq!(rows[0].completed_at, None);
+    }
+
+    #[test]
+    fn update_task_status_preserves_completion_rules_for_board() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let done_clock = FixedClock {
+            now: "2026-07-06T01:00:00Z",
+        };
+        let progress_clock = FixedClock {
+            now: "2026-07-06T02:00:00Z",
+        };
+        let task = usecases::create_task(&database, &create_clock, draft("かんばん親タスク"))
+            .expect("create task");
+        usecases::create_subtask(
+            &database,
+            &create_clock,
+            task.id.clone(),
+            draft("未完了サブタスク"),
+        )
+        .expect("create subtask");
+
+        let rejected = usecases::update_task_status(
+            &database,
+            &done_clock,
+            task.id.clone(),
+            "done".to_string(),
+            false,
+        );
+        assert!(rejected
+            .expect_err("confirmation required")
+            .contains("未完了"));
+
+        let completed = usecases::update_task_status(
+            &database,
+            &done_clock,
+            task.id.clone(),
+            "done".to_string(),
+            true,
+        )
+        .expect("complete from board");
+        assert_eq!(completed.status, WorkStatus::Done);
+        assert_eq!(
+            completed.completed_at.as_deref(),
+            Some("2026-07-06T01:00:00Z")
+        );
+
+        let moved = usecases::update_task_status(
+            &database,
+            &progress_clock,
+            task.id.clone(),
+            "in_progress".to_string(),
+            false,
+        )
+        .expect("move to progress");
+        let rows = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("task rows");
+
+        assert_eq!(moved.status, WorkStatus::InProgress);
+        assert_eq!(moved.completed_at, None);
+        assert_eq!(moved.updated_at, "2026-07-06T02:00:00Z");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].status, WorkStatus::InProgress);
         assert_eq!(rows[0].completed_at, None);
     }
 

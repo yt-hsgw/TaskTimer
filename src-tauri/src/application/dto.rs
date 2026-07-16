@@ -152,6 +152,14 @@ pub struct CompleteTaskRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UpdateTaskStatusRequestDto {
+    pub task_id: String,
+    pub status: String,
+    pub allow_incomplete_subtasks: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReopenTaskRequestDto {
     pub task_id: String,
 }

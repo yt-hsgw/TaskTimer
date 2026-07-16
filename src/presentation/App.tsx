@@ -18,12 +18,14 @@ import type { NotificationDisplayMode } from "../domain/notification/types";
 import type { ActiveTimer, TimerSession } from "../domain/timer/types";
 import {
   DEFAULT_TASK_LIST_ID,
+  type Task,
   type Subtask,
   type WorkTargetRef,
 } from "../domain/task/types";
 import { tauriTaskTimerGateway } from "../infrastructure/tauri/gateway";
 import { WeekCalendar, type CalendarViewMode } from "./components/WeekCalendar";
 import { TaskPanel } from "./components/TaskPanel";
+import { KanbanBoard } from "./components/KanbanBoard";
 import { TaskDetailPane } from "./components/TaskDetailPane";
 import {
   SettingsPanel,
@@ -699,6 +701,36 @@ export function App() {
     [runTaskActionMutation],
   );
 
+  const handleChangeTaskStatus = useCallback(
+    (task: TaskWithSubtasks, status: Exclude<Task["status"], "archived">) => {
+      if (task.status === status) {
+        return Promise.resolve(true);
+      }
+
+      const hasIncompleteSubtasks =
+        status === "done" &&
+        task.subtasks.some((subtask) => subtask.status !== "done");
+      if (
+        hasIncompleteSubtasks &&
+        !window.confirm(
+          "未完了のサブタスクがあります。サブタスクは未完了のまま、親タスクだけ完了しますか？",
+        )
+      ) {
+        return Promise.resolve(false);
+      }
+
+      return runTaskActionMutation(task.id, async () => {
+        await tauriTaskTimerGateway.updateTaskStatus(
+          task.id,
+          status,
+          hasIncompleteSubtasks,
+        );
+        return task.id;
+      });
+    },
+    [runTaskActionMutation],
+  );
+
   const handleToggleSubtaskCompletion = useCallback(
     (subtask: Subtask) =>
       runMutation(async () => {
@@ -1127,6 +1159,54 @@ export function App() {
                 onCreateTask={handleCreateTask}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
                 onToggleTaskFavorite={handleToggleTaskFavorite}
+              />
+              {selectedTask ? (
+                <TaskDetailPane
+                  task={selectedTask}
+                  selectedSubtaskId={selectedSubtaskId}
+                  activeTimer={activeTimer}
+                  taskLists={taskLists}
+                  tags={tags}
+                  displayMode={displayMode}
+                  isMutating={isMutating}
+                  onClose={closeDetailPane}
+                  onUpdateTask={handleUpdateTask}
+                  onUpdateSubtask={handleUpdateSubtask}
+                  onCreateSubtask={handleCreateSubtask}
+                  onSelectSubtask={(subtaskId) =>
+                    handleSelectSubtask(selectedTask.id, subtaskId)
+                  }
+                  onSelectParentTask={handleSelectParentTask}
+                  onStartTimer={handleStartTimer}
+                  onPauseTimer={handlePauseTimer}
+                  onResumeTimer={handleResumeTimer}
+                  onStopTimer={handleStopTimer}
+                  onToggleTaskCompletion={handleToggleTaskCompletion}
+                  onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
+                  onDeleteTask={handleDeleteTask}
+                  onDeleteSubtask={handleDeleteSubtask}
+                  onAttachTagToTask={handleAttachTagToTask}
+                  onDetachTagFromTask={handleDetachTagFromTask}
+                />
+              ) : null}
+            </div>
+          ) : null}
+
+          {activeView.kind === "board" ? (
+            <div
+              className={`task-workspace ${
+                selectedTask ? "is-detail-open" : ""
+              }`}
+            >
+              <KanbanBoard
+                tasks={visibleTasks}
+                taskRows={visibleTaskRows}
+                selectedTaskId={selectedTaskId}
+                isLoading={isLoading}
+                isMutating={isMutating}
+                pendingTaskActionIds={pendingTaskActionIds}
+                onSelectTask={handleSelectTask}
+                onChangeTaskStatus={handleChangeTaskStatus}
               />
               {selectedTask ? (
                 <TaskDetailPane

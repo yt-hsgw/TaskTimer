@@ -128,6 +128,7 @@ export type AppViewKind =
   | "today"
   | "favorites"
   | "tag"
+  | "board"
   | "calendar"
   | "settings";
 
@@ -217,6 +218,11 @@ export type TaskTimerGateway = {
   resumeActiveTimer(): Promise<ActiveTimer>;
   stopActiveTimer(): Promise<TimerSession>;
   completeTask(taskId: string, allowIncompleteSubtasks: boolean): Promise<Task>;
+  updateTaskStatus(
+    taskId: string,
+    status: Task["status"],
+    allowIncompleteSubtasks: boolean,
+  ): Promise<Task>;
   reopenTask(taskId: string): Promise<Task>;
   completeSubtask(subtaskId: string): Promise<Subtask>;
   reopenSubtask(subtaskId: string): Promise<Subtask>;

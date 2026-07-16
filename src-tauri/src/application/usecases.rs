@@ -4,7 +4,7 @@ use crate::domain::{
     task::{
         validate_date_range, validate_due_time_requires_due_date, validate_memo,
         validate_optional_date, validate_optional_time, validate_tag_name,
-        validate_task_list_color_token, validate_task_list_name, validate_title,
+        validate_task_list_color_token, validate_task_list_name, validate_title, WorkStatus,
         DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID,
     },
     timer::WorkTargetRef,
@@ -21,8 +21,9 @@ use super::{
         SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore,
         SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord, TagRepository, TagUpdate,
         TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskRecord,
-        TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository, UiPreferencesRecord,
-        UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository,
+        UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate,
+        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
 
@@ -35,6 +36,7 @@ const LOCAL_PATH_MAX_CHARS: usize = 4096;
 const UI_VIEW_LIST: &str = "list";
 const UI_VIEW_TODAY: &str = "today";
 const UI_VIEW_FAVORITES: &str = "favorites";
+const UI_VIEW_BOARD: &str = "board";
 const UI_VIEW_CALENDAR: &str = "calendar";
 const UI_VIEW_SETTINGS: &str = "settings";
 const CALENDAR_VIEW_WEEK: &str = "week";
@@ -300,6 +302,25 @@ pub fn complete_task(
 ) -> RepositoryResult<TaskRecord> {
     let task_id = validate_identifier(&task_id, "タスクID")?;
     repository.complete_task(task_id, allow_incomplete_subtasks, clock.now_utc_iso8601())
+}
+
+pub fn update_task_status(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    task_id: String,
+    status: String,
+    allow_incomplete_subtasks: bool,
+) -> RepositoryResult<TaskRecord> {
+    let task_id = validate_identifier(&task_id, "タスクID")?;
+    let status = validate_board_task_status(&status)?;
+    repository.update_task_status(
+        task_id,
+        TaskStatusUpdate {
+            status,
+            allow_incomplete_subtasks,
+            now: clock.now_utc_iso8601(),
+        },
+    )
 }
 
 pub fn reopen_task(
@@ -633,10 +654,17 @@ fn validate_identifier(value: &str, field_label: &str) -> RepositoryResult<Strin
 fn validate_ui_view(value: &str) -> RepositoryResult<String> {
     let trimmed = value.trim();
     match trimmed {
-        UI_VIEW_LIST | UI_VIEW_TODAY | UI_VIEW_FAVORITES | UI_VIEW_CALENDAR | UI_VIEW_SETTINGS => {
-            Ok(trimmed.to_string())
-        }
+        UI_VIEW_LIST | UI_VIEW_TODAY | UI_VIEW_FAVORITES | UI_VIEW_BOARD | UI_VIEW_CALENDAR
+        | UI_VIEW_SETTINGS => Ok(trimmed.to_string()),
         _ => Err("最後のビュー設定が不正です".to_string()),
+    }
+}
+
+fn validate_board_task_status(value: &str) -> RepositoryResult<WorkStatus> {
+    let status = WorkStatus::from_db(value.trim())?;
+    match status {
+        WorkStatus::Todo | WorkStatus::InProgress | WorkStatus::Done => Ok(status),
+        WorkStatus::Archived => Err("かんばんからアーカイブ状態へ直接変更できません".to_string()),
     }
 }
 
@@ -721,11 +749,23 @@ mod tests {
 
     #[test]
     fn validate_ui_preferences_rejects_unknown_values() {
-        assert!(validate_ui_view("board")
+        assert_eq!(validate_ui_view("board").expect("board view"), "board");
+        assert!(validate_ui_view("unknown")
             .expect_err("invalid view")
             .contains("ビュー"));
         assert!(validate_calendar_view_mode("year")
             .expect_err("invalid calendar mode")
             .contains("カレンダー"));
+    }
+
+    #[test]
+    fn validate_board_task_status_rejects_archived() {
+        assert_eq!(
+            validate_board_task_status("in_progress").expect("valid status"),
+            WorkStatus::InProgress
+        );
+        assert!(validate_board_task_status("archived")
+            .expect_err("archive is separate")
+            .contains("アーカイブ"));
     }
 }

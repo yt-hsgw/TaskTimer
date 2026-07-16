@@ -12,6 +12,7 @@ export type AppView =
   | { kind: "today" }
   | { kind: "favorites" }
   | { kind: "tag"; tagId: string }
+  | { kind: "board" }
   | { kind: "calendar" }
   | { kind: "settings" };
 
@@ -451,6 +452,13 @@ export function LeftNavigation({
             isOpen={isOpen}
             isActive={activeView.kind === "favorites"}
             onClick={() => onSelectView({ kind: "favorites" })}
+          />
+          <NavButton
+            icon="▥"
+            label="かんばん"
+            isOpen={isOpen}
+            isActive={activeView.kind === "board"}
+            onClick={() => onSelectView({ kind: "board" })}
           />
           <NavButton
             icon="▦"
