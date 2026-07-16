@@ -148,6 +148,14 @@ npm run perf:seed -- --force
 npm run perf:measure
 ```
 
+Windows runnerでRead Model計測を行う場合:
+
+```text
+GitHub Actions > 大量データ性能検証 > Run workflow
+profile=standard
+fail_on_warning=true
+```
+
 期待結果:
 
 - ウィンドウ表示後5秒以内にタスク一覧が操作可能になる。
@@ -156,3 +164,4 @@ npm run perf:measure
 - 右詳細ペインがタイマー履歴の全件表示に依存せず、1秒以内に表示される。
 - カレンダー範囲取得とアクティブタイマー取得が表示範囲または単一アクティブタイマーに絞られている。
 - `perf:measure` の標準データ計測でWARNが出た場合は、対象Read Model名、件数、実行時間、端末情報を #72 へ記録する。
+- `大量データ性能検証` workflowはWindows上のDB読み取り時間を確認する。GUI操作、Tauri IPC、OS通知、SmartScreen、実機ディスク差の代替にはしない。

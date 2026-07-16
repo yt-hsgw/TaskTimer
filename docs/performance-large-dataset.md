@@ -87,6 +87,25 @@ CIや厳密な確認で、しきい値超過を失敗扱いにする場合:
 npm run perf:measure -- --fail-on-warning
 ```
 
+## GitHub ActionsでのWindows Read Model計測
+
+`.github/workflows/performance-large-dataset.yml` の `大量データ性能検証` workflowで、GitHub-hosted Windows runner上のDB生成とRead Model計測を実行できる。
+
+PRでは、性能検証workflow、検証bin、初期マイグレーション、npm定義が変更された場合だけスモークプロファイルを自動実行する。標準プロファイルは重いため、必要時に `workflow_dispatch` で手動実行する。
+
+手動実行の推奨値:
+
+| 入力 | 値 |
+| --- | --- |
+| `profile` | `standard` |
+| `fail_on_warning` | `true` |
+
+workflowの制約:
+
+- 確認対象はSQLite Read Model相当のクエリ時間であり、React描画、Tauri IPC、OS通知権限、GPU/ディスク差は保証しない。
+- 計測ログだけを短期artifactとstep summaryへ残し、生成DBファイルは保存しない。
+- 追加Secret、新しいTauri権限、アプリ実行時外部通信は使わない。
+
 計測対象:
 
 | 対象 | 意図 |
@@ -186,6 +205,10 @@ Read Model計測結果:
 | --- | --- | --- | --- | --- | ---: | --- |
 | 2026-07-16 | Darwin 25.5.0 arm64 / Apple M1 | `dc1114f` + PR差分 | smoke 50/200/500 | `npm run perf:measure -- --db tmp/perf/tasktimer-smoke.sqlite3 --threshold-ms 100 --fail-on-warning` | 0 | 最大0ms。 |
 | 2026-07-16 | Darwin 25.5.0 arm64 / Apple M1 | `dc1114f` + PR差分 | standard 5k/20k/50k | `npm run perf:measure -- --fail-on-warning` | 0 | 最大61ms。Windows GUI描画は未計測。 |
+| 2026-07-16 | Darwin 25.5.0 arm64 / Apple M1 | `a3580d9` + PR差分 | smoke 50/200/500 | `npm run perf:measure -- --db tmp/perf/tasktimer-smoke.sqlite3 --threshold-ms 100 --fail-on-warning` | 0 | 最大1ms。 |
+| 2026-07-16 | Darwin 25.5.0 arm64 / Apple M1 | `a3580d9` + PR差分 | standard 5k/20k/50k | `npm run perf:measure -- --fail-on-warning` | 0 | 最大56ms。Windows GUI描画は未計測。 |
+| 2026-07-16 | GitHub-hosted Windows runner / Windows Server 2025 | PR #104 | smoke 50/200/500 | `大量データ性能検証` PR trigger | 0 | 最大1ms。 |
+| 2026-07-16 | GitHub-hosted Windows runner | 未実施 | standard 5k/20k/50k | `大量データ性能検証` workflow / `profile=standard` / `fail_on_warning=true` | 未実施 | workflow追加後、main上で手動実行して結果を追記する。 |
 
 ## SQL確認
 

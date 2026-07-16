@@ -71,6 +71,7 @@ jobs:
           test -f CHANGELOG.md
           test -f .github/dependabot.yml
           test -f .github/workflows/release.yml
+          test -f .github/workflows/performance-large-dataset.yml
           test -f docs/mvp-spec.md
           test -f docs/architecture.md
           test -f docs/domain-model.md
