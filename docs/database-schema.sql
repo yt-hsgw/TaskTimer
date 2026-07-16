@@ -139,6 +139,52 @@ CREATE INDEX timer_pauses_session_idx
 ON timer_pauses (timer_session_id, paused_at)
 WHERE deleted_at IS NULL;
 
+CREATE TABLE pomodoro_settings (
+  id TEXT PRIMARY KEY CHECK (id = 'default'),
+  work_seconds INTEGER NOT NULL CHECK (work_seconds >= 60 AND work_seconds <= 86400),
+  short_break_seconds INTEGER NOT NULL CHECK (short_break_seconds >= 60 AND short_break_seconds <= 86400),
+  long_break_seconds INTEGER NOT NULL CHECK (long_break_seconds >= 60 AND long_break_seconds <= 86400),
+  cycles_until_long_break INTEGER NOT NULL CHECK (cycles_until_long_break >= 1 AND cycles_until_long_break <= 12),
+  auto_start_break INTEGER NOT NULL DEFAULT 0 CHECK (auto_start_break IN (0, 1)),
+  auto_start_next_work INTEGER NOT NULL DEFAULT 0 CHECK (auto_start_next_work IN (0, 1)),
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE pomodoro_sessions (
+  id TEXT PRIMARY KEY,
+  target_type TEXT NOT NULL CHECK (target_type IN ('task', 'subtask')),
+  target_id TEXT NOT NULL,
+  timer_session_id TEXT NULL,
+  phase TEXT NOT NULL CHECK (phase IN ('work', 'short_break', 'long_break')),
+  status TEXT NOT NULL CHECK (status IN ('running', 'paused', 'completed', 'cancelled')),
+  cycle_count INTEGER NOT NULL DEFAULT 0 CHECK (cycle_count >= 0),
+  phase_started_at TEXT NOT NULL,
+  phase_duration_seconds INTEGER NOT NULL CHECK (phase_duration_seconds >= 60 AND phase_duration_seconds <= 86400),
+  paused_at TEXT NULL,
+  paused_total_seconds INTEGER NOT NULL DEFAULT 0 CHECK (paused_total_seconds >= 0),
+  completed_at TEXT NULL,
+  cancelled_at TEXT NULL,
+  deleted_at TEXT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (timer_session_id) REFERENCES timer_sessions(id) ON DELETE RESTRICT,
+  CHECK (phase <> 'work' OR timer_session_id IS NOT NULL),
+  CHECK (completed_at IS NULL OR completed_at >= phase_started_at),
+  CHECK (cancelled_at IS NULL OR cancelled_at >= phase_started_at)
+);
+
+CREATE UNIQUE INDEX one_active_pomodoro_session
+ON pomodoro_sessions ((status IN ('running', 'paused')))
+WHERE status IN ('running', 'paused') AND deleted_at IS NULL;
+
+CREATE INDEX pomodoro_sessions_target_idx
+ON pomodoro_sessions (target_type, target_id, created_at)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX pomodoro_sessions_timer_idx
+ON pomodoro_sessions (timer_session_id)
+WHERE timer_session_id IS NOT NULL AND deleted_at IS NULL;
+
 CREATE TABLE notification_rules (
   id TEXT PRIMARY KEY,
   target_type TEXT NOT NULL CHECK (target_type IN ('task', 'subtask')),

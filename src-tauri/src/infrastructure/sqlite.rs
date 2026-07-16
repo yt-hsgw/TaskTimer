@@ -19,23 +19,29 @@ use uuid::Uuid;
 
 use crate::{
     application::repositories::{
-        target_ref, ActiveTimer, CalendarMarker, CalendarRepository, DataExportCreate,
-        DataExportManifestRecord, DataExportRecord, DataExportRepository,
+        target_ref, ActivePomodoro, ActiveTimer, CalendarMarker, CalendarRepository,
+        DataExportCreate, DataExportManifestRecord, DataExportRecord, DataExportRepository,
         NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationHistoryRepository, NotificationJob, NotificationPreferenceRepository,
-        RecurrenceRuleInput, RecurrenceRuleRecord, RepositoryResult, SqliteBackupCreate,
-        SqliteBackupManifestRecord, SqliteBackupRecord, SqliteBackupRepository,
-        SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord,
-        TagRepository, TagUpdate, TaskListCommandRepository, TaskListCreate, TaskListRecord,
-        TaskListUpdate, TaskReadRepository, TaskRecord, TaskRowRecord, TaskStatusUpdate,
-        TaskTagRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
-        UiPreferenceRepository, UiPreferencesRecord, UiPreferencesUpdate, WeekCalendarItem,
-        WorkItemCreate, WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        PomodoroRepository, PomodoroSettingsRecord, PomodoroSettingsUpdate, RecurrenceRuleInput,
+        RecurrenceRuleRecord, RepositoryResult, SqliteBackupCreate, SqliteBackupManifestRecord,
+        SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore, SqliteRestoreRecord,
+        SubtaskRecord, TagCreate, TagRecord, TagRepository, TagUpdate, TaskListCommandRepository,
+        TaskListCreate, TaskListRecord, TaskListUpdate, TaskReadRepository, TaskRecord,
+        TaskRowRecord, TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository,
+        TaskWithSubtasksRecord, TimerRepository, UiPreferenceRepository, UiPreferencesRecord,
+        UiPreferencesUpdate, WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
+        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
     domain::{
         notification::{
             NotificationDeliveryResult, NotificationDisplayMode, NotificationKind,
             NotificationRegistrationStatus,
+        },
+        pomodoro::{
+            PomodoroPhase, PomodoroStatus, DEFAULT_POMODORO_CYCLES_UNTIL_LONG_BREAK,
+            DEFAULT_POMODORO_LONG_BREAK_SECONDS, DEFAULT_POMODORO_SETTINGS_ID,
+            DEFAULT_POMODORO_SHORT_BREAK_SECONDS, DEFAULT_POMODORO_WORK_SECONDS,
         },
         recurrence::RecurrenceFrequency,
         task::{
@@ -170,6 +176,8 @@ struct JsonExportFile {
     subtasks: Vec<ExportSubtaskRow>,
     timer_sessions: Vec<ExportTimerSessionRow>,
     timer_pauses: Vec<ExportTimerPauseRow>,
+    pomodoro_settings: Vec<ExportPomodoroSettingsRow>,
+    pomodoro_sessions: Vec<ExportPomodoroSessionRow>,
     notification_rules: Vec<ExportNotificationRuleRow>,
     recurrence_rules: Vec<ExportRecurrenceRuleRow>,
 }
@@ -183,6 +191,8 @@ struct ExportDataset {
     subtasks: Vec<ExportSubtaskRow>,
     timer_sessions: Vec<ExportTimerSessionRow>,
     timer_pauses: Vec<ExportTimerPauseRow>,
+    pomodoro_settings: Vec<ExportPomodoroSettingsRow>,
+    pomodoro_sessions: Vec<ExportPomodoroSessionRow>,
     notification_rules: Vec<ExportNotificationRuleRow>,
     recurrence_rules: Vec<ExportRecurrenceRuleRow>,
 }
@@ -266,6 +276,37 @@ struct ExportTimerPauseRow {
     paused_at: String,
     resumed_at: Option<String>,
     created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportPomodoroSettingsRow {
+    id: String,
+    work_seconds: i64,
+    short_break_seconds: i64,
+    long_break_seconds: i64,
+    cycles_until_long_break: i64,
+    auto_start_break: bool,
+    auto_start_next_work: bool,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportPomodoroSessionRow {
+    id: String,
+    target_type: String,
+    target_id: String,
+    timer_session_id: Option<String>,
+    phase: String,
+    status: String,
+    cycle_count: i64,
+    phase_started_at: String,
+    phase_duration_seconds: i64,
+    paused_at: Option<String>,
+    paused_total_seconds: i64,
+    completed_at: Option<String>,
+    cancelled_at: Option<String>,
+    created_at: String,
+    updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -403,6 +444,108 @@ impl CalendarRepository for SqliteDatabase {
 impl TimerRepository for SqliteDatabase {
     fn get_active_timer(&self) -> RepositoryResult<Option<ActiveTimer>> {
         self.with_connection(select_active_timer)
+    }
+}
+
+impl PomodoroRepository for SqliteDatabase {
+    fn get_pomodoro_settings(&self) -> RepositoryResult<PomodoroSettingsRecord> {
+        self.with_connection(select_pomodoro_settings)
+    }
+
+    fn update_pomodoro_settings(
+        &self,
+        input: PomodoroSettingsUpdate,
+    ) -> RepositoryResult<PomodoroSettingsRecord> {
+        self.with_transaction(|transaction| {
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE pomodoro_settings
+                    SET work_seconds = ?1,
+                        short_break_seconds = ?2,
+                        long_break_seconds = ?3,
+                        cycles_until_long_break = ?4,
+                        auto_start_break = ?5,
+                        auto_start_next_work = ?6,
+                        updated_at = ?7
+                    WHERE id = ?8
+                    ",
+                    params![
+                        input.work_seconds,
+                        input.short_break_seconds,
+                        input.long_break_seconds,
+                        input.cycles_until_long_break,
+                        input.auto_start_break,
+                        input.auto_start_next_work,
+                        input.now,
+                        DEFAULT_POMODORO_SETTINGS_ID
+                    ],
+                )
+                .map_err(|error| format!("ポモドーロ設定を保存できません: {error}"))?;
+            if updated != 1 {
+                return Err("ポモドーロ設定を保存できませんでした".to_string());
+            }
+
+            select_pomodoro_settings(transaction)
+        })
+    }
+
+    fn get_active_pomodoro(&self) -> RepositoryResult<Option<ActivePomodoro>> {
+        self.with_connection(select_active_pomodoro)
+    }
+
+    fn start_pomodoro(
+        &self,
+        target: WorkTargetRef,
+        now: String,
+    ) -> RepositoryResult<ActivePomodoro> {
+        self.with_transaction(|transaction| {
+            let status = find_target_status(transaction, &target)?.ok_or_else(|| {
+                "ポモドーロ開始対象のタスクまたはサブタスクが存在しません".to_string()
+            })?;
+            assert_timer_startable(&status)?;
+            ensure_no_active_timer(transaction)?;
+            ensure_no_active_pomodoro(transaction)?;
+            let settings = select_pomodoro_settings(transaction)?;
+
+            let timer_id = Uuid::new_v4().to_string();
+            transaction
+                .execute(
+                    "
+                    INSERT INTO timer_sessions (
+                      id, target_type, target_id, started_at, created_at
+                    )
+                    VALUES (?1, ?2, ?3, ?4, ?4)
+                    ",
+                    params![timer_id, target.target_type.as_str(), target.id, now],
+                )
+                .map_err(|error| format!("ポモドーロ用タイマーを開始できません: {error}"))?;
+
+            let pomodoro_id = Uuid::new_v4().to_string();
+            transaction
+                .execute(
+                    "
+                    INSERT INTO pomodoro_sessions (
+                      id, target_type, target_id, timer_session_id, phase, status,
+                      cycle_count, phase_started_at, phase_duration_seconds,
+                      paused_total_seconds, created_at, updated_at
+                    )
+                    VALUES (?1, ?2, ?3, ?4, 'work', 'running', 0, ?5, ?6, 0, ?5, ?5)
+                    ",
+                    params![
+                        pomodoro_id,
+                        target.target_type.as_str(),
+                        target.id,
+                        timer_id,
+                        now,
+                        settings.work_seconds
+                    ],
+                )
+                .map_err(|error| format!("ポモドーロを開始できません: {error}"))?;
+
+            mark_target_in_progress(transaction, &target, &now)?;
+            select_active_pomodoro_by_id(transaction, &pomodoro_id)
+        })
     }
 }
 
@@ -600,6 +743,8 @@ impl DataExportRepository for SqliteDatabase {
             subtasks: dataset.subtasks,
             timer_sessions: dataset.timer_sessions,
             timer_pauses: dataset.timer_pauses,
+            pomodoro_settings: dataset.pomodoro_settings,
+            pomodoro_sessions: dataset.pomodoro_sessions,
             notification_rules: dataset.notification_rules,
             recurrence_rules: dataset.recurrence_rules,
         };
@@ -681,6 +826,7 @@ impl TaskTimerCommandRepository for SqliteDatabase {
             })?;
             assert_timer_startable(&status)?;
             ensure_no_active_timer(transaction)?;
+            ensure_no_active_pomodoro(transaction)?;
 
             let timer_id = Uuid::new_v4().to_string();
             transaction
@@ -720,6 +866,7 @@ impl TaskTimerCommandRepository for SqliteDatabase {
                 )
                 .map_err(|error| format!("タイマーを一時停止できません: {error}"))?;
 
+            pause_pomodoro_for_timer(transaction, &active_timer.id, &now)?;
             select_active_timer_by_id(transaction, &active_timer.id)
         })
     }
@@ -748,6 +895,7 @@ impl TaskTimerCommandRepository for SqliteDatabase {
                 return Err("一時停止中のタイマーを再開できませんでした".to_string());
             }
 
+            resume_pomodoro_for_timer(transaction, &active_timer.id, &now)?;
             select_active_timer_by_id(transaction, &active_timer.id)
         })
     }
@@ -778,6 +926,8 @@ impl TaskTimerCommandRepository for SqliteDatabase {
                 return Err("開始中のタイマーを停止できませんでした".to_string());
             }
 
+            resume_pomodoro_for_timer(transaction, &active_timer.id, &now)?;
+            cancel_pomodoro_for_timer(transaction, &active_timer.id, &now)?;
             select_timer_by_id(transaction, &active_timer.id)
         })
     }
@@ -982,6 +1132,7 @@ impl TaskTimerCommandRepository for SqliteDatabase {
                 return Ok(task);
             }
             ensure_no_active_timer_for_task_graph(transaction, &task_id)?;
+            ensure_no_active_pomodoro_for_task_graph(transaction, &task_id)?;
 
             transaction
                 .execute(
@@ -3156,6 +3307,7 @@ fn soft_delete_task_graph(
 
     soft_delete_timer_sessions_for_task_graph(transaction, task_id, now)?;
     soft_delete_timer_pauses_for_task_graph(transaction, task_id, now)?;
+    soft_delete_pomodoro_sessions_for_task_graph(transaction, task_id, now)?;
     soft_delete_notification_rules_for_task_graph(transaction, task_id, now)?;
     soft_delete_recurrence_rules_for_task_graph(transaction, task_id, now)?;
     transaction
@@ -3240,6 +3392,20 @@ fn soft_delete_subtask_graph(
     transaction
         .execute(
             "
+            UPDATE pomodoro_sessions
+            SET deleted_at = ?1,
+                updated_at = ?1
+            WHERE target_type = 'subtask'
+              AND target_id = ?2
+              AND deleted_at IS NULL
+            ",
+            params![now, subtask_id],
+        )
+        .map_err(|error| format!("サブタスクのポモドーロ履歴を削除できません: {error}"))?;
+
+    transaction
+        .execute(
+            "
             UPDATE recurrence_rules
             SET deleted_at = ?1,
                 updated_at = ?1
@@ -3280,6 +3446,36 @@ fn soft_delete_timer_sessions_for_task_graph(
         )
         .map(|_| ())
         .map_err(|error| format!("関連タイマー履歴を削除できません: {error}"))
+}
+
+fn soft_delete_pomodoro_sessions_for_task_graph(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE pomodoro_sessions
+            SET deleted_at = ?1,
+                updated_at = ?1
+            WHERE deleted_at IS NULL
+              AND (
+                (target_type = 'task' AND target_id = ?2)
+                OR (
+                  target_type = 'subtask'
+                  AND target_id IN (
+                    SELECT id
+                    FROM subtasks
+                    WHERE task_id = ?2
+                  )
+                )
+              )
+            ",
+            params![now, task_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("関連ポモドーロ履歴を削除できません: {error}"))
 }
 
 fn soft_delete_notification_rules_for_task_graph(
@@ -3393,6 +3589,29 @@ fn ensure_no_active_timer(connection: &Connection) -> RepositoryResult<()> {
 
     if exists {
         Err("すでに開始中のタイマーがあります".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn ensure_no_active_pomodoro(connection: &Connection) -> RepositoryResult<()> {
+    let exists: bool = connection
+        .query_row(
+            "
+            SELECT EXISTS(
+              SELECT 1
+              FROM pomodoro_sessions
+              WHERE status IN ('running', 'paused')
+                AND deleted_at IS NULL
+            )
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("アクティブポモドーロを確認できません: {error}"))?;
+
+    if exists {
+        Err("すでに開始中のポモドーロがあります".to_string())
     } else {
         Ok(())
     }
@@ -3520,6 +3739,46 @@ fn ensure_no_active_timer_for_task_graph(
 
     if exists {
         Err("タイマー開始中のタスクはアーカイブできません".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+fn ensure_no_active_pomodoro_for_task_graph(
+    connection: &Connection,
+    task_id: &str,
+) -> RepositoryResult<()> {
+    let exists: bool = connection
+        .query_row(
+            "
+            SELECT EXISTS(
+              SELECT 1
+              FROM pomodoro_sessions
+              LEFT JOIN subtasks
+                ON pomodoro_sessions.target_type = 'subtask'
+               AND pomodoro_sessions.target_id = subtasks.id
+               AND subtasks.deleted_at IS NULL
+              WHERE pomodoro_sessions.status IN ('running', 'paused')
+                AND pomodoro_sessions.deleted_at IS NULL
+                AND (
+                  (
+                    pomodoro_sessions.target_type = 'task'
+                    AND pomodoro_sessions.target_id = ?1
+                  )
+                  OR (
+                    pomodoro_sessions.target_type = 'subtask'
+                    AND subtasks.task_id = ?1
+                  )
+                )
+            )
+            ",
+            params![task_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("関連アクティブポモドーロを確認できません: {error}"))?;
+
+    if exists {
+        Err("ポモドーロ開始中のタスクはアーカイブできません".to_string())
     } else {
         Ok(())
     }
@@ -3993,6 +4252,155 @@ fn map_active_timer_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActiveTimer
     })
 }
 
+fn select_pomodoro_settings(connection: &Connection) -> RepositoryResult<PomodoroSettingsRecord> {
+    connection
+        .query_row(
+            "
+            SELECT id,
+                   work_seconds,
+                   short_break_seconds,
+                   long_break_seconds,
+                   cycles_until_long_break,
+                   auto_start_break,
+                   auto_start_next_work,
+                   updated_at
+            FROM pomodoro_settings
+            WHERE id = ?1
+            ",
+            params![DEFAULT_POMODORO_SETTINGS_ID],
+            map_pomodoro_settings_row,
+        )
+        .map_err(|error| format!("ポモドーロ設定を取得できません: {error}"))
+}
+
+fn map_pomodoro_settings_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PomodoroSettingsRecord> {
+    Ok(PomodoroSettingsRecord {
+        id: row.get(0)?,
+        work_seconds: row.get(1)?,
+        short_break_seconds: row.get(2)?,
+        long_break_seconds: row.get(3)?,
+        cycles_until_long_break: row.get(4)?,
+        auto_start_break: row.get::<_, i64>(5)? != 0,
+        auto_start_next_work: row.get::<_, i64>(6)? != 0,
+        updated_at: row.get(7)?,
+    })
+}
+
+fn select_active_pomodoro(connection: &Connection) -> RepositoryResult<Option<ActivePomodoro>> {
+    connection
+        .query_row(
+            "
+            SELECT pomodoro_sessions.id,
+                   pomodoro_sessions.target_type,
+                   pomodoro_sessions.target_id,
+                   pomodoro_sessions.timer_session_id,
+                   pomodoro_sessions.phase,
+                   pomodoro_sessions.status,
+                   pomodoro_sessions.cycle_count,
+                   pomodoro_sessions.phase_started_at,
+                   pomodoro_sessions.phase_duration_seconds,
+                   pomodoro_sessions.paused_at,
+                   pomodoro_sessions.paused_total_seconds,
+                   pomodoro_sessions.completed_at,
+                   pomodoro_sessions.cancelled_at,
+                   pomodoro_sessions.deleted_at,
+                   pomodoro_sessions.created_at,
+                   pomodoro_sessions.updated_at
+            FROM pomodoro_sessions
+            LEFT JOIN tasks AS task_targets
+              ON pomodoro_sessions.target_type = 'task'
+             AND pomodoro_sessions.target_id = task_targets.id
+             AND task_targets.deleted_at IS NULL
+             AND task_targets.status <> 'archived'
+            LEFT JOIN subtasks AS subtask_targets
+              ON pomodoro_sessions.target_type = 'subtask'
+             AND pomodoro_sessions.target_id = subtask_targets.id
+             AND subtask_targets.deleted_at IS NULL
+             AND subtask_targets.status <> 'archived'
+            LEFT JOIN tasks AS parent_tasks
+              ON subtask_targets.task_id = parent_tasks.id
+             AND parent_tasks.deleted_at IS NULL
+             AND parent_tasks.status <> 'archived'
+            WHERE pomodoro_sessions.status IN ('running', 'paused')
+              AND pomodoro_sessions.deleted_at IS NULL
+              AND (
+                (
+                  pomodoro_sessions.target_type = 'task'
+                  AND task_targets.id IS NOT NULL
+                )
+                OR (
+                  pomodoro_sessions.target_type = 'subtask'
+                  AND subtask_targets.id IS NOT NULL
+                  AND parent_tasks.id IS NOT NULL
+                )
+              )
+            LIMIT 1
+            ",
+            [],
+            map_active_pomodoro_row,
+        )
+        .optional()
+        .map_err(|error| format!("アクティブポモドーロを取得できません: {error}"))
+}
+
+fn select_active_pomodoro_by_id(
+    connection: &Connection,
+    id: &str,
+) -> RepositoryResult<ActivePomodoro> {
+    connection
+        .query_row(
+            "
+            SELECT id,
+                   target_type,
+                   target_id,
+                   timer_session_id,
+                   phase,
+                   status,
+                   cycle_count,
+                   phase_started_at,
+                   phase_duration_seconds,
+                   paused_at,
+                   paused_total_seconds,
+                   completed_at,
+                   cancelled_at,
+                   deleted_at,
+                   created_at,
+                   updated_at
+            FROM pomodoro_sessions
+            WHERE id = ?1
+              AND status IN ('running', 'paused')
+              AND deleted_at IS NULL
+            ",
+            params![id],
+            map_active_pomodoro_row,
+        )
+        .map_err(|error| format!("開始したポモドーロを取得できません: {error}"))
+}
+
+fn map_active_pomodoro_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActivePomodoro> {
+    let target_type_text: String = row.get(1)?;
+    let target_type = WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?;
+    let phase_text: String = row.get(4)?;
+    let status_text: String = row.get(5)?;
+    Ok(ActivePomodoro {
+        id: row.get(0)?,
+        target: target_ref(target_type, row.get(2)?),
+        timer_session_id: row.get(3)?,
+        phase: PomodoroPhase::from_db(&phase_text).map_err(db_value_error)?,
+        status: PomodoroStatus::from_db(&status_text).map_err(db_value_error)?,
+        cycle_count: row.get(6)?,
+        phase_started_at: row.get(7)?,
+        phase_duration_seconds: row.get(8)?,
+        paused_at: row.get(9)?,
+        paused_total_seconds: row.get(10)?,
+        completed_at: row.get(11)?,
+        cancelled_at: row.get(12)?,
+        deleted_at: row.get(13)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
+    })
+}
+
 fn close_open_pause_for_timer(
     transaction: &Transaction<'_>,
     timer_id: &str,
@@ -4011,6 +4419,94 @@ fn close_open_pause_for_timer(
         )
         .map(|_| ())
         .map_err(|error| format!("一時停止区間を閉じられません: {error}"))
+}
+
+fn pause_pomodoro_for_timer(
+    transaction: &Transaction<'_>,
+    timer_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE pomodoro_sessions
+            SET status = 'paused',
+                paused_at = ?1,
+                updated_at = ?1
+            WHERE timer_session_id = ?2
+              AND status = 'running'
+              AND deleted_at IS NULL
+            ",
+            params![now, timer_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("ポモドーロを一時停止状態に更新できません: {error}"))
+}
+
+fn resume_pomodoro_for_timer(
+    transaction: &Transaction<'_>,
+    timer_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    let paused_at = transaction
+        .query_row(
+            "
+            SELECT paused_at
+            FROM pomodoro_sessions
+            WHERE timer_session_id = ?1
+              AND status = 'paused'
+              AND deleted_at IS NULL
+            ",
+            params![timer_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(|error| format!("ポモドーロ一時停止状態を取得できません: {error}"))?
+        .flatten();
+
+    let Some(paused_at) = paused_at else {
+        return Ok(());
+    };
+    let paused_seconds = calculate_duration_seconds(&paused_at, now)?;
+    transaction
+        .execute(
+            "
+            UPDATE pomodoro_sessions
+            SET status = 'running',
+                paused_at = NULL,
+                paused_total_seconds = paused_total_seconds + ?1,
+                updated_at = ?2
+            WHERE timer_session_id = ?3
+              AND status = 'paused'
+              AND deleted_at IS NULL
+            ",
+            params![paused_seconds, now, timer_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("ポモドーロを再開状態に更新できません: {error}"))
+}
+
+fn cancel_pomodoro_for_timer(
+    transaction: &Transaction<'_>,
+    timer_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE pomodoro_sessions
+            SET status = 'cancelled',
+                paused_at = NULL,
+                cancelled_at = ?1,
+                updated_at = ?1
+            WHERE timer_session_id = ?2
+              AND status IN ('running', 'paused')
+              AND deleted_at IS NULL
+            ",
+            params![now, timer_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("ポモドーロを終了状態に更新できません: {error}"))
 }
 
 fn total_pause_seconds(
@@ -4088,6 +4584,7 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
         .execute_batch(INITIAL_SCHEMA)
         .map_err(|error| format!("SQLite初期マイグレーションに失敗しました: {error}"))?;
     run_timer_recurrence_migration(connection)?;
+    run_pomodoro_migration(connection)?;
     run_due_time_migration(connection)?;
     run_ui_read_model_migration(connection)?;
     run_tag_migration(connection)?;
@@ -4274,6 +4771,62 @@ fn run_timer_recurrence_migration(connection: &Connection) -> RepositoryResult<(
         .map_err(|error| format!("タイマー一時停止/繰り返し用テーブルを作成できません: {error}"))
 }
 
+fn run_pomodoro_migration(connection: &Connection) -> RepositoryResult<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS pomodoro_settings (
+              id TEXT PRIMARY KEY CHECK (id = 'default'),
+              work_seconds INTEGER NOT NULL CHECK (work_seconds >= 60 AND work_seconds <= 86400),
+              short_break_seconds INTEGER NOT NULL CHECK (short_break_seconds >= 60 AND short_break_seconds <= 86400),
+              long_break_seconds INTEGER NOT NULL CHECK (long_break_seconds >= 60 AND long_break_seconds <= 86400),
+              cycles_until_long_break INTEGER NOT NULL CHECK (cycles_until_long_break >= 1 AND cycles_until_long_break <= 12),
+              auto_start_break INTEGER NOT NULL DEFAULT 0 CHECK (auto_start_break IN (0, 1)),
+              auto_start_next_work INTEGER NOT NULL DEFAULT 0 CHECK (auto_start_next_work IN (0, 1)),
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS pomodoro_sessions (
+              id TEXT PRIMARY KEY,
+              target_type TEXT NOT NULL CHECK (target_type IN ('task', 'subtask')),
+              target_id TEXT NOT NULL,
+              timer_session_id TEXT NULL,
+              phase TEXT NOT NULL CHECK (phase IN ('work', 'short_break', 'long_break')),
+              status TEXT NOT NULL CHECK (status IN ('running', 'paused', 'completed', 'cancelled')),
+              cycle_count INTEGER NOT NULL DEFAULT 0 CHECK (cycle_count >= 0),
+              phase_started_at TEXT NOT NULL,
+              phase_duration_seconds INTEGER NOT NULL CHECK (phase_duration_seconds >= 60 AND phase_duration_seconds <= 86400),
+              paused_at TEXT NULL,
+              paused_total_seconds INTEGER NOT NULL DEFAULT 0 CHECK (paused_total_seconds >= 0),
+              completed_at TEXT NULL,
+              cancelled_at TEXT NULL,
+              deleted_at TEXT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              FOREIGN KEY (timer_session_id) REFERENCES timer_sessions(id) ON DELETE RESTRICT,
+              CHECK (phase <> 'work' OR timer_session_id IS NOT NULL),
+              CHECK (completed_at IS NULL OR completed_at >= phase_started_at),
+              CHECK (cancelled_at IS NULL OR cancelled_at >= phase_started_at)
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS one_active_pomodoro_session
+            ON pomodoro_sessions ((status IN ('running', 'paused')))
+            WHERE status IN ('running', 'paused') AND deleted_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS pomodoro_sessions_target_idx
+            ON pomodoro_sessions (target_type, target_id, created_at)
+            WHERE deleted_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS pomodoro_sessions_timer_idx
+            ON pomodoro_sessions (timer_session_id)
+            WHERE timer_session_id IS NOT NULL AND deleted_at IS NULL;
+            ",
+        )
+        .map_err(|error| format!("ポモドーロ用テーブルを作成できません: {error}"))?;
+
+    seed_default_pomodoro_settings(connection)
+}
+
 fn run_ui_read_model_migration(connection: &Connection) -> RepositoryResult<()> {
     connection
         .execute_batch(
@@ -4442,6 +4995,34 @@ fn seed_default_ui_preferences(connection: &Connection) -> RepositoryResult<()> 
         )
         .map(|_| ())
         .map_err(|error| format!("UI設定の初期化に失敗しました: {error}"))
+}
+
+fn seed_default_pomodoro_settings(connection: &Connection) -> RepositoryResult<()> {
+    connection
+        .execute(
+            "
+            INSERT OR IGNORE INTO pomodoro_settings (
+              id,
+              work_seconds,
+              short_break_seconds,
+              long_break_seconds,
+              cycles_until_long_break,
+              auto_start_break,
+              auto_start_next_work,
+              updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            ",
+            params![
+                DEFAULT_POMODORO_SETTINGS_ID,
+                DEFAULT_POMODORO_WORK_SECONDS,
+                DEFAULT_POMODORO_SHORT_BREAK_SECONDS,
+                DEFAULT_POMODORO_LONG_BREAK_SECONDS,
+                DEFAULT_POMODORO_CYCLES_UNTIL_LONG_BREAK
+            ],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("ポモドーロ設定の初期化に失敗しました: {error}"))
 }
 
 fn normalize_optional_list_id(list_id: Option<&str>) -> Option<String> {
@@ -4861,6 +5442,78 @@ fn write_csv_export_files(
             .collect(),
     )?;
     write_csv_file(
+        &export_dir.join("pomodoro_settings.csv"),
+        &[
+            "id",
+            "work_seconds",
+            "short_break_seconds",
+            "long_break_seconds",
+            "cycles_until_long_break",
+            "auto_start_break",
+            "auto_start_next_work",
+            "updated_at",
+        ],
+        dataset
+            .pomodoro_settings
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.work_seconds.to_string(),
+                    row.short_break_seconds.to_string(),
+                    row.long_break_seconds.to_string(),
+                    row.cycles_until_long_break.to_string(),
+                    row.auto_start_break.to_string(),
+                    row.auto_start_next_work.to_string(),
+                    row.updated_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
+        &export_dir.join("pomodoro_sessions.csv"),
+        &[
+            "id",
+            "target_type",
+            "target_id",
+            "timer_session_id",
+            "phase",
+            "status",
+            "cycle_count",
+            "phase_started_at",
+            "phase_duration_seconds",
+            "paused_at",
+            "paused_total_seconds",
+            "completed_at",
+            "cancelled_at",
+            "created_at",
+            "updated_at",
+        ],
+        dataset
+            .pomodoro_sessions
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.target_type.clone(),
+                    row.target_id.clone(),
+                    option_text(&row.timer_session_id),
+                    row.phase.clone(),
+                    row.status.clone(),
+                    row.cycle_count.to_string(),
+                    row.phase_started_at.clone(),
+                    row.phase_duration_seconds.to_string(),
+                    option_text(&row.paused_at),
+                    row.paused_total_seconds.to_string(),
+                    option_text(&row.completed_at),
+                    option_text(&row.cancelled_at),
+                    row.created_at.clone(),
+                    row.updated_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
         &export_dir.join("notification_rules.csv"),
         &[
             "id",
@@ -4939,6 +5592,8 @@ fn csv_export_file_names() -> Vec<&'static str> {
         "subtasks.csv",
         "timer_sessions.csv",
         "timer_pauses.csv",
+        "pomodoro_settings.csv",
+        "pomodoro_sessions.csv",
         "notification_rules.csv",
         "recurrence_rules.csv",
     ]
@@ -5007,6 +5662,8 @@ fn select_export_dataset(connection: &Connection) -> RepositoryResult<ExportData
         subtasks: select_export_subtasks(connection)?,
         timer_sessions: select_export_timer_sessions(connection)?,
         timer_pauses: select_export_timer_pauses(connection)?,
+        pomodoro_settings: select_export_pomodoro_settings(connection)?,
+        pomodoro_sessions: select_export_pomodoro_sessions(connection)?,
         notification_rules: select_export_notification_rules(connection)?,
         recurrence_rules: select_export_recurrence_rules(connection)?,
     })
@@ -5218,6 +5875,76 @@ fn select_export_timer_pauses(
         })
         .map_err(|error| format!("エクスポート用一時停止履歴を取得できません: {error}"))?;
     collect_export_rows(rows, "エクスポート用一時停止履歴を読めません")
+}
+
+fn select_export_pomodoro_settings(
+    connection: &Connection,
+) -> RepositoryResult<Vec<ExportPomodoroSettingsRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, work_seconds, short_break_seconds, long_break_seconds,
+                   cycles_until_long_break, auto_start_break, auto_start_next_work,
+                   updated_at
+            FROM pomodoro_settings
+            ORDER BY id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用ポモドーロ設定取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportPomodoroSettingsRow {
+                id: row.get(0)?,
+                work_seconds: row.get(1)?,
+                short_break_seconds: row.get(2)?,
+                long_break_seconds: row.get(3)?,
+                cycles_until_long_break: row.get(4)?,
+                auto_start_break: row.get::<_, i64>(5)? != 0,
+                auto_start_next_work: row.get::<_, i64>(6)? != 0,
+                updated_at: row.get(7)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用ポモドーロ設定を取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用ポモドーロ設定を読めません")
+}
+
+fn select_export_pomodoro_sessions(
+    connection: &Connection,
+) -> RepositoryResult<Vec<ExportPomodoroSessionRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, target_type, target_id, timer_session_id, phase, status,
+                   cycle_count, phase_started_at, phase_duration_seconds, paused_at,
+                   paused_total_seconds, completed_at, cancelled_at, created_at, updated_at
+            FROM pomodoro_sessions
+            WHERE deleted_at IS NULL
+            ORDER BY created_at, id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用ポモドーロ履歴取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportPomodoroSessionRow {
+                id: row.get(0)?,
+                target_type: row.get(1)?,
+                target_id: row.get(2)?,
+                timer_session_id: row.get(3)?,
+                phase: row.get(4)?,
+                status: row.get(5)?,
+                cycle_count: row.get(6)?,
+                phase_started_at: row.get(7)?,
+                phase_duration_seconds: row.get(8)?,
+                paused_at: row.get(9)?,
+                paused_total_seconds: row.get(10)?,
+                completed_at: row.get(11)?,
+                cancelled_at: row.get(12)?,
+                created_at: row.get(13)?,
+                updated_at: row.get(14)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用ポモドーロ履歴を取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用ポモドーロ履歴を読めません")
 }
 
 fn select_export_notification_rules(
@@ -5574,6 +6301,7 @@ mod tests {
         },
         domain::{
             notification::{NotificationDeliveryResult, NotificationDisplayMode, NotificationKind},
+            pomodoro::{PomodoroPhase, PomodoroStatus},
             task::WorkStatus,
             timer::WorkTargetType,
         },
@@ -5727,6 +6455,152 @@ mod tests {
 
         assert_eq!(display_mode, "title_only");
         assert_eq!(notifications_enabled, 1);
+    }
+
+    #[test]
+    fn migration_initializes_pomodoro_settings() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        configure_connection(&connection).expect("configure");
+        run_initial_migration(&connection).expect("migrate");
+
+        let (
+            work_seconds,
+            short_break_seconds,
+            long_break_seconds,
+            cycles_until_long_break,
+            auto_start_break,
+            auto_start_next_work,
+        ): (i64, i64, i64, i64, i64, i64) = connection
+            .query_row(
+                "
+                SELECT work_seconds, short_break_seconds, long_break_seconds,
+                       cycles_until_long_break, auto_start_break, auto_start_next_work
+                FROM pomodoro_settings
+                WHERE id = 'default'
+                ",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .expect("default pomodoro settings");
+        let table_count: i64 = connection
+            .query_row(
+                "
+                SELECT COUNT(*)
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name IN ('pomodoro_settings', 'pomodoro_sessions')
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .expect("pomodoro tables");
+
+        assert_eq!(work_seconds, DEFAULT_POMODORO_WORK_SECONDS);
+        assert_eq!(short_break_seconds, DEFAULT_POMODORO_SHORT_BREAK_SECONDS);
+        assert_eq!(long_break_seconds, DEFAULT_POMODORO_LONG_BREAK_SECONDS);
+        assert_eq!(
+            cycles_until_long_break,
+            DEFAULT_POMODORO_CYCLES_UNTIL_LONG_BREAK
+        );
+        assert_eq!(auto_start_break, 0);
+        assert_eq!(auto_start_next_work, 0);
+        assert_eq!(table_count, 2);
+    }
+
+    #[test]
+    fn schema_allows_only_one_active_pomodoro() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        configure_connection(&connection).expect("configure");
+        run_initial_migration(&connection).expect("migrate");
+
+        connection
+            .execute(
+                "
+                INSERT INTO pomodoro_sessions (
+                  id, target_type, target_id, phase, status, cycle_count,
+                  phase_started_at, phase_duration_seconds, paused_total_seconds,
+                  created_at, updated_at
+                )
+                VALUES (
+                  'pomodoro-1', 'task', 'task-1', 'short_break', 'running', 1,
+                  '2026-07-05T00:00:00Z', 300, 0,
+                  '2026-07-05T00:00:00Z', '2026-07-05T00:00:00Z'
+                )
+                ",
+                [],
+            )
+            .expect("first active pomodoro");
+
+        let result = connection.execute(
+            "
+            INSERT INTO pomodoro_sessions (
+              id, target_type, target_id, phase, status, cycle_count,
+              phase_started_at, phase_duration_seconds, paused_total_seconds,
+              created_at, updated_at
+            )
+            VALUES (
+              'pomodoro-2', 'task', 'task-2', 'short_break', 'paused', 1,
+              '2026-07-05T00:01:00Z', 300, 0,
+              '2026-07-05T00:01:00Z', '2026-07-05T00:01:00Z'
+            )
+            ",
+            [],
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn update_pomodoro_settings_validates_ranges() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+
+        let updated = usecases::update_pomodoro_settings(
+            &database,
+            &clock,
+            usecases::PomodoroSettingsDraft {
+                work_seconds: 30 * 60,
+                short_break_seconds: 3 * 60,
+                long_break_seconds: 20 * 60,
+                cycles_until_long_break: 3,
+                auto_start_break: true,
+                auto_start_next_work: false,
+            },
+        )
+        .expect("update pomodoro settings");
+        assert_eq!(updated.work_seconds, 30 * 60);
+        assert_eq!(updated.short_break_seconds, 3 * 60);
+        assert_eq!(updated.long_break_seconds, 20 * 60);
+        assert_eq!(updated.cycles_until_long_break, 3);
+        assert!(updated.auto_start_break);
+        assert!(!updated.auto_start_next_work);
+
+        let invalid = usecases::update_pomodoro_settings(
+            &database,
+            &clock,
+            usecases::PomodoroSettingsDraft {
+                work_seconds: 0,
+                short_break_seconds: 3 * 60,
+                long_break_seconds: 20 * 60,
+                cycles_until_long_break: 3,
+                auto_start_break: false,
+                auto_start_next_work: false,
+            },
+        );
+        assert!(invalid
+            .expect_err("invalid work seconds")
+            .contains("作業時間"));
     }
 
     #[test]
@@ -6018,7 +6892,7 @@ mod tests {
             &clock,
             WorkTargetRef {
                 target_type: WorkTargetType::Task,
-                id: first_task.id,
+                id: first_task.id.clone(),
             },
         )
         .expect("first timer");
@@ -6037,6 +6911,174 @@ mod tests {
         );
 
         assert!(result.expect_err("second active timer").contains("開始中"));
+    }
+
+    #[test]
+    fn start_pomodoro_creates_work_timer_and_active_session() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &clock, draft("ポモドーロ作業")).expect("create task");
+
+        let active = usecases::start_pomodoro(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id.clone(),
+            },
+        )
+        .expect("start pomodoro");
+
+        assert_eq!(active.target.target_type, WorkTargetType::Task);
+        assert_eq!(active.target.id, task.id);
+        assert_eq!(active.phase, PomodoroPhase::Work);
+        assert_eq!(active.status, PomodoroStatus::Running);
+        assert_eq!(active.phase_started_at, "2026-07-06T00:00:00Z");
+        assert_eq!(active.phase_duration_seconds, DEFAULT_POMODORO_WORK_SECONDS);
+        let timer_session_id = active
+            .timer_session_id
+            .as_deref()
+            .expect("work phase timer session");
+        let active_timer = database
+            .get_active_timer()
+            .expect("active timer")
+            .expect("pomodoro work timer");
+        assert_eq!(active_timer.id, timer_session_id);
+
+        let active_pomodoro = usecases::get_active_pomodoro(&database)
+            .expect("active pomodoro")
+            .expect("active pomodoro");
+        assert_eq!(active_pomodoro.id, active.id);
+        let updated_task = database
+            .with_connection(|connection| select_task_by_id(connection, &task.id))
+            .expect("updated task");
+        assert_eq!(updated_task.status, WorkStatus::InProgress);
+    }
+
+    #[test]
+    fn timer_pause_resume_and_stop_syncs_active_pomodoro_work_phase() {
+        let database = in_memory_database();
+        let start_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let pause_clock = FixedClock {
+            now: "2026-07-06T00:02:00Z",
+        };
+        let resume_clock = FixedClock {
+            now: "2026-07-06T00:05:00Z",
+        };
+        let stop_clock = FixedClock {
+            now: "2026-07-06T00:07:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &start_clock, draft("ポモドーロ同期")).expect("task");
+        let pomodoro = usecases::start_pomodoro(
+            &database,
+            &start_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start pomodoro");
+
+        usecases::pause_active_timer(&database, &pause_clock).expect("pause pomodoro timer");
+        let paused = usecases::get_active_pomodoro(&database)
+            .expect("active pomodoro")
+            .expect("paused pomodoro");
+        assert_eq!(paused.status, PomodoroStatus::Paused);
+        assert_eq!(paused.paused_at.as_deref(), Some("2026-07-06T00:02:00Z"));
+
+        usecases::resume_active_timer(&database, &resume_clock).expect("resume pomodoro timer");
+        let resumed = usecases::get_active_pomodoro(&database)
+            .expect("active pomodoro")
+            .expect("resumed pomodoro");
+        assert_eq!(resumed.status, PomodoroStatus::Running);
+        assert_eq!(resumed.paused_at, None);
+        assert_eq!(resumed.paused_total_seconds, 180);
+
+        let stopped =
+            usecases::stop_active_timer(&database, &stop_clock).expect("stop pomodoro timer");
+        let active_pomodoro = usecases::get_active_pomodoro(&database).expect("active pomodoro");
+        let (status, cancelled_at, paused_total_seconds): (String, String, i64) = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "
+                        SELECT status, cancelled_at, paused_total_seconds
+                        FROM pomodoro_sessions
+                        WHERE id = ?1
+                        ",
+                        params![pomodoro.id.as_str()],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )
+                    .map_err(|error| format!("pomodoro row: {error}"))
+            })
+            .expect("pomodoro row");
+
+        assert_eq!(stopped.elapsed_seconds, Some(240));
+        assert!(active_pomodoro.is_none());
+        assert_eq!(status, PomodoroStatus::Cancelled.as_str());
+        assert_eq!(cancelled_at, "2026-07-06T00:07:00Z");
+        assert_eq!(paused_total_seconds, 180);
+    }
+
+    #[test]
+    fn start_timer_and_start_pomodoro_are_mutually_exclusive() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let first_task =
+            usecases::create_task(&database, &clock, draft("通常タイマー")).expect("first task");
+        let second_task =
+            usecases::create_task(&database, &clock, draft("ポモドーロ")).expect("second task");
+
+        usecases::start_timer(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: first_task.id.clone(),
+            },
+        )
+        .expect("start normal timer");
+        let pomodoro_result = usecases::start_pomodoro(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: second_task.id.clone(),
+            },
+        );
+        assert!(pomodoro_result
+            .expect_err("active timer blocks pomodoro")
+            .contains("開始中"));
+
+        usecases::stop_active_timer(&database, &clock).expect("stop normal timer");
+        usecases::start_pomodoro(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: second_task.id,
+            },
+        )
+        .expect("start pomodoro");
+        let normal_timer_result = usecases::start_timer(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: first_task.id,
+            },
+        );
+        assert!(normal_timer_result
+            .expect_err("active pomodoro blocks timer")
+            .contains("開始中"));
     }
 
     #[test]
@@ -6587,6 +7629,17 @@ mod tests {
         assert_eq!(json["task_tags"][0]["task_id"], task.id);
         assert_eq!(json["task_tags"][0]["tag_id"], tag.id);
         assert_eq!(json["subtasks"][0]["title"], "サブタスク");
+        assert_eq!(
+            json["pomodoro_settings"][0]["work_seconds"],
+            DEFAULT_POMODORO_WORK_SECONDS
+        );
+        assert_eq!(
+            json["pomodoro_sessions"]
+                .as_array()
+                .expect("sessions")
+                .len(),
+            0
+        );
 
         fs::remove_dir_all(data_dir).expect("cleanup data");
         fs::remove_dir_all(export_root).expect("cleanup export");
@@ -6663,9 +7716,20 @@ mod tests {
             .files
             .iter()
             .any(|path| path.ends_with("timer_sessions.csv")));
+        assert!(export
+            .files
+            .iter()
+            .any(|path| path.ends_with("pomodoro_settings.csv")));
+        assert!(export
+            .files
+            .iter()
+            .any(|path| path.ends_with("pomodoro_sessions.csv")));
 
         let tasks_csv = fs::read_to_string(PathBuf::from(&export.export_path).join("tasks.csv"))
             .expect("read tasks csv");
+        let pomodoro_settings_csv =
+            fs::read_to_string(PathBuf::from(&export.export_path).join("pomodoro_settings.csv"))
+                .expect("read pomodoro settings csv");
         let tags_csv = fs::read_to_string(PathBuf::from(&export.export_path).join("tags.csv"))
             .expect("read tags csv");
         let task_tags_csv =
@@ -6674,6 +7738,7 @@ mod tests {
         assert!(tasks_csv.starts_with("id,list_id,title,status,is_favorite"));
         assert!(tasks_csv.contains("\"'=SUM(1,2)\""));
         assert!(tasks_csv.contains("\"カンマ, 改行\n\"\"引用符\"\"\""));
+        assert!(pomodoro_settings_csv.starts_with("id,work_seconds,short_break_seconds"));
         assert!(tags_csv.contains("'+tag"));
         assert!(task_tags_csv.contains(&task.id));
         assert!(task_tags_csv.contains(&tag.id));
@@ -8014,6 +9079,53 @@ mod tests {
         assert_eq!(deleted_timer_pauses, 1);
         assert_eq!(deleted_recurrences, 2);
         assert_eq!(disabled_notifications, 2);
+    }
+
+    #[test]
+    fn delete_task_soft_deletes_active_pomodoro() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let task = usecases::create_task(&database, &clock, draft("ポモドーロ削除")).expect("task");
+
+        usecases::start_pomodoro(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id.clone(),
+            },
+        )
+        .expect("start pomodoro");
+        usecases::delete_task(&database, &clock, task.id).expect("delete task");
+
+        let active_timer = database.get_active_timer().expect("active timer");
+        let active_pomodoro = usecases::get_active_pomodoro(&database).expect("active pomodoro");
+        let (deleted_timers, deleted_pomodoros): (i64, i64) = database
+            .with_connection(|connection| {
+                let deleted_timers = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM timer_sessions WHERE deleted_at IS NOT NULL",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("deleted timers");
+                let deleted_pomodoros = connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM pomodoro_sessions WHERE deleted_at IS NOT NULL",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .expect("deleted pomodoros");
+                Ok((deleted_timers, deleted_pomodoros))
+            })
+            .expect("deleted counts");
+
+        assert!(active_timer.is_none());
+        assert!(active_pomodoro.is_none());
+        assert_eq!(deleted_timers, 1);
+        assert_eq!(deleted_pomodoros, 1);
     }
 
     #[test]

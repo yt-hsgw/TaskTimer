@@ -73,6 +73,36 @@ erDiagram
     datetime created_at
   }
 
+  POMODORO_SETTING {
+    string id PK
+    int work_seconds
+    int short_break_seconds
+    int long_break_seconds
+    int cycles_until_long_break
+    bool auto_start_break
+    bool auto_start_next_work
+    datetime updated_at
+  }
+
+  POMODORO_SESSION {
+    string id PK
+    string target_type
+    string target_id
+    string timer_session_id FK
+    string phase
+    string status
+    int cycle_count
+    datetime phase_started_at
+    int phase_duration_seconds
+    datetime paused_at
+    int paused_total_seconds
+    datetime completed_at
+    datetime cancelled_at
+    datetime deleted_at
+    datetime created_at
+    datetime updated_at
+  }
+
   NOTIFICATION_RULE {
     string id PK
     string target_type
@@ -125,6 +155,7 @@ erDiagram
   TAG ||--o{ TASK_TAG : 割り当て
   TASK ||--o{ SUBTASK : 持つ
   TIMER_SESSION ||--o{ TIMER_PAUSE : 持つ
+  TIMER_SESSION ||--o{ POMODORO_SESSION : 作業フェーズ
 ```
 
 ## エンティティ
@@ -183,8 +214,8 @@ erDiagram
 - アーカイブ済みタスクとその子サブタスクは、通常一覧、今日、お気に入り、カレンダー、通知dispatchから除外する。
 - タスクまたは子サブタスクでタイマー開始中の場合、アーカイブは拒否する。
 - アーカイブ済みタスクの復元は、`completed_at` があれば `done`、なければ `todo` へ戻し、子サブタスク状態は維持する。
-- タスク削除時は、タスク、子サブタスク、タイマーセッション、通知ルールを同一トランザクションでソフト削除する。
-- タスク削除時に対象タスクまたは子サブタスクでタイマー開始中の場合、そのタイマーセッションもソフト削除して通常のアクティブタイマー検索から除外する。
+- タスク削除時は、タスク、子サブタスク、タイマーセッション、ポモドーロセッション、通知ルールを同一トランザクションでソフト削除する。
+- タスク削除時に対象タスクまたは子サブタスクでタイマー/ポモドーロ開始中の場合、そのセッションもソフト削除して通常のアクティブ検索から除外する。
 - お気に入り状態はタスク単位で保持する。
 - タグは親タスク単位で複数付与できる。
 - 完了済みタスクは完了セクションへ表示されるが、データ上は `status` と `completed_at` を正とする。
@@ -214,8 +245,8 @@ erDiagram
 - サブタスクは独自のタイマー履歴を持てる。
 - サブタスクは独自の開始予定日、期限日、期限時刻、タイマー目標時間を持てる。
 - 完了済みサブタスクは未完了に戻せるが、アーカイブ済みサブタスクは未完了に戻せない。
-- サブタスク削除時は、サブタスク、タイマーセッション、通知ルールを同一トランザクションでソフト削除する。
-- サブタスク削除時にタイマー開始中の場合、そのタイマーセッションもソフト削除して通常のアクティブタイマー検索から除外する。
+- サブタスク削除時は、サブタスク、タイマーセッション、ポモドーロセッション、通知ルールを同一トランザクションでソフト削除する。
+- サブタスク削除時にタイマー/ポモドーロ開始中の場合、そのセッションもソフト削除して通常のアクティブ検索から除外する。
 
 ### TimerSession
 
@@ -245,6 +276,31 @@ erDiagram
 - 終了時に未再開の一時停止区間がある場合、終了時刻で `resumed_at` を閉じる。
 - `elapsed_seconds` は一時停止区間の合計秒数を除外して確定する。
 - ソフト削除済みタイマーの一時停止区間は通常の計算対象から除外する。
+
+### PomodoroSetting
+
+ポモドーロの既定値を表す。
+
+ルール:
+
+- `id = default` の1行を正とする。
+- 作業、短休憩、長休憩は60秒以上86,400秒以下。
+- 長休憩までの作業回数は1以上12以下。
+- 自動開始設定は将来UI/通知実装で使う。初期値はOFF。
+
+### PomodoroSession
+
+ポモドーロの現在フェーズと履歴を表す。
+
+ルール:
+
+- `target_type` は `task` または `subtask`。
+- `phase` は `work`, `short_break`, `long_break`。
+- `status` は `running`, `paused`, `completed`, `cancelled`。
+- `running` または `paused` のポモドーロはアプリ全体で最大1件。
+- 作業フェーズは `timer_sessions` を同一トランザクションで作成し、実作業時間履歴として扱う。
+- 休憩フェーズは `timer_sessions` に保存しない。
+- 対象削除時はソフト削除し、アクティブポモドーロ検索から除外する。
 
 ### NotificationRule
 
@@ -326,7 +382,16 @@ erDiagram
 
 - 対象が存在する。
 - 対象が完了済みまたはアーカイブ済みではない。
-- アクティブタイマーが存在しない。
+- アクティブタイマーまたはアクティブポモドーロが存在しない。
+
+### PomodoroPolicy
+
+確認内容:
+
+- 作業/休憩秒数と長休憩までの作業回数が許容範囲内である。
+- 作業フェーズだけが `timer_sessions` と紐づく。
+- 通常タイマーとポモドーロを合わせて単一アクティブ制約を満たす。
+- 対象削除時にポモドーロセッションが孤立しない。
 
 ### SchedulePolicy
 

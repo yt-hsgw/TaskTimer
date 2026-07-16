@@ -51,7 +51,7 @@
 - Subtaskドメインモデル。
 - TimerSessionドメインモデル。
 - SQLite Repository。
-- Application Use Case。
+- Application Use Case。初回実装スライスで `GetPomodoroSettings`、`UpdatePomodoroSettings`、`GetActivePomodoro`、`StartPomodoro` まで追加済み。
 
 完了条件:
 
@@ -240,12 +240,13 @@ UI専用にすべてのタスク、サブタスク、タイマー履歴を一括
 
 推奨分割:
 
-1. データモデル、Use Case、Repository境界を追加する。
-2. SQLiteマイグレーションとRustテストを追加する。
+1. データモデル、Use Case、Repository境界を追加する。完了。
+2. SQLiteマイグレーションとRustテストを追加する。完了。
 3. 右詳細ペインに通常/ポモドーロ切替と進行中表示を追加する。
 4. 設定画面にポモドーロ既定値を追加する。
 5. 作業終了/休憩終了通知と復帰時再同期を追加する。
-6. バックアップ、JSON、CSVエクスポート、大量データ計測を更新する。
+6. バックアップ、JSON、CSVエクスポートを更新する。完了。
+7. 大量データ計測を更新する。
 
 危険ケース:
 
