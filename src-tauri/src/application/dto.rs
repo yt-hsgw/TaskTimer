@@ -9,10 +9,10 @@ use super::{
     repositories::{
         ActivePomodoro, ActiveTimer, DataExportManifestRecord, DataExportRecord,
         NextNotificationSchedule, NotificationDeliveryAttemptRecord, NotificationDispatchSummary,
-        PomodoroSettingsRecord, RecurrenceRuleRecord, SqliteBackupManifestRecord,
-        SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord, TagRecord, TaskListRecord,
-        TaskRecord, TaskRowRecord, TaskTagRecord, TaskWithSubtasksRecord, UiPreferencesRecord,
-        WeekCalendarItem,
+        NotificationSyncResult, PomodoroSettingsRecord, RecurrenceRuleRecord,
+        SqliteBackupManifestRecord, SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord,
+        TagRecord, TaskListRecord, TaskRecord, TaskRowRecord, TaskTagRecord,
+        TaskWithSubtasksRecord, UiPreferencesRecord, WeekCalendarItem,
     },
     usecases::{
         DataExportCreateDraft, PomodoroSettingsDraft, RecurrenceRuleDraft, SqliteBackupCreateDraft,
@@ -484,6 +484,13 @@ pub struct NotificationDispatchSummaryDto {
 pub struct NextNotificationScheduleDto {
     pub notification_rule_id: String,
     pub notify_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationSyncResultDto {
+    pub dispatch_summary: NotificationDispatchSummaryDto,
+    pub next_schedule: Option<NextNotificationScheduleDto>,
 }
 
 #[derive(Serialize)]
@@ -982,6 +989,15 @@ impl From<NextNotificationSchedule> for NextNotificationScheduleDto {
         Self {
             notification_rule_id: value.notification_rule_id,
             notify_at: value.notify_at,
+        }
+    }
+}
+
+impl From<NotificationSyncResult> for NotificationSyncResultDto {
+    fn from(value: NotificationSyncResult) -> Self {
+        Self {
+            dispatch_summary: value.dispatch_summary.into(),
+            next_schedule: value.next_schedule.map(Into::into),
         }
     }
 }

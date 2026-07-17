@@ -295,6 +295,12 @@ pub struct NotificationDispatchSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationSyncResult {
+    pub dispatch_summary: NotificationDispatchSummary,
+    pub next_schedule: Option<NextNotificationSchedule>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationDeliveryAttemptRecord {
     pub id: String,
     pub notification_rule_id: String,

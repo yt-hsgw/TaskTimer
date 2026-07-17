@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   ActivePomodoro,
+  NextNotificationSchedule,
   NotificationDeliveryAttempt,
   NotificationDispatchSummary,
   PomodoroSettings,
@@ -73,8 +74,8 @@ export function App() {
   const [notificationFailureHistory, setNotificationFailureHistory] = useState<
     NotificationDeliveryAttempt[]
   >([]);
-  const [notificationScheduleVersion, setNotificationScheduleVersion] =
-    useState(0);
+  const [nextNotificationSchedule, setNextNotificationSchedule] =
+    useState<NextNotificationSchedule | null>(null);
   const [calendarViewMode, setCalendarViewMode] =
     useState<CalendarViewMode>("week");
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(
@@ -240,19 +241,20 @@ export function App() {
       setPomodoroSettings(nextPomodoroSettings);
       setDisplayMode(nextDisplayMode);
       setNotificationsEnabled(nextNotificationsEnabled);
-      const dueNotificationSummary =
-        await tauriTaskTimerGateway.dispatchDueNotifications();
+      const notificationSyncResult =
+        await tauriTaskTimerGateway.syncNotifications();
       setNotificationSummary(
         combineNotificationSummaries(
           pomodoroSyncResult.notificationSummary,
-          dueNotificationSummary,
+          notificationSyncResult.dispatchSummary,
         ),
       );
+      setNextNotificationSchedule(notificationSyncResult.nextSchedule);
       setNotificationFailureHistory(
         await tauriTaskTimerGateway.listNotificationFailureHistory(),
       );
-      setNotificationScheduleVersion((version) => version + 1);
     } catch (error) {
+      setNextNotificationSchedule(null);
       setErrorMessage(toErrorMessage(error));
     } finally {
       if (showLoading) {
@@ -398,42 +400,25 @@ export function App() {
   }, [activePomodoro, loadSnapshot]);
 
   useEffect(() => {
-    if (!hasHydratedUiPreferences || !notificationsEnabled) {
+    if (
+      !hasHydratedUiPreferences ||
+      !notificationsEnabled ||
+      !nextNotificationSchedule
+    ) {
       return;
     }
 
-    let isCancelled = false;
-    let timerId: number | null = null;
+    const timerId = window.setTimeout(() => {
+      void loadSnapshot({ showLoading: false });
+    }, getNotificationScheduleTimeoutMs(nextNotificationSchedule.notifyAt));
 
-    async function scheduleNextNotification() {
-      try {
-        const nextNotification =
-          await tauriTaskTimerGateway.getNextPendingNotification();
-        if (isCancelled || !nextNotification) {
-          return;
-        }
-
-        timerId = window.setTimeout(() => {
-          void loadSnapshot({ showLoading: false });
-        }, getNotificationScheduleTimeoutMs(nextNotification.notifyAt));
-      } catch (error) {
-        if (!isCancelled) {
-          setErrorMessage(toErrorMessage(error));
-        }
-      }
-    }
-
-    void scheduleNextNotification();
     return () => {
-      isCancelled = true;
-      if (timerId !== null) {
-        window.clearTimeout(timerId);
-      }
+      window.clearTimeout(timerId);
     };
   }, [
     hasHydratedUiPreferences,
     loadSnapshot,
-    notificationScheduleVersion,
+    nextNotificationSchedule,
     notificationsEnabled,
   ]);
 

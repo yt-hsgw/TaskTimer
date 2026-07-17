@@ -139,6 +139,7 @@ UI専用にすべてのタスク、サブタスク、タイマー履歴を一括
 - 設定画面でdispatch結果と失敗メッセージを確認でき、再試行できる。
 - 通知送信の成功/失敗は `notification_delivery_attempts` に保存し、設定画面で最新履歴を確認できる。
 - アプリ起動中は、最も近い未来の `pending` / `failed` 通知を読み取り、React側の単一ローカルタイマーから既存 `dispatch_due_notifications` を呼び出せる。
+- 起動、復帰、通知設定変更、タスク/サブタスク期限変更、バックアップ復元後は `sync_notifications` を通知再同期入口として使い、期限到来dispatch後に次回通知予定を再予約する。
 
 設計判断:
 
@@ -146,6 +147,7 @@ UI専用にすべてのタスク、サブタスク、タイマー履歴を一括
 - メモ本文は通知本文に含めない。
 - 通知全体OFF時は通知ルールを変更せず、dispatch入口でOS通知送信を止める。
 - 将来時刻通知は段階導入する。第1段階ではアプリ起動中のローカルスケジューラで既存 `dispatch_due_notifications` を呼び、第2段階ではWindows/macOSネイティブ永続登録を検証する。
+- `sync_notifications` は新しいOS永続登録状態を持たず、DB上の `notification_rules` からローカルタイマーを再生成する。
 
 ## Phase 5: リリース前強化
 

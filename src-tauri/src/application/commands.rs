@@ -164,6 +164,20 @@ pub fn get_next_pending_notification(
 }
 
 #[tauri::command]
+pub fn sync_notifications(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    notification_gateway: NotificationGatewayState<'_>,
+) -> Result<super::dto::NotificationSyncResultDto, String> {
+    super::usecases::sync_notifications(
+        database.inner(),
+        notification_gateway.inner(),
+        clock.inner(),
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
 pub fn get_ui_preferences(
     database: DatabaseState<'_>,
 ) -> Result<super::dto::UiPreferencesDto, String> {
