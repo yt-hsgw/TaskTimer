@@ -90,7 +90,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("大量データ検証DBを作成しました: {}", config.out.display());
     println!(
-        "tasks={}, subtasks={}, timer_sessions={}, task_lists={}",
+        "tasks={}, subtasks={}, stopped_timer_sessions={}, active_pomodoro_sessions=1, task_lists={}",
         config.task_count, config.subtask_count, config.timer_session_count, config.list_count
     );
     println!(
@@ -341,6 +341,45 @@ fn seed_database(connection: &mut Connection, config: &Config) -> Result<(), Box
         }
     }
 
+    let active_pomodoro_task_id = task_id(active_pomodoro_task_index(config));
+    let active_started_at = datetime_for(config, 0, 12, 0)?;
+    transaction.execute(
+        "
+        UPDATE tasks
+        SET status = 'in_progress',
+            completed_at = NULL,
+            updated_at = ?2
+        WHERE id = ?1
+          AND deleted_at IS NULL
+        ",
+        params![active_pomodoro_task_id.as_str(), active_started_at.as_str()],
+    )?;
+    transaction.execute(
+        "
+        INSERT INTO timer_sessions (
+          id, target_type, target_id, started_at, stopped_at,
+          elapsed_seconds, deleted_at, created_at
+        ) VALUES ('perf-active-pomodoro-timer', 'task', ?1, ?2, NULL, NULL, NULL, ?2)
+        ",
+        params![active_pomodoro_task_id.as_str(), active_started_at.as_str()],
+    )?;
+    transaction.execute(
+        "
+        INSERT INTO pomodoro_sessions (
+          id, target_type, target_id, timer_session_id, phase, status,
+          cycle_count, phase_started_at, phase_duration_seconds,
+          paused_at, paused_total_seconds, completed_at, cancelled_at,
+          deleted_at, created_at, updated_at
+        ) VALUES (
+          'perf-active-pomodoro', 'task', ?1, 'perf-active-pomodoro-timer', 'work', 'running',
+          0, ?2, 1500,
+          NULL, 0, NULL, NULL,
+          NULL, ?2, ?2
+        )
+        ",
+        params![active_pomodoro_task_id.as_str(), active_started_at.as_str()],
+    )?;
+
     transaction.commit()?;
     Ok(())
 }
@@ -429,6 +468,14 @@ fn task_id(index: usize) -> String {
 
 fn subtask_id(index: usize) -> String {
     format!("perf-subtask-{index:05}")
+}
+
+fn active_pomodoro_task_index(config: &Config) -> usize {
+    if config.task_count > 1 {
+        1
+    } else {
+        0
+    }
 }
 
 fn task_status(index: usize) -> &'static str {
