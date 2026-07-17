@@ -10226,6 +10226,107 @@ mod tests {
     }
 
     #[test]
+    fn sync_notifications_dispatches_due_after_resume_and_reschedules_future() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T09:00:00Z",
+        };
+        let resume_clock = FixedClock {
+            now: "2026-07-06T09:06:00Z",
+        };
+        let second_resume_clock = FixedClock {
+            now: "2026-07-06T09:07:00Z",
+        };
+        let notification_gateway = RecordingNotificationGateway::ok();
+
+        for (title, due_time) in [("復帰時に送る通知", "09:05"), ("次に予約する通知", "09:10")]
+        {
+            usecases::create_task(
+                &database,
+                &create_clock,
+                usecases::WorkItemDraft {
+                    list_id: None,
+                    title: title.to_string(),
+                    planned_start_date: None,
+                    due_date: Some("2026-07-06".to_string()),
+                    due_time: Some(due_time.to_string()),
+                    memo: None,
+                },
+            )
+            .expect("create task");
+        }
+
+        let initial_sync =
+            usecases::sync_notifications(&database, &notification_gateway, &create_clock)
+                .expect("initial sync");
+        let resume_sync =
+            usecases::sync_notifications(&database, &notification_gateway, &resume_clock)
+                .expect("resume sync");
+        let duplicate_guard_sync =
+            usecases::sync_notifications(&database, &notification_gateway, &second_resume_clock)
+                .expect("duplicate guard sync");
+
+        assert_eq!(initial_sync.dispatch_summary.attempted, 0);
+        assert_eq!(
+            initial_sync
+                .next_schedule
+                .as_ref()
+                .map(|schedule| schedule.notify_at.as_str()),
+            Some("2026-07-06T09:05:00Z")
+        );
+        assert_eq!(resume_sync.dispatch_summary.attempted, 1);
+        assert_eq!(resume_sync.dispatch_summary.succeeded, 1);
+        assert_eq!(
+            resume_sync
+                .next_schedule
+                .as_ref()
+                .map(|schedule| schedule.notify_at.as_str()),
+            Some("2026-07-06T09:10:00Z")
+        );
+        assert_eq!(duplicate_guard_sync.dispatch_summary.attempted, 0);
+        assert_eq!(
+            duplicate_guard_sync
+                .next_schedule
+                .as_ref()
+                .map(|schedule| schedule.notify_at.as_str()),
+            Some("2026-07-06T09:10:00Z")
+        );
+        assert_eq!(notification_gateway.messages().len(), 1);
+    }
+
+    #[test]
+    fn sync_notifications_skips_dispatch_and_schedule_when_disabled() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T09:00:00Z",
+        };
+        let notification_gateway = RecordingNotificationGateway::ok();
+
+        usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "通知OFF同期".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-06".to_string()),
+                due_time: Some("09:05".to_string()),
+                memo: None,
+            },
+        )
+        .expect("create task");
+        usecases::update_notifications_enabled(&database, &clock, false)
+            .expect("disable notifications");
+
+        let sync_result = usecases::sync_notifications(&database, &notification_gateway, &clock)
+            .expect("notification sync");
+
+        assert_eq!(sync_result.dispatch_summary.attempted, 0);
+        assert_eq!(sync_result.next_schedule, None);
+        assert!(notification_gateway.messages().is_empty());
+    }
+
+    #[test]
     fn update_task_detail_saves_and_disables_recurrence_rule() {
         let database = in_memory_database();
         let create_clock = FixedClock {

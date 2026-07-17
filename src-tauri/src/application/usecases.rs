@@ -21,14 +21,14 @@ use super::{
         ActivePomodoro, ActiveTimer, DataExportCreate, DataExportRecord, DataExportRepository,
         NextNotificationSchedule, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationDispatchSummary, NotificationHistoryRepository,
-        NotificationPreferenceRepository, NotificationScheduleRepository, PomodoroRepository,
-        PomodoroSettingsRecord, PomodoroSettingsUpdate, RecurrenceRuleInput, RepositoryResult,
-        SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore,
-        SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord, TagRepository, TagUpdate,
-        TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskRecord,
-        TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository,
-        UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate,
-        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        NotificationPreferenceRepository, NotificationScheduleRepository, NotificationSyncResult,
+        PomodoroRepository, PomodoroSettingsRecord, PomodoroSettingsUpdate, RecurrenceRuleInput,
+        RepositoryResult, SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository,
+        SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord,
+        TagRepository, TagUpdate, TaskListCommandRepository, TaskListCreate, TaskListRecord,
+        TaskListUpdate, TaskRecord, TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository,
+        UiPreferenceRepository, UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate,
+        WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
 
@@ -579,6 +579,24 @@ pub fn get_next_pending_notification(
     }
 
     repository.get_next_pending_notification(&clock.now_utc_iso8601())
+}
+
+pub fn sync_notifications<R>(
+    repository: &R,
+    notification_gateway: &impl LocalNotificationGateway,
+    clock: &impl Clock,
+) -> RepositoryResult<NotificationSyncResult>
+where
+    R: NotificationCommandRepository
+        + NotificationPreferenceRepository
+        + NotificationScheduleRepository,
+{
+    let dispatch_summary = dispatch_due_notifications(repository, notification_gateway, clock)?;
+    let next_schedule = get_next_pending_notification(repository, clock)?;
+    Ok(NotificationSyncResult {
+        dispatch_summary,
+        next_schedule,
+    })
 }
 
 pub fn dispatch_due_notifications(
