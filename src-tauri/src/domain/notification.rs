@@ -76,6 +76,56 @@ impl NotificationRegistrationStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotificationOsRegistrationStatus {
+    Pending,
+    Registered,
+    Failed,
+    CancelPending,
+    Disabled,
+}
+
+impl NotificationOsRegistrationStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Registered => "registered",
+            Self::Failed => "failed",
+            Self::CancelPending => "cancel_pending",
+            Self::Disabled => "disabled",
+        }
+    }
+
+    pub fn from_db(value: &str) -> Result<Self, String> {
+        match value {
+            "pending" => Ok(Self::Pending),
+            "registered" => Ok(Self::Registered),
+            "failed" => Ok(Self::Failed),
+            "cancel_pending" => Ok(Self::CancelPending),
+            "disabled" => Ok(Self::Disabled),
+            _ => Err(format!("不正な通知OS登録状態です: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotificationOsRegistrationAction {
+    RegisterOrReplace,
+    Cancel,
+}
+
+impl NotificationOsRegistrationAction {
+    pub fn from_status(status: &NotificationOsRegistrationStatus) -> Self {
+        match status {
+            NotificationOsRegistrationStatus::CancelPending => Self::Cancel,
+            NotificationOsRegistrationStatus::Pending
+            | NotificationOsRegistrationStatus::Registered
+            | NotificationOsRegistrationStatus::Failed
+            | NotificationOsRegistrationStatus::Disabled => Self::RegisterOrReplace,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotificationDeliveryResult {
     Success,
     Failed,

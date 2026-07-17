@@ -209,6 +209,37 @@ CREATE INDEX notification_rules_target_idx
 ON notification_rules (target_type, target_id)
 WHERE deleted_at IS NULL;
 
+CREATE TABLE notification_os_registrations (
+  id TEXT PRIMARY KEY,
+  notification_rule_id TEXT NOT NULL,
+  os_registration_id TEXT NULL CHECK (
+    os_registration_id IS NULL OR length(trim(os_registration_id)) > 0
+  ),
+  registration_status TEXT NOT NULL CHECK (
+    registration_status IN (
+      'pending',
+      'registered',
+      'failed',
+      'cancel_pending',
+      'disabled'
+    )
+  ),
+  last_attempted_at TEXT NULL,
+  last_error TEXT NULL,
+  deleted_at TEXT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (notification_rule_id) REFERENCES notification_rules(id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX notification_os_registrations_rule_active_idx
+ON notification_os_registrations (notification_rule_id)
+WHERE deleted_at IS NULL;
+
+CREATE INDEX notification_os_registrations_status_idx
+ON notification_os_registrations (registration_status, updated_at)
+WHERE deleted_at IS NULL;
+
 CREATE TABLE notification_delivery_attempts (
   id TEXT PRIMARY KEY,
   notification_rule_id TEXT NOT NULL,

@@ -141,6 +141,8 @@ flowchart LR
 | GetNextPendingNotification | アプリ起動中のローカルスケジューラ用に、未来の `pending` / `failed` 通知から最も近い1件を取得する。読み取り専用。 |
 | DispatchDueNotifications | 期限到来した通知ルールを取得し、OS通知送信後に `registered` または `failed` を保存する。アプリ起動中スケジューラも期限到達時にこのUse Caseを呼ぶ。 |
 | SyncNotifications | 起動、復帰、設定変更、復元後の再同期入口。期限到来通知dispatch後に次回通知予定を返す。 |
+| ListNotificationOsRegistrationJobs | 将来のネイティブadapter用に、OS登録/差し替え/解除が必要な通知登録状態を上限付きで取得する。 |
+| MarkNotificationOsRegistrationRegistered / Failed / Cancelled | OS登録・失敗・解除完了の結果を `notification_os_registrations` へ保存する。 |
 | ListTaskLists | 左ペインのリスト一覧を取得する。読み取り専用。 |
 | CreateTaskList | リスト名を検証し、リストを作成する。 |
 | UpdateTaskList | 初期リストではないことを確認し、リスト名を検証して名称を変更する。 |
@@ -169,11 +171,13 @@ Issue #30 では、`PauseActiveTimer`、`ResumeActiveTimer`、`StopActiveTimer` 
 
 Issue #58 では、OS復帰またはウィンドウ再フォーカス相当のイベントでPresentationがスナップショットを再取得し、期限到来通知dispatchを再実行する。タイマーの正はDBに置き、停止時の `elapsed_seconds` は `started_at` と停止時刻のwall-clock差分から一時停止区間を差し引いて確定する。成功済み通知は `registered` として保持し、復帰後のdispatch対象から除外する。
 
-Issue #51 では、将来時刻通知を段階導入にする。第1段階ではアプリ起動中だけローカルスケジューラが次回 `notify_at` まで待機し、期限到達時に既存の `DispatchDueNotifications` を呼ぶ。起動、ウィンドウ復帰、通知設定変更、タスク/サブタスク日付変更後は、期限到来通知を処理してから次回通知を再予約する。第2段階ではWindows/macOSのネイティブ永続登録を検証するが、OS登録状態は `notification_rules.registration_status` に混ぜず、必要なら専用Repository境界を追加する。
+Issue #51 では、将来時刻通知を段階導入にする。第1段階ではアプリ起動中だけローカルスケジューラが次回 `notify_at` まで待機し、期限到達時に既存の `DispatchDueNotifications` を呼ぶ。起動、ウィンドウ復帰、通知設定変更、タスク/サブタスク日付変更後は、期限到来通知を処理してから次回通知を再予約する。第2段階ではWindows/macOSのネイティブ永続登録を検証するが、OS登録状態は `notification_rules.registration_status` に混ぜず、専用の `notification_os_registrations` とRepository境界へ分離する。
 
 Issue #116 では、`GetNextPendingNotification` を読み取り専用Use Caseとして実装する。返却DTOは `notificationRuleId` と `notifyAt` に限定し、タスク名、サブタスク名、メモ本文、通知本文をPresentationへ渡さない。React側はスナップショット更新後に次回通知を取得し、古い予約を破棄して1本だけローカルタイマーを張る。タイマー発火時は既存のスナップショット更新を呼び、期限到来通知dispatch後に次回通知を再予約する。
 
 Issue #117 では、`SyncNotifications` を通知再同期の入口にする。Presentationは起動、ウィンドウ復帰、通知設定変更、タスク/サブタスク期限変更、カレンダー期限移動、SQLite復元後に `loadSnapshot` を経由し、`SyncNotifications` で期限到来通知dispatchと次回通知予定取得を同じ順序で実行する。通知全体OFF時はdispatchも次回予約も行わない。
+
+Issue #115 では、将来のネイティブOS通知予約adapterに備えて `notification_os_registrations` を追加する。`notification_rules` は通知意図と期限到来dispatch状態を保持し、OS登録ID、OS登録状態、最終試行時刻、最終エラーは `notification_os_registrations` に保持する。タスク/サブタスク更新時は通知予定が同じでもOS登録状態だけを `pending` に戻し、通知ルール削除時はOS登録IDがある行を `cancel_pending` として残す。
 
 Issue #60 では、カレンダーRead Modelを週専用から開始予定日・期限日の範囲取得へ拡張する。表示切替、基準日、選択中カレンダー項目はPresentation状態であり、DB更新を行わない。取得範囲は93日以内に制限し、週/日/月表示で必要な範囲だけをSQLiteから読み取る。サブタスク項目は親タスク名をRead Modelに含め、実行中タイマーは `started_at` から表示用時刻を派生する。
 

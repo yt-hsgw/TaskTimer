@@ -116,6 +116,18 @@ erDiagram
     datetime updated_at
   }
 
+  NOTIFICATION_OS_REGISTRATION {
+    string id PK
+    string notification_rule_id FK
+    string os_registration_id
+    string registration_status
+    datetime last_attempted_at
+    string last_error
+    datetime deleted_at
+    datetime created_at
+    datetime updated_at
+  }
+
   NOTIFICATION_PREFERENCE {
     string id PK
     string display_mode
@@ -156,6 +168,7 @@ erDiagram
   TASK ||--o{ SUBTASK : 持つ
   TIMER_SESSION ||--o{ TIMER_PAUSE : 持つ
   TIMER_SESSION ||--o{ POMODORO_SESSION : 作業フェーズ
+  NOTIFICATION_RULE ||--o| NOTIFICATION_OS_REGISTRATION : OS登録状態
 ```
 
 ## エンティティ

@@ -59,6 +59,9 @@ flowchart TD
 - スケジューラ用DTOにはタスク名、サブタスク名、メモ本文、通知本文を含めない。
 - `sync_notifications` は復帰相当の時刻ジャンプ後に期限到来通知を1回だけ送信し、次の未来通知を返す。
 - `sync_notifications` は通知全体OFF中にdispatchも次回予約も行わない。
+- 既存 `notification_rules` から `notification_os_registrations` がbackfillされる。
+- タスク更新時、`notification_rules.registration_status` を重複dispatch対象に戻さず、OS登録状態だけを `pending` に戻す。
+- タスク削除時、OS登録IDがある通知登録状態は `cancel_pending` として残り、解除完了後にジョブ対象から外れる。
 - UI設定取得で左ペイン開閉、最後のビュー、最後のリストID、カレンダー表示モードが返る。
 - UI設定更新で許可された値だけが保存される。
 - UI設定値が破損していても既定値へフォールバックして取得できる。
