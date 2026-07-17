@@ -1,5 +1,7 @@
 use crate::domain::{
-    notification::{build_notification_content, NotificationDisplayMode},
+    notification::{
+        build_notification_content, NotificationDisplayMode, NotificationOsRegistrationAction,
+    },
     pomodoro::{
         validate_pomodoro_cycles_until_long_break, validate_pomodoro_duration_seconds,
         PomodoroPhase,
@@ -16,9 +18,13 @@ use crate::domain::{
 
 use super::{
     clock::Clock,
-    notification::{LocalNotificationGateway, LocalNotificationMessage},
+    notification::{
+        LocalNotificationGateway, LocalNotificationMessage, NativeNotificationRegistrationGateway,
+        NativeNotificationRegistrationRequest,
+    },
     repositories::{
         ActivePomodoro, ActiveTimer, DataExportCreate, DataExportRecord, DataExportRepository,
+        NativeNotificationOsRegistrationRepository, NativeNotificationRegistrationSummary,
         NextNotificationSchedule, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationDispatchSummary, NotificationHistoryRepository, NotificationOsRegistrationJob,
         NotificationOsRegistrationRepository, NotificationPreferenceRepository,
@@ -742,6 +748,107 @@ pub fn mark_notification_os_registration_cancelled(
     repository.mark_notification_os_registration_cancelled(registration_id, clock.now_utc_iso8601())
 }
 
+pub fn process_notification_os_registration_jobs<R>(
+    repository: &R,
+    native_gateway: &impl NativeNotificationRegistrationGateway,
+    clock: &impl Clock,
+) -> RepositoryResult<NativeNotificationRegistrationSummary>
+where
+    R: NativeNotificationOsRegistrationRepository + NotificationPreferenceRepository,
+{
+    let mut summary = NativeNotificationRegistrationSummary {
+        attempted: 0,
+        registered: 0,
+        cancelled: 0,
+        skipped: 0,
+        failed: 0,
+        last_error: None,
+    };
+
+    if !native_gateway.is_available() {
+        return Ok(summary);
+    }
+
+    let now = clock.now_utc_iso8601();
+    let notifications_enabled = repository.get_notifications_enabled()?;
+    let display_mode = repository.get_notification_display_mode()?;
+    let jobs = repository
+        .list_native_notification_os_registration_jobs(&now, NOTIFICATION_OS_REGISTRATION_LIMIT)?;
+
+    for job in jobs {
+        match job.action {
+            NotificationOsRegistrationAction::RegisterOrReplace => {
+                if !notifications_enabled {
+                    summary.skipped += 1;
+                    continue;
+                }
+
+                summary.attempted += 1;
+                let content = build_notification_content(&display_mode, &job.target_title);
+                let request = NativeNotificationRegistrationRequest {
+                    registration_id: job.id.clone(),
+                    existing_os_registration_id: job.os_registration_id.clone(),
+                    title: content.title,
+                    body: content.body,
+                    notify_at: job.notify_at,
+                };
+
+                match native_gateway.register_or_replace(&request) {
+                    Ok(os_registration_id) => {
+                        repository.mark_notification_os_registration_registered(
+                            job.id,
+                            os_registration_id,
+                            clock.now_utc_iso8601(),
+                        )?;
+                        summary.registered += 1;
+                    }
+                    Err(error) => {
+                        repository.mark_notification_os_registration_failed(
+                            job.id,
+                            &error,
+                            clock.now_utc_iso8601(),
+                        )?;
+                        summary.failed += 1;
+                        summary.last_error = Some(error);
+                    }
+                }
+            }
+            NotificationOsRegistrationAction::Cancel => {
+                let Some(os_registration_id) = job.os_registration_id.as_deref() else {
+                    repository.mark_notification_os_registration_cancelled(
+                        job.id,
+                        clock.now_utc_iso8601(),
+                    )?;
+                    summary.cancelled += 1;
+                    continue;
+                };
+
+                summary.attempted += 1;
+                match native_gateway.cancel(os_registration_id) {
+                    Ok(()) => {
+                        repository.mark_notification_os_registration_cancelled(
+                            job.id,
+                            clock.now_utc_iso8601(),
+                        )?;
+                        summary.cancelled += 1;
+                    }
+                    Err(error) => {
+                        repository.mark_notification_os_registration_failed(
+                            job.id,
+                            &error,
+                            clock.now_utc_iso8601(),
+                        )?;
+                        summary.failed += 1;
+                        summary.last_error = Some(error);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(summary)
+}
+
 pub fn create_sqlite_backup(
     repository: &impl SqliteBackupRepository,
     clock: &impl Clock,
@@ -995,6 +1102,17 @@ fn validate_local_path(value: &str, field_label: &str) -> RepositoryResult<Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+
+    use crate::{
+        application::repositories::{
+            NativeNotificationOsRegistrationJob, NotificationOsRegistrationJob,
+        },
+        domain::{
+            notification::{NotificationKind, NotificationOsRegistrationStatus},
+            timer::WorkTargetType,
+        },
+    };
 
     #[test]
     fn validate_work_item_draft_rejects_blank_title() {
@@ -1067,5 +1185,308 @@ mod tests {
         assert!(validate_board_task_status("archived")
             .expect_err("archive is separate")
             .contains("アーカイブ"));
+    }
+
+    #[test]
+    fn process_notification_os_registration_jobs_skips_without_native_gateway() {
+        let repository = FakeNativeRegistrationRepository::new(
+            NotificationDisplayMode::TitleOnly,
+            true,
+            vec![native_registration_job(
+                "registration-1",
+                NotificationOsRegistrationStatus::Pending,
+                None,
+                "秘密のタスク",
+            )],
+        );
+        let gateway = FakeNativeRegistrationGateway::unavailable();
+        let clock = FixedClock("2026-07-17T00:00:00Z");
+
+        let summary =
+            process_notification_os_registration_jobs(&repository, &gateway, &clock).expect("sync");
+
+        assert_eq!(summary.attempted, 0);
+        assert_eq!(summary.registered, 0);
+        assert_eq!(*repository.native_list_calls.borrow(), 0);
+        assert!(gateway.registered_requests.borrow().is_empty());
+    }
+
+    #[test]
+    fn process_notification_os_registration_jobs_uses_generic_content_when_configured() {
+        let repository = FakeNativeRegistrationRepository::new(
+            NotificationDisplayMode::Generic,
+            true,
+            vec![native_registration_job(
+                "registration-1",
+                NotificationOsRegistrationStatus::Pending,
+                None,
+                "社外秘タスク",
+            )],
+        );
+        let gateway = FakeNativeRegistrationGateway::available();
+        let clock = FixedClock("2026-07-17T00:00:00Z");
+
+        let summary =
+            process_notification_os_registration_jobs(&repository, &gateway, &clock).expect("sync");
+
+        assert_eq!(summary.attempted, 1);
+        assert_eq!(summary.registered, 1);
+        let requests = gateway.registered_requests.borrow();
+        assert_eq!(requests[0].title, "TaskTimer");
+        assert_eq!(requests[0].body, "予定時刻です");
+        assert_eq!(
+            repository.registered.borrow()[0],
+            (
+                "registration-1".to_string(),
+                "os:registration-1".to_string(),
+                "2026-07-17T00:00:00Z".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn process_notification_os_registration_jobs_cancels_existing_os_registration() {
+        let repository = FakeNativeRegistrationRepository::new(
+            NotificationDisplayMode::TitleOnly,
+            true,
+            vec![native_registration_job(
+                "registration-1",
+                NotificationOsRegistrationStatus::CancelPending,
+                Some("os-existing"),
+                "タスク",
+            )],
+        );
+        let gateway = FakeNativeRegistrationGateway::available();
+        let clock = FixedClock("2026-07-17T00:00:00Z");
+
+        let summary =
+            process_notification_os_registration_jobs(&repository, &gateway, &clock).expect("sync");
+
+        assert_eq!(summary.attempted, 1);
+        assert_eq!(summary.cancelled, 1);
+        assert_eq!(gateway.cancelled_ids.borrow()[0], "os-existing");
+        assert_eq!(
+            repository.cancelled.borrow()[0],
+            (
+                "registration-1".to_string(),
+                "2026-07-17T00:00:00Z".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn process_notification_os_registration_jobs_marks_registration_failure() {
+        let repository = FakeNativeRegistrationRepository::new(
+            NotificationDisplayMode::TitleOnly,
+            true,
+            vec![native_registration_job(
+                "registration-1",
+                NotificationOsRegistrationStatus::Pending,
+                None,
+                "タスク",
+            )],
+        );
+        let gateway =
+            FakeNativeRegistrationGateway::available_with_error("Windows通知予約を登録できません");
+        let clock = FixedClock("2026-07-17T00:00:00Z");
+
+        let summary =
+            process_notification_os_registration_jobs(&repository, &gateway, &clock).expect("sync");
+
+        assert_eq!(summary.attempted, 1);
+        assert_eq!(summary.failed, 1);
+        assert_eq!(
+            repository.failed.borrow()[0],
+            (
+                "registration-1".to_string(),
+                "Windows通知予約を登録できません".to_string(),
+                "2026-07-17T00:00:00Z".to_string()
+            )
+        );
+    }
+
+    struct FixedClock(&'static str);
+
+    impl Clock for FixedClock {
+        fn now_utc_iso8601(&self) -> String {
+            self.0.to_string()
+        }
+    }
+
+    struct FakeNativeRegistrationRepository {
+        display_mode: NotificationDisplayMode,
+        notifications_enabled: bool,
+        native_jobs: RefCell<Vec<NativeNotificationOsRegistrationJob>>,
+        native_list_calls: RefCell<usize>,
+        registered: RefCell<Vec<(String, String, String)>>,
+        failed: RefCell<Vec<(String, String, String)>>,
+        cancelled: RefCell<Vec<(String, String)>>,
+    }
+
+    impl FakeNativeRegistrationRepository {
+        fn new(
+            display_mode: NotificationDisplayMode,
+            notifications_enabled: bool,
+            native_jobs: Vec<NativeNotificationOsRegistrationJob>,
+        ) -> Self {
+            Self {
+                display_mode,
+                notifications_enabled,
+                native_jobs: RefCell::new(native_jobs),
+                native_list_calls: RefCell::new(0),
+                registered: RefCell::new(Vec::new()),
+                failed: RefCell::new(Vec::new()),
+                cancelled: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl NotificationPreferenceRepository for FakeNativeRegistrationRepository {
+        fn get_notification_display_mode(&self) -> RepositoryResult<NotificationDisplayMode> {
+            Ok(self.display_mode.clone())
+        }
+
+        fn get_notifications_enabled(&self) -> RepositoryResult<bool> {
+            Ok(self.notifications_enabled)
+        }
+    }
+
+    impl NotificationOsRegistrationRepository for FakeNativeRegistrationRepository {
+        fn list_notification_os_registration_jobs(
+            &self,
+            _now: &str,
+            _limit: i64,
+        ) -> RepositoryResult<Vec<NotificationOsRegistrationJob>> {
+            Ok(Vec::new())
+        }
+
+        fn mark_notification_os_registration_registered(
+            &self,
+            registration_id: String,
+            os_registration_id: String,
+            now: String,
+        ) -> RepositoryResult<()> {
+            self.registered
+                .borrow_mut()
+                .push((registration_id, os_registration_id, now));
+            Ok(())
+        }
+
+        fn mark_notification_os_registration_failed(
+            &self,
+            registration_id: String,
+            error: &str,
+            now: String,
+        ) -> RepositoryResult<()> {
+            self.failed
+                .borrow_mut()
+                .push((registration_id, error.to_string(), now));
+            Ok(())
+        }
+
+        fn mark_notification_os_registration_cancelled(
+            &self,
+            registration_id: String,
+            now: String,
+        ) -> RepositoryResult<()> {
+            self.cancelled.borrow_mut().push((registration_id, now));
+            Ok(())
+        }
+    }
+
+    impl NativeNotificationOsRegistrationRepository for FakeNativeRegistrationRepository {
+        fn list_native_notification_os_registration_jobs(
+            &self,
+            _now: &str,
+            _limit: i64,
+        ) -> RepositoryResult<Vec<NativeNotificationOsRegistrationJob>> {
+            *self.native_list_calls.borrow_mut() += 1;
+            Ok(self.native_jobs.borrow().clone())
+        }
+    }
+
+    struct FakeNativeRegistrationGateway {
+        available: bool,
+        error: RefCell<Option<String>>,
+        registered_requests: RefCell<Vec<NativeNotificationRegistrationRequest>>,
+        cancelled_ids: RefCell<Vec<String>>,
+    }
+
+    impl FakeNativeRegistrationGateway {
+        fn available() -> Self {
+            Self {
+                available: true,
+                error: RefCell::new(None),
+                registered_requests: RefCell::new(Vec::new()),
+                cancelled_ids: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn available_with_error(error: &str) -> Self {
+            Self {
+                available: true,
+                error: RefCell::new(Some(error.to_string())),
+                registered_requests: RefCell::new(Vec::new()),
+                cancelled_ids: RefCell::new(Vec::new()),
+            }
+        }
+
+        fn unavailable() -> Self {
+            Self {
+                available: false,
+                error: RefCell::new(None),
+                registered_requests: RefCell::new(Vec::new()),
+                cancelled_ids: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl NativeNotificationRegistrationGateway for FakeNativeRegistrationGateway {
+        fn is_available(&self) -> bool {
+            self.available
+        }
+
+        fn register_or_replace(
+            &self,
+            request: &NativeNotificationRegistrationRequest,
+        ) -> Result<String, String> {
+            self.registered_requests.borrow_mut().push(request.clone());
+            if let Some(error) = self.error.borrow_mut().take() {
+                return Err(error);
+            }
+            Ok(format!("os:{}", request.registration_id))
+        }
+
+        fn cancel(&self, os_registration_id: &str) -> Result<(), String> {
+            self.cancelled_ids
+                .borrow_mut()
+                .push(os_registration_id.to_string());
+            Ok(())
+        }
+    }
+
+    fn native_registration_job(
+        id: &str,
+        registration_status: NotificationOsRegistrationStatus,
+        os_registration_id: Option<&str>,
+        target_title: &str,
+    ) -> NativeNotificationOsRegistrationJob {
+        let action = NotificationOsRegistrationAction::from_status(&registration_status);
+        NativeNotificationOsRegistrationJob {
+            id: id.to_string(),
+            notification_rule_id: "rule-1".to_string(),
+            os_registration_id: os_registration_id.map(str::to_string),
+            target: WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: "task-1".to_string(),
+            },
+            target_title: target_title.to_string(),
+            kind: NotificationKind::Due,
+            notify_at: "2026-07-17T00:05:00Z".to_string(),
+            registration_status,
+            action,
+            last_attempted_at: None,
+            last_error: None,
+        }
     }
 }

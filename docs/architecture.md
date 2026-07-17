@@ -143,6 +143,7 @@ flowchart LR
 | SyncNotifications | 起動、復帰、設定変更、復元後の再同期入口。期限到来通知dispatch後に次回通知予定を返す。 |
 | ListNotificationOsRegistrationJobs | 将来のネイティブadapter用に、OS登録/差し替え/解除が必要な通知登録状態を上限付きで取得する。 |
 | MarkNotificationOsRegistrationRegistered / Failed / Cancelled | OS登録・失敗・解除完了の結果を `notification_os_registrations` へ保存する。 |
+| ProcessNotificationOsRegistrationJobs | Windowsネイティブ将来通知PoC用に、`notification_os_registrations` の登録/差し替え/解除ジョブをOS adapterへ渡し、結果を保存する。Windows以外ではDBに触らずスキップする。 |
 | ListTaskLists | 左ペインのリスト一覧を取得する。読み取り専用。 |
 | CreateTaskList | リスト名を検証し、リストを作成する。 |
 | UpdateTaskList | 初期リストではないことを確認し、リスト名を検証して名称を変更する。 |
@@ -180,6 +181,8 @@ Issue #117 では、`SyncNotifications` を通知再同期の入口にする。P
 Issue #115 では、将来のネイティブOS通知予約adapterに備えて `notification_os_registrations` を追加する。`notification_rules` は通知意図と期限到来dispatch状態を保持し、OS登録ID、OS登録状態、最終試行時刻、最終エラーは `notification_os_registrations` に保持する。タスク/サブタスク更新時は通知予定が同じでもOS登録状態だけを `pending` に戻し、通知ルール削除時はOS登録IDがある行を `cancel_pending` として残す。
 
 Issue #118 では、Windows/macOSネイティブ将来通知adapterを現時点では本実装しない判断にした。現行 `tauri-plugin-notification 2.3.3` のdesktop `show()` は即時通知であり、`schedule` をアプリ完全終了中の永続予約として扱う前提を置かない。Windowsは #123 でインストール済みアプリ、AppUserModelID、非昇格実行、OS登録解除をPoCする。macOSは署名・公証準備ができるまで後回しにする。
+
+Issue #123 では、Windows限定の `ScheduledToastNotification` PoC adapterをRust Infrastructureに追加する。Presentationは `sync_notifications` の後に `process_notification_os_registrations` を呼ぶだけに留め、JS側notification capabilityは追加しない。`generic` 設定では対象タイトルやメモ本文をOS adapterへ渡さず、通知全体OFF、タスク/サブタスク削除、期限変更では `notification_os_registrations` を `pending` / `cancel_pending` に戻してからOS登録/解除を処理する。このPoCは本採用ではなく、Windows 11のインストール済みアプリで登録、変更、解除、アプリ完全終了中の発火、アンインストール後の予約通知残存可否を確認してから採用判断する。
 
 Issue #60 では、カレンダーRead Modelを週専用から開始予定日・期限日の範囲取得へ拡張する。表示切替、基準日、選択中カレンダー項目はPresentation状態であり、DB更新を行わない。取得範囲は93日以内に制限し、週/日/月表示で必要な範囲だけをSQLiteから読み取る。サブタスク項目は親タスク名をRead Modelに含め、実行中タイマーは `started_at` から表示用時刻を派生する。
 
@@ -249,6 +252,7 @@ sequenceDiagram
 - OS通知をアダプターに閉じ込めることで、Windows/macOS差分をInfrastructureへ隔離できる。
 - Tauriの公式notification pluginをRust側adapterから呼び、PresentationにOS通知APIを直接公開しない。
 - アプリ完全終了中の通知保証はTauri pluginの型だけで判断せず、Windows先行PoC #123 後に採用可否を決める。macOSは署名・公証準備後に別途判断する。
+- WindowsネイティブPoCでもOS登録はInfrastructureへ閉じ、DBコミット後の副作用として扱う。
 
 ## トレードオフ
 
@@ -256,6 +260,7 @@ sequenceDiagram
 - `tasks` と `subtasks` を分けることでドメイン意味は保てるが、共通処理のApplication Service設計が必要になる。
 - Tauriは実行時サイズを抑えられる一方、Rust側実装とパッケージングの複雑さが増える。
 - 将来時刻通知は、まずアプリ起動中のローカルスケジューラで既存dispatch境界を再利用する。アプリ完全終了中の通知保証はWindows先行PoC #123 で採用可否を判断し、macOSは署名・公証準備まで後回しにする。
+- Windows APIには `ScheduledToastNotification` がある一方、desktop appのスケジュール制限が公式ドキュメントにあるため、PoCの成功を公開保証に直結させない。
 - UI/UX改修はRead Modelを増やすためRepository境界が増えるが、大量タスク時にPresentationで全件集計するより安全である。
 - タイマー一時停止/再開は実務上便利だが、単純な開始/停止よりDB設計と境界ケースが増える。
 

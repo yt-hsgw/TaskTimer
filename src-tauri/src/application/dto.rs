@@ -8,11 +8,12 @@ use crate::domain::{
 use super::{
     repositories::{
         ActivePomodoro, ActiveTimer, DataExportManifestRecord, DataExportRecord,
-        NextNotificationSchedule, NotificationDeliveryAttemptRecord, NotificationDispatchSummary,
-        NotificationSyncResult, PomodoroSettingsRecord, RecurrenceRuleRecord,
-        SqliteBackupManifestRecord, SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord,
-        TagRecord, TaskListRecord, TaskRecord, TaskRowRecord, TaskTagRecord,
-        TaskWithSubtasksRecord, UiPreferencesRecord, WeekCalendarItem,
+        NativeNotificationRegistrationSummary, NextNotificationSchedule,
+        NotificationDeliveryAttemptRecord, NotificationDispatchSummary, NotificationSyncResult,
+        PomodoroSettingsRecord, RecurrenceRuleRecord, SqliteBackupManifestRecord,
+        SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord, TagRecord, TaskListRecord,
+        TaskRecord, TaskRowRecord, TaskTagRecord, TaskWithSubtasksRecord, UiPreferencesRecord,
+        WeekCalendarItem,
     },
     usecases::{
         DataExportCreateDraft, PomodoroSettingsDraft, RecurrenceRuleDraft, SqliteBackupCreateDraft,
@@ -491,6 +492,17 @@ pub struct NextNotificationScheduleDto {
 pub struct NotificationSyncResultDto {
     pub dispatch_summary: NotificationDispatchSummaryDto,
     pub next_schedule: Option<NextNotificationScheduleDto>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeNotificationRegistrationSummaryDto {
+    pub attempted: usize,
+    pub registered: usize,
+    pub cancelled: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub last_error: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -998,6 +1010,19 @@ impl From<NotificationSyncResult> for NotificationSyncResultDto {
         Self {
             dispatch_summary: value.dispatch_summary.into(),
             next_schedule: value.next_schedule.map(Into::into),
+        }
+    }
+}
+
+impl From<NativeNotificationRegistrationSummary> for NativeNotificationRegistrationSummaryDto {
+    fn from(value: NativeNotificationRegistrationSummary) -> Self {
+        Self {
+            attempted: value.attempted,
+            registered: value.registered,
+            cancelled: value.cancelled,
+            skipped: value.skipped,
+            failed: value.failed,
+            last_error: value.last_error,
         }
     }
 }

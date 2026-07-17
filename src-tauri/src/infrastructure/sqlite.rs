@@ -21,6 +21,7 @@ use crate::{
     application::repositories::{
         target_ref, ActivePomodoro, ActiveTimer, CalendarMarker, CalendarRepository,
         DataExportCreate, DataExportManifestRecord, DataExportRecord, DataExportRepository,
+        NativeNotificationOsRegistrationJob, NativeNotificationOsRegistrationRepository,
         NextNotificationSchedule, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationHistoryRepository, NotificationJob, NotificationOsRegistrationJob,
         NotificationOsRegistrationRepository, NotificationPreferenceRepository,
@@ -1861,6 +1862,19 @@ impl NotificationOsRegistrationRepository for SqliteDatabase {
     }
 }
 
+impl NativeNotificationOsRegistrationRepository for SqliteDatabase {
+    fn list_native_notification_os_registration_jobs(
+        &self,
+        now: &str,
+        limit: i64,
+    ) -> RepositoryResult<Vec<NativeNotificationOsRegistrationJob>> {
+        let limit = limit.clamp(1, 100);
+        self.with_connection(|connection| {
+            select_native_notification_os_registration_jobs(connection, now, limit)
+        })
+    }
+}
+
 impl NotificationCommandRepository for SqliteDatabase {
     fn update_notification_display_mode(
         &self,
@@ -1879,6 +1893,8 @@ impl NotificationCommandRepository for SqliteDatabase {
                     params![display_mode.as_str(), now],
                 )
                 .map_err(|error| format!("通知表示設定を保存できません: {error}"))?;
+
+            mark_future_notification_os_registrations_pending(transaction, &now)?;
 
             let display_mode: String = transaction
                 .query_row(
@@ -1910,6 +1926,12 @@ impl NotificationCommandRepository for SqliteDatabase {
                 .map_err(|error| format!("通知有効設定を保存できません: {error}"))?;
             if updated != 1 {
                 return Err("通知有効設定を保存できませんでした".to_string());
+            }
+
+            if enabled {
+                reactivate_future_notification_os_registrations(transaction, &now)?;
+            } else {
+                disable_future_notification_os_registrations(transaction, &now)?;
             }
 
             let enabled: i64 = transaction
@@ -3165,6 +3187,202 @@ fn mark_notification_os_registrations_cancel_pending_for_task_graph(
         .map_err(|error| format!("通知OS登録状態を解除待ちにできません: {error}"))
 }
 
+fn mark_future_notification_os_registrations_pending(
+    transaction: &Transaction<'_>,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE notification_os_registrations
+            SET registration_status = 'pending',
+                last_attempted_at = NULL,
+                last_error = NULL,
+                updated_at = ?1
+            WHERE deleted_at IS NULL
+              AND notification_rule_id IN (
+                SELECT notification_rules.id
+                FROM notification_rules
+                LEFT JOIN tasks
+                  ON notification_rules.target_type = 'task'
+                 AND notification_rules.target_id = tasks.id
+                 AND tasks.deleted_at IS NULL
+                 AND tasks.status <> 'archived'
+                LEFT JOIN subtasks
+                  ON notification_rules.target_type = 'subtask'
+                 AND notification_rules.target_id = subtasks.id
+                 AND subtasks.deleted_at IS NULL
+                 AND subtasks.status <> 'archived'
+                LEFT JOIN tasks AS subtask_parent_tasks
+                  ON notification_rules.target_type = 'subtask'
+                 AND subtasks.task_id = subtask_parent_tasks.id
+                 AND subtask_parent_tasks.deleted_at IS NULL
+                 AND subtask_parent_tasks.status <> 'archived'
+                WHERE notification_rules.enabled = 1
+                  AND notification_rules.deleted_at IS NULL
+                  AND notification_rules.notify_at > ?1
+                  AND (
+                    (
+                      notification_rules.target_type = 'task'
+                      AND tasks.id IS NOT NULL
+                    )
+                    OR (
+                      notification_rules.target_type = 'subtask'
+                      AND subtasks.id IS NOT NULL
+                      AND subtask_parent_tasks.id IS NOT NULL
+                    )
+                  )
+              )
+            ",
+            params![now],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("通知OS登録状態を再同期待ちにできません: {error}"))
+}
+
+fn disable_future_notification_os_registrations(
+    transaction: &Transaction<'_>,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE notification_os_registrations
+            SET registration_status = CASE
+                    WHEN os_registration_id IS NULL THEN 'disabled'
+                    ELSE 'cancel_pending'
+                END,
+                last_attempted_at = NULL,
+                last_error = NULL,
+                deleted_at = CASE
+                    WHEN os_registration_id IS NULL THEN ?1
+                    ELSE NULL
+                END,
+                updated_at = ?1
+            WHERE deleted_at IS NULL
+              AND notification_rule_id IN (
+                SELECT id
+                FROM notification_rules
+                WHERE enabled = 1
+                  AND deleted_at IS NULL
+                  AND notify_at > ?1
+              )
+            ",
+            params![now],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("通知OS登録状態を通知OFFへ同期できません: {error}"))
+}
+
+fn reactivate_future_notification_os_registrations(
+    transaction: &Transaction<'_>,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE notification_os_registrations
+            SET registration_status = 'pending',
+                last_attempted_at = NULL,
+                last_error = NULL,
+                updated_at = ?1
+            WHERE deleted_at IS NULL
+              AND registration_status IN ('disabled', 'cancel_pending')
+              AND notification_rule_id IN (
+                SELECT notification_rules.id
+                FROM notification_rules
+                LEFT JOIN tasks
+                  ON notification_rules.target_type = 'task'
+                 AND notification_rules.target_id = tasks.id
+                 AND tasks.deleted_at IS NULL
+                 AND tasks.status <> 'archived'
+                LEFT JOIN subtasks
+                  ON notification_rules.target_type = 'subtask'
+                 AND notification_rules.target_id = subtasks.id
+                 AND subtasks.deleted_at IS NULL
+                 AND subtasks.status <> 'archived'
+                LEFT JOIN tasks AS subtask_parent_tasks
+                  ON notification_rules.target_type = 'subtask'
+                 AND subtasks.task_id = subtask_parent_tasks.id
+                 AND subtask_parent_tasks.deleted_at IS NULL
+                 AND subtask_parent_tasks.status <> 'archived'
+                WHERE notification_rules.enabled = 1
+                  AND notification_rules.deleted_at IS NULL
+                  AND notification_rules.notify_at > ?1
+                  AND (
+                    (
+                      notification_rules.target_type = 'task'
+                      AND tasks.id IS NOT NULL
+                    )
+                    OR (
+                      notification_rules.target_type = 'subtask'
+                      AND subtasks.id IS NOT NULL
+                      AND subtask_parent_tasks.id IS NOT NULL
+                    )
+                  )
+              )
+            ",
+            params![now],
+        )
+        .map_err(|error| format!("通知OS登録状態を通知ONへ同期できません: {error}"))?;
+
+    let mut statement = transaction
+        .prepare(
+            "
+            SELECT notification_rules.id
+            FROM notification_rules
+            LEFT JOIN notification_os_registrations AS registrations
+              ON registrations.notification_rule_id = notification_rules.id
+             AND registrations.deleted_at IS NULL
+            LEFT JOIN tasks
+              ON notification_rules.target_type = 'task'
+             AND notification_rules.target_id = tasks.id
+             AND tasks.deleted_at IS NULL
+             AND tasks.status <> 'archived'
+            LEFT JOIN subtasks
+              ON notification_rules.target_type = 'subtask'
+             AND notification_rules.target_id = subtasks.id
+             AND subtasks.deleted_at IS NULL
+             AND subtasks.status <> 'archived'
+            LEFT JOIN tasks AS subtask_parent_tasks
+              ON notification_rules.target_type = 'subtask'
+             AND subtasks.task_id = subtask_parent_tasks.id
+             AND subtask_parent_tasks.deleted_at IS NULL
+             AND subtask_parent_tasks.status <> 'archived'
+            WHERE notification_rules.enabled = 1
+              AND notification_rules.deleted_at IS NULL
+              AND notification_rules.notify_at > ?1
+              AND registrations.id IS NULL
+              AND (
+                (
+                  notification_rules.target_type = 'task'
+                  AND tasks.id IS NOT NULL
+                )
+                OR (
+                  notification_rules.target_type = 'subtask'
+                  AND subtasks.id IS NOT NULL
+                  AND subtask_parent_tasks.id IS NOT NULL
+                )
+              )
+            ",
+        )
+        .map_err(|error| format!("通知OS登録再作成クエリを準備できません: {error}"))?;
+
+    let rule_ids = statement
+        .query_map(params![now], |row| row.get::<_, String>(0))
+        .map_err(|error| format!("通知OS登録再作成対象を取得できません: {error}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("通知OS登録再作成対象行を読めません: {error}"))?;
+
+    drop(statement);
+
+    for rule_id in rule_ids {
+        ensure_notification_os_registration_for_rule(transaction, &rule_id, now)?;
+    }
+
+    Ok(())
+}
+
 fn notification_time_for_date(date: &str, time: Option<&str>) -> String {
     let time = time.unwrap_or("00:00");
     format!("{date}T{time}:00Z")
@@ -3373,6 +3591,108 @@ fn select_notification_os_registration_jobs(
 
     rows.map(|row| row.map_err(|error| format!("通知OS登録ジョブ行を読めません: {error}")))
         .collect()
+}
+
+fn select_native_notification_os_registration_jobs(
+    connection: &Connection,
+    now: &str,
+    limit: i64,
+) -> RepositoryResult<Vec<NativeNotificationOsRegistrationJob>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT registrations.id,
+                   registrations.notification_rule_id,
+                   registrations.os_registration_id,
+                   notification_rules.target_type,
+                   notification_rules.target_id,
+                   notification_rules.kind,
+                   COALESCE(tasks.title, subtasks.title, '') AS target_title,
+                   notification_rules.notify_at,
+                   registrations.registration_status,
+                   registrations.last_attempted_at,
+                   registrations.last_error
+            FROM notification_os_registrations AS registrations
+            INNER JOIN notification_rules
+              ON notification_rules.id = registrations.notification_rule_id
+            LEFT JOIN tasks
+              ON notification_rules.target_type = 'task'
+             AND notification_rules.target_id = tasks.id
+             AND tasks.deleted_at IS NULL
+             AND tasks.status <> 'archived'
+            LEFT JOIN subtasks
+              ON notification_rules.target_type = 'subtask'
+             AND notification_rules.target_id = subtasks.id
+             AND subtasks.deleted_at IS NULL
+             AND subtasks.status <> 'archived'
+            LEFT JOIN tasks AS subtask_parent_tasks
+              ON notification_rules.target_type = 'subtask'
+             AND subtasks.task_id = subtask_parent_tasks.id
+             AND subtask_parent_tasks.deleted_at IS NULL
+             AND subtask_parent_tasks.status <> 'archived'
+            WHERE registrations.deleted_at IS NULL
+              AND (
+                (
+                  registrations.registration_status IN ('pending', 'failed')
+                  AND notification_rules.enabled = 1
+                  AND notification_rules.deleted_at IS NULL
+                  AND notification_rules.notify_at > ?1
+                  AND (
+                    (
+                      notification_rules.target_type = 'task'
+                      AND tasks.id IS NOT NULL
+                    )
+                    OR (
+                      notification_rules.target_type = 'subtask'
+                      AND subtasks.id IS NOT NULL
+                      AND subtask_parent_tasks.id IS NOT NULL
+                    )
+                  )
+                )
+                OR registrations.registration_status = 'cancel_pending'
+              )
+            ORDER BY CASE
+                       WHEN registrations.registration_status = 'cancel_pending' THEN 0
+                       ELSE 1
+                     END,
+                     notification_rules.notify_at ASC,
+                     registrations.updated_at ASC,
+                     registrations.id ASC
+            LIMIT ?2
+            ",
+        )
+        .map_err(|error| format!("ネイティブ通知OS登録ジョブクエリを準備できません: {error}"))?;
+
+    let rows = statement
+        .query_map(params![now, limit], |row| {
+            let target_type_text: String = row.get(3)?;
+            let target_type = WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?;
+            let kind_text: String = row.get(5)?;
+            let registration_status_text: String = row.get(8)?;
+            let registration_status =
+                NotificationOsRegistrationStatus::from_db(&registration_status_text)
+                    .map_err(db_value_error)?;
+            let action = NotificationOsRegistrationAction::from_status(&registration_status);
+            Ok(NativeNotificationOsRegistrationJob {
+                id: row.get(0)?,
+                notification_rule_id: row.get(1)?,
+                os_registration_id: row.get(2)?,
+                target: target_ref(target_type, row.get(4)?),
+                kind: NotificationKind::from_db(&kind_text).map_err(db_value_error)?,
+                target_title: row.get(6)?,
+                notify_at: row.get(7)?,
+                registration_status,
+                action,
+                last_attempted_at: row.get(9)?,
+                last_error: row.get(10)?,
+            })
+        })
+        .map_err(|error| format!("ネイティブ通知OS登録ジョブを取得できません: {error}"))?;
+
+    rows.map(|row| {
+        row.map_err(|error| format!("ネイティブ通知OS登録ジョブ行を読めません: {error}"))
+    })
+    .collect()
 }
 
 fn select_notification_failure_history(

@@ -4,6 +4,8 @@ type DatabaseState<'a> = State<'a, crate::infrastructure::sqlite::SqliteDatabase
 type ClockState<'a> = State<'a, crate::infrastructure::clock::SystemClock>;
 type NotificationGatewayState<'a> =
     State<'a, crate::infrastructure::notification::TauriLocalNotificationGateway>;
+type NativeNotificationGatewayState<'a> =
+    State<'a, crate::infrastructure::notification::TauriNativeNotificationRegistrationGateway>;
 const TASK_LIST_LIMIT: i64 = 200;
 
 #[tauri::command]
@@ -172,6 +174,20 @@ pub fn sync_notifications(
     super::usecases::sync_notifications(
         database.inner(),
         notification_gateway.inner(),
+        clock.inner(),
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
+pub fn process_notification_os_registrations(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    native_notification_gateway: NativeNotificationGatewayState<'_>,
+) -> Result<super::dto::NativeNotificationRegistrationSummaryDto, String> {
+    super::usecases::process_notification_os_registration_jobs(
+        database.inner(),
+        native_notification_gateway.inner(),
         clock.inner(),
     )
     .map(Into::into)

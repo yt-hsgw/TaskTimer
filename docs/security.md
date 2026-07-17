@@ -70,6 +70,8 @@ Application境界で検証する。
 - アプリ起動中の将来時刻通知スケジューラは外部通信を行わず、OS通知adapterへ渡す本文は通知表示モードに従う。
 - アプリ完全終了中の通知を保証するネイティブOS登録、常駐プロセス、OSタスクを追加する場合は、ユーザー同意、署名、公証、アンインストール時の登録解除を別途レビューする。
 - 現時点では `tauri-plugin-notification` の `schedule` を永続予約として採用しない。Windows PoCでもJS側notification capabilityを追加せず、Rust Infrastructure側adapterに閉じる。
+- Windowsネイティブ将来通知PoCは `Windows.UI.Notifications` をWindows限定依存としてRust側から呼ぶ。`generic` 設定ではタスク名、サブタスク名、メモ本文をOS adapterへ渡さない。
+- Windowsネイティブ将来通知PoCの失敗情報は短縮済みOSエラーだけを `notification_os_registrations.last_error` に保存し、タスク名、サブタスク名、メモ本文、通知本文を保存しない。
 
 ## ログルール
 
@@ -93,6 +95,8 @@ Application境界で検証する。
 - 通知登録に失敗したのに、UIでは通知が有効に見える。
 - 通知設定が `generic` なのに、OS通知アダプターへタイトルが渡される。
 - 通知全体OFF中に、将来時刻スケジューラがOS通知adapterへ対象タイトルを渡す。
+- 通知全体OFF中に、Windowsネイティブ通知PoCが既存OS予約を解除せず、アプリ終了後に通知が残る。
+- Windowsネイティブ通知PoCでAppUserModelIDやショートカット要件が満たせず、登録成功に見えても通知が発火しない。
 - 古いローカル通知タイマーが残り、期限変更前の時刻で通知される。
 - 将来追加した依存関係がデフォルトでネットワークアクセスを行う。
 - アプリが想定外の場所へデータベースをエクスポートする。
