@@ -53,8 +53,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("大量データ性能DB計測");
     println!("DB: {}", config.db.display());
     println!(
-        "件数: task_lists={}, tasks={}, subtasks={}, timer_sessions={}",
-        counts.task_lists, counts.tasks, counts.subtasks, counts.timer_sessions
+        "件数: task_lists={}, tasks={}, subtasks={}, timer_sessions={}, pomodoro_sessions={}",
+        counts.task_lists,
+        counts.tasks,
+        counts.subtasks,
+        counts.timer_sessions,
+        counts.pomodoro_sessions
     );
     println!(
         "しきい値: {}ms / 超過時{}",
@@ -92,6 +96,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             config.threshold,
         )?,
         measure_active_timer(&connection, config.threshold)?,
+        measure_active_pomodoro(&connection, config.threshold)?,
         measure_notification_dispatch_candidates(&connection, config.threshold)?,
         measure_task_detail(&connection, config.threshold)?,
     ];
@@ -191,6 +196,7 @@ struct Counts {
     tasks: i64,
     subtasks: i64,
     timer_sessions: i64,
+    pomodoro_sessions: i64,
 }
 
 fn read_counts(connection: &Connection) -> Result<Counts, Box<dyn Error>> {
@@ -199,6 +205,7 @@ fn read_counts(connection: &Connection) -> Result<Counts, Box<dyn Error>> {
         tasks: count_table(connection, "tasks")?,
         subtasks: count_table(connection, "subtasks")?,
         timer_sessions: count_table(connection, "timer_sessions")?,
+        pomodoro_sessions: count_table(connection, "pomodoro_sessions")?,
     })
 }
 
@@ -472,6 +479,48 @@ fn measure_active_timer(
             )
             OR (
               timer_sessions.target_type = 'subtask'
+              AND subtask_targets.id IS NOT NULL
+              AND parent_tasks.id IS NOT NULL
+            )
+          )
+        ",
+        threshold,
+    )
+}
+
+fn measure_active_pomodoro(
+    connection: &Connection,
+    threshold: Duration,
+) -> Result<Measurement, Box<dyn Error>> {
+    measure_count_query(
+        connection,
+        "active_pomodoro_lookup",
+        "
+        SELECT COUNT(*)
+        FROM pomodoro_sessions
+        LEFT JOIN tasks AS task_targets
+          ON pomodoro_sessions.target_type = 'task'
+         AND pomodoro_sessions.target_id = task_targets.id
+         AND task_targets.deleted_at IS NULL
+         AND task_targets.status <> 'archived'
+        LEFT JOIN subtasks AS subtask_targets
+          ON pomodoro_sessions.target_type = 'subtask'
+         AND pomodoro_sessions.target_id = subtask_targets.id
+         AND subtask_targets.deleted_at IS NULL
+         AND subtask_targets.status <> 'archived'
+        LEFT JOIN tasks AS parent_tasks
+          ON subtask_targets.task_id = parent_tasks.id
+         AND parent_tasks.deleted_at IS NULL
+         AND parent_tasks.status <> 'archived'
+        WHERE pomodoro_sessions.status IN ('running', 'paused')
+          AND pomodoro_sessions.deleted_at IS NULL
+          AND (
+            (
+              pomodoro_sessions.target_type = 'task'
+              AND task_targets.id IS NOT NULL
+            )
+            OR (
+              pomodoro_sessions.target_type = 'subtask'
               AND subtask_targets.id IS NOT NULL
               AND parent_tasks.id IS NOT NULL
             )
