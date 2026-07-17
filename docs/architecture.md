@@ -179,6 +179,8 @@ Issue #117 では、`SyncNotifications` を通知再同期の入口にする。P
 
 Issue #115 では、将来のネイティブOS通知予約adapterに備えて `notification_os_registrations` を追加する。`notification_rules` は通知意図と期限到来dispatch状態を保持し、OS登録ID、OS登録状態、最終試行時刻、最終エラーは `notification_os_registrations` に保持する。タスク/サブタスク更新時は通知予定が同じでもOS登録状態だけを `pending` に戻し、通知ルール削除時はOS登録IDがある行を `cancel_pending` として残す。
 
+Issue #118 では、Windows/macOSネイティブ将来通知adapterを現時点では本実装しない判断にした。現行 `tauri-plugin-notification 2.3.3` のdesktop `show()` は即時通知であり、`schedule` をアプリ完全終了中の永続予約として扱う前提を置かない。Windowsは #123 でインストール済みアプリ、AppUserModelID、非昇格実行、OS登録解除をPoCする。macOSは署名・公証準備ができるまで後回しにする。
+
 Issue #60 では、カレンダーRead Modelを週専用から開始予定日・期限日の範囲取得へ拡張する。表示切替、基準日、選択中カレンダー項目はPresentation状態であり、DB更新を行わない。取得範囲は93日以内に制限し、週/日/月表示で必要な範囲だけをSQLiteから読み取る。サブタスク項目は親タスク名をRead Modelに含め、実行中タイマーは `started_at` から表示用時刻を派生する。
 
 Issue #68 では、右詳細ペインの編集対象を期限日/期限時刻中心へ寄せる。`planned_start_date` は互換性のため保持するが、詳細UIからの作成・更新では `null` を渡す。期限通知の `notify_at` は `due_date` と `due_time` から同一トランザクション内で同期し、期限時刻がない場合は従来通り日付開始時刻を使う。
@@ -246,13 +248,14 @@ sequenceDiagram
 - Reactはカレンダーやタスク編集のような対話的UIに向いている。
 - OS通知をアダプターに閉じ込めることで、Windows/macOS差分をInfrastructureへ隔離できる。
 - Tauriの公式notification pluginをRust側adapterから呼び、PresentationにOS通知APIを直接公開しない。
+- アプリ完全終了中の通知保証はTauri pluginの型だけで判断せず、Windows先行PoC #123 後に採用可否を決める。macOSは署名・公証準備後に別途判断する。
 
 ## トレードオフ
 
 - `target_type` と `target_id` により、タイマーと通知の共通処理は簡単になるが、DBレベルの外部キー制約は弱くなる。
 - `tasks` と `subtasks` を分けることでドメイン意味は保てるが、共通処理のApplication Service設計が必要になる。
 - Tauriは実行時サイズを抑えられる一方、Rust側実装とパッケージングの複雑さが増える。
-- 将来時刻通知は、まずアプリ起動中のローカルスケジューラで既存dispatch境界を再利用する。アプリ完全終了中の通知保証はWindows/macOSネイティブ登録の検証後に扱う。
+- 将来時刻通知は、まずアプリ起動中のローカルスケジューラで既存dispatch境界を再利用する。アプリ完全終了中の通知保証はWindows先行PoC #123 で採用可否を判断し、macOSは署名・公証準備まで後回しにする。
 - UI/UX改修はRead Modelを増やすためRepository境界が増えるが、大量タスク時にPresentationで全件集計するより安全である。
 - タイマー一時停止/再開は実務上便利だが、単純な開始/停止よりDB設計と境界ケースが増える。
 

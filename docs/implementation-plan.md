@@ -150,6 +150,8 @@ UI専用にすべてのタスク、サブタスク、タイマー履歴を一括
 - 将来時刻通知は段階導入する。第1段階ではアプリ起動中のローカルスケジューラで既存 `dispatch_due_notifications` を呼び、第2段階ではWindows/macOSネイティブ永続登録を検証する。
 - `sync_notifications` は新しいOS永続登録状態を持たず、DB上の `notification_rules` からローカルタイマーを再生成する。
 - `notification_rules.registration_status` は期限到来dispatch状態のまま維持し、OS永続登録状態は `notification_os_registrations.registration_status` へ分離する。
+- 現行 `tauri-plugin-notification 2.3.3` のdesktop `show()` は即時通知として扱い、`schedule` をアプリ完全終了中の永続予約として採用しない。
+- Windowsネイティブ将来通知adapterは #123 でPoCし、macOS adapterは署名・公証準備ができるまで後回しにする。
 
 ## Phase 5: リリース前強化
 
