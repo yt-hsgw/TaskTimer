@@ -52,6 +52,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [044 OSへの将来時刻通知スケジューリング方式を設計する](044-notification-future-scheduling.md) / GitHub #51
 - [045 アプリ起動中の将来時刻通知スケジューラを実装する](045-notification-in-app-scheduler.md) / GitHub #116
 - [046 起動・復帰・設定変更時の通知再同期を実装する](046-notification-resync-events.md) / GitHub #117
+- [047 通知OS登録状態のRepository境界とDB状態を追加する](047-notification-os-registration-state.md) / GitHub #115
 
 ## 運用
 

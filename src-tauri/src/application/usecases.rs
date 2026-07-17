@@ -20,20 +20,25 @@ use super::{
     repositories::{
         ActivePomodoro, ActiveTimer, DataExportCreate, DataExportRecord, DataExportRepository,
         NextNotificationSchedule, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
-        NotificationDispatchSummary, NotificationHistoryRepository,
-        NotificationPreferenceRepository, NotificationScheduleRepository, NotificationSyncResult,
-        PomodoroRepository, PomodoroSettingsRecord, PomodoroSettingsUpdate, RecurrenceRuleInput,
-        RepositoryResult, SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository,
-        SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord,
-        TagRepository, TagUpdate, TaskListCommandRepository, TaskListCreate, TaskListRecord,
-        TaskListUpdate, TaskRecord, TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository,
-        UiPreferenceRepository, UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate,
-        WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        NotificationDispatchSummary, NotificationHistoryRepository, NotificationOsRegistrationJob,
+        NotificationOsRegistrationRepository, NotificationPreferenceRepository,
+        NotificationScheduleRepository, NotificationSyncResult, PomodoroRepository,
+        PomodoroSettingsRecord, PomodoroSettingsUpdate, RecurrenceRuleInput, RepositoryResult,
+        SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore,
+        SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord, TagRepository, TagUpdate,
+        TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskRecord,
+        TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository,
+        UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate,
+        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
 
 const NOTIFICATION_DISPATCH_LIMIT: i64 = 20;
 const NOTIFICATION_HISTORY_LIMIT: i64 = 20;
+#[allow(dead_code)]
+const NOTIFICATION_OS_REGISTRATION_LIMIT: i64 = 50;
+#[allow(dead_code)]
+const OS_REGISTRATION_ID_MAX_CHARS: usize = 256;
 const TIMER_TARGET_MAX_SECONDS: i64 = 60 * 60 * 24 * 30;
 const RECURRENCE_INTERVAL_MAX: i64 = 365;
 const LOCAL_PATH_MAX_CHARS: usize = 4096;
@@ -685,6 +690,58 @@ pub fn list_notification_failure_history(
     repository.list_notification_failure_history(NOTIFICATION_HISTORY_LIMIT)
 }
 
+#[allow(dead_code)]
+pub fn list_notification_os_registration_jobs(
+    repository: &impl NotificationOsRegistrationRepository,
+    clock: &impl Clock,
+) -> RepositoryResult<Vec<NotificationOsRegistrationJob>> {
+    repository.list_notification_os_registration_jobs(
+        &clock.now_utc_iso8601(),
+        NOTIFICATION_OS_REGISTRATION_LIMIT,
+    )
+}
+
+#[allow(dead_code)]
+pub fn mark_notification_os_registration_registered(
+    repository: &impl NotificationOsRegistrationRepository,
+    clock: &impl Clock,
+    registration_id: String,
+    os_registration_id: String,
+) -> RepositoryResult<()> {
+    let registration_id = validate_identifier(&registration_id, "通知OS登録ID")?;
+    let os_registration_id = validate_os_registration_id(&os_registration_id)?;
+    repository.mark_notification_os_registration_registered(
+        registration_id,
+        os_registration_id,
+        clock.now_utc_iso8601(),
+    )
+}
+
+#[allow(dead_code)]
+pub fn mark_notification_os_registration_failed(
+    repository: &impl NotificationOsRegistrationRepository,
+    clock: &impl Clock,
+    registration_id: String,
+    error: &str,
+) -> RepositoryResult<()> {
+    let registration_id = validate_identifier(&registration_id, "通知OS登録ID")?;
+    repository.mark_notification_os_registration_failed(
+        registration_id,
+        error,
+        clock.now_utc_iso8601(),
+    )
+}
+
+#[allow(dead_code)]
+pub fn mark_notification_os_registration_cancelled(
+    repository: &impl NotificationOsRegistrationRepository,
+    clock: &impl Clock,
+    registration_id: String,
+) -> RepositoryResult<()> {
+    let registration_id = validate_identifier(&registration_id, "通知OS登録ID")?;
+    repository.mark_notification_os_registration_cancelled(registration_id, clock.now_utc_iso8601())
+}
+
 pub fn create_sqlite_backup(
     repository: &impl SqliteBackupRepository,
     clock: &impl Clock,
@@ -822,6 +879,23 @@ fn validate_update_list_id(value: Option<&str>) -> RepositoryResult<Option<Strin
         }
         _ => Ok(None),
     }
+}
+
+#[allow(dead_code)]
+fn validate_os_registration_id(value: &str) -> RepositoryResult<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("OS登録IDは必須です".to_string());
+    }
+    if trimmed.chars().count() > OS_REGISTRATION_ID_MAX_CHARS {
+        return Err(format!(
+            "OS登録IDは{OS_REGISTRATION_ID_MAX_CHARS}文字以内で入力してください"
+        ));
+    }
+    if trimmed.chars().any(char::is_control) {
+        return Err("OS登録IDに制御文字は使えません".to_string());
+    }
+    Ok(trimmed.to_string())
 }
 
 fn validate_timer_target_seconds(value: Option<i64>) -> RepositoryResult<Option<i64>> {

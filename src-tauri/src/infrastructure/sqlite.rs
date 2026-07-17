@@ -22,7 +22,8 @@ use crate::{
         target_ref, ActivePomodoro, ActiveTimer, CalendarMarker, CalendarRepository,
         DataExportCreate, DataExportManifestRecord, DataExportRecord, DataExportRepository,
         NextNotificationSchedule, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
-        NotificationHistoryRepository, NotificationJob, NotificationPreferenceRepository,
+        NotificationHistoryRepository, NotificationJob, NotificationOsRegistrationJob,
+        NotificationOsRegistrationRepository, NotificationPreferenceRepository,
         NotificationScheduleRepository, PomodoroExpiry, PomodoroRepository, PomodoroSettingsRecord,
         PomodoroSettingsUpdate, RecurrenceRuleInput, RecurrenceRuleRecord, RepositoryResult,
         SqliteBackupCreate, SqliteBackupManifestRecord, SqliteBackupRecord, SqliteBackupRepository,
@@ -36,6 +37,7 @@ use crate::{
     domain::{
         notification::{
             NotificationDeliveryResult, NotificationDisplayMode, NotificationKind,
+            NotificationOsRegistrationAction, NotificationOsRegistrationStatus,
             NotificationRegistrationStatus,
         },
         pomodoro::{
@@ -180,6 +182,7 @@ struct JsonExportFile {
     pomodoro_settings: Vec<ExportPomodoroSettingsRow>,
     pomodoro_sessions: Vec<ExportPomodoroSessionRow>,
     notification_rules: Vec<ExportNotificationRuleRow>,
+    notification_os_registrations: Vec<ExportNotificationOsRegistrationRow>,
     recurrence_rules: Vec<ExportRecurrenceRuleRow>,
 }
 
@@ -195,6 +198,7 @@ struct ExportDataset {
     pomodoro_settings: Vec<ExportPomodoroSettingsRow>,
     pomodoro_sessions: Vec<ExportPomodoroSessionRow>,
     notification_rules: Vec<ExportNotificationRuleRow>,
+    notification_os_registrations: Vec<ExportNotificationOsRegistrationRow>,
     recurrence_rules: Vec<ExportRecurrenceRuleRow>,
 }
 
@@ -319,6 +323,18 @@ struct ExportNotificationRuleRow {
     notify_at: String,
     enabled: bool,
     registration_status: String,
+    last_error: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportNotificationOsRegistrationRow {
+    id: String,
+    notification_rule_id: String,
+    os_registration_id: Option<String>,
+    registration_status: String,
+    last_attempted_at: Option<String>,
     last_error: Option<String>,
     created_at: String,
     updated_at: String,
@@ -1181,6 +1197,7 @@ impl DataExportRepository for SqliteDatabase {
             pomodoro_settings: dataset.pomodoro_settings,
             pomodoro_sessions: dataset.pomodoro_sessions,
             notification_rules: dataset.notification_rules,
+            notification_os_registrations: dataset.notification_os_registrations,
             recurrence_rules: dataset.recurrence_rules,
         };
         if let Err(error) = write_json_export_file(&export_path, &export_file) {
@@ -1739,6 +1756,108 @@ impl NotificationHistoryRepository for SqliteDatabase {
     ) -> RepositoryResult<Vec<NotificationDeliveryAttemptRecord>> {
         let limit = limit.clamp(1, 100);
         self.with_connection(|connection| select_notification_failure_history(connection, limit))
+    }
+}
+
+impl NotificationOsRegistrationRepository for SqliteDatabase {
+    fn list_notification_os_registration_jobs(
+        &self,
+        now: &str,
+        limit: i64,
+    ) -> RepositoryResult<Vec<NotificationOsRegistrationJob>> {
+        let limit = limit.clamp(1, 100);
+        self.with_connection(|connection| {
+            select_notification_os_registration_jobs(connection, now, limit)
+        })
+    }
+
+    fn mark_notification_os_registration_registered(
+        &self,
+        registration_id: String,
+        os_registration_id: String,
+        now: String,
+    ) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| {
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE notification_os_registrations
+                    SET os_registration_id = ?1,
+                        registration_status = 'registered',
+                        last_attempted_at = ?2,
+                        last_error = NULL,
+                        updated_at = ?2
+                    WHERE id = ?3
+                      AND deleted_at IS NULL
+                    ",
+                    params![os_registration_id, now, registration_id],
+                )
+                .map_err(|error| format!("通知OS登録成功状態を保存できません: {error}"))?;
+            if updated == 1 {
+                Ok(())
+            } else {
+                Err("通知OS登録状態が存在しません".to_string())
+            }
+        })
+    }
+
+    fn mark_notification_os_registration_failed(
+        &self,
+        registration_id: String,
+        error: &str,
+        now: String,
+    ) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| {
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE notification_os_registrations
+                    SET registration_status = 'failed',
+                        last_attempted_at = ?1,
+                        last_error = ?2,
+                        updated_at = ?1
+                    WHERE id = ?3
+                      AND deleted_at IS NULL
+                    ",
+                    params![now, truncate_error(error), registration_id],
+                )
+                .map_err(|error| format!("通知OS登録失敗状態を保存できません: {error}"))?;
+            if updated == 1 {
+                Ok(())
+            } else {
+                Err("通知OS登録状態が存在しません".to_string())
+            }
+        })
+    }
+
+    fn mark_notification_os_registration_cancelled(
+        &self,
+        registration_id: String,
+        now: String,
+    ) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| {
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE notification_os_registrations
+                    SET os_registration_id = NULL,
+                        registration_status = 'disabled',
+                        last_attempted_at = ?1,
+                        last_error = NULL,
+                        deleted_at = ?1,
+                        updated_at = ?1
+                    WHERE id = ?2
+                      AND deleted_at IS NULL
+                    ",
+                    params![now, registration_id],
+                )
+                .map_err(|error| format!("通知OS登録解除状態を保存できません: {error}"))?;
+            if updated == 1 {
+                Ok(())
+            } else {
+                Err("通知OS登録状態が存在しません".to_string())
+            }
+        })
     }
 }
 
@@ -2498,7 +2617,8 @@ fn sync_notification_rules_for_target(
         due_date,
         due_time,
         now,
-    )
+    )?;
+    mark_notification_os_registrations_pending_for_target(transaction, target, now)
 }
 
 fn sync_notification_rule_for_kind(
@@ -2543,8 +2663,8 @@ fn sync_notification_rule_for_kind(
                 ",
                 params![notify_at, enabled, registration_status, now, existing.id],
             )
-            .map(|_| ())
-            .map_err(|error| format!("通知ルールを更新できません: {error}"))
+            .map_err(|error| format!("通知ルールを更新できません: {error}"))?;
+        mark_notification_os_registration_pending_for_rule(transaction, &existing.id, now)
     } else {
         insert_notification_rule(transaction, target, kind, &notify_at, now)
     }
@@ -2597,6 +2717,13 @@ fn disable_notification_rules_for_kind(
     kind: &NotificationKind,
     now: &str,
 ) -> RepositoryResult<()> {
+    mark_notification_os_registrations_cancel_pending_for_target_kind(
+        transaction,
+        target,
+        kind,
+        None,
+        now,
+    )?;
     transaction
         .execute(
             "
@@ -2628,6 +2755,13 @@ fn disable_duplicate_notification_rules_for_kind(
     keep_rule_id: &str,
     now: &str,
 ) -> RepositoryResult<()> {
+    mark_notification_os_registrations_cancel_pending_for_target_kind(
+        transaction,
+        target,
+        kind,
+        Some(keep_rule_id),
+        now,
+    )?;
     transaction
         .execute(
             "
@@ -2773,6 +2907,7 @@ fn insert_notification_rule(
     notify_at: &str,
     now: &str,
 ) -> RepositoryResult<()> {
+    let notification_rule_id = Uuid::new_v4().to_string();
     transaction
         .execute(
             "
@@ -2783,7 +2918,7 @@ fn insert_notification_rule(
             VALUES (?1, ?2, ?3, ?4, ?5, 1, 'pending', ?6, ?6)
             ",
             params![
-                Uuid::new_v4().to_string(),
+                notification_rule_id.as_str(),
                 target.target_type.as_str(),
                 target.id.as_str(),
                 kind.as_str(),
@@ -2791,8 +2926,243 @@ fn insert_notification_rule(
                 now
             ],
         )
+        .map_err(|error| format!("通知ルールを作成できません: {error}"))?;
+
+    ensure_notification_os_registration_for_rule(transaction, &notification_rule_id, now)
+}
+
+fn ensure_notification_os_registration_for_rule(
+    transaction: &Transaction<'_>,
+    notification_rule_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            INSERT INTO notification_os_registrations (
+              id, notification_rule_id, os_registration_id, registration_status,
+              created_at, updated_at
+            )
+            SELECT ?1, ?2, NULL, 'pending', ?3, ?3
+            WHERE NOT EXISTS (
+              SELECT 1
+              FROM notification_os_registrations
+              WHERE notification_rule_id = ?2
+                AND deleted_at IS NULL
+            )
+            ",
+            params![Uuid::new_v4().to_string(), notification_rule_id, now],
+        )
         .map(|_| ())
-        .map_err(|error| format!("通知ルールを作成できません: {error}"))
+        .map_err(|error| format!("通知OS登録状態を作成できません: {error}"))
+}
+
+fn mark_notification_os_registration_pending_for_rule(
+    transaction: &Transaction<'_>,
+    notification_rule_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    ensure_notification_os_registration_for_rule(transaction, notification_rule_id, now)?;
+    transaction
+        .execute(
+            "
+            UPDATE notification_os_registrations
+            SET registration_status = 'pending',
+                last_attempted_at = NULL,
+                last_error = NULL,
+                updated_at = ?1
+            WHERE notification_rule_id = ?2
+              AND deleted_at IS NULL
+            ",
+            params![now, notification_rule_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("通知OS登録状態を再同期待ちにできません: {error}"))
+}
+
+fn mark_notification_os_registrations_pending_for_target(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE notification_os_registrations
+            SET registration_status = 'pending',
+                last_attempted_at = NULL,
+                last_error = NULL,
+                updated_at = ?1
+            WHERE deleted_at IS NULL
+              AND notification_rule_id IN (
+                SELECT id
+                FROM notification_rules
+                WHERE target_type = ?2
+                  AND target_id = ?3
+                  AND enabled = 1
+                  AND deleted_at IS NULL
+              )
+            ",
+            params![now, target.target_type.as_str(), target.id.as_str()],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("通知OS登録状態を再同期待ちにできません: {error}"))
+}
+
+fn mark_notification_os_registrations_cancel_pending_for_target_kind(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    kind: &NotificationKind,
+    keep_rule_id: Option<&str>,
+    now: &str,
+) -> RepositoryResult<()> {
+    match keep_rule_id {
+        Some(keep_rule_id) => transaction.execute(
+            "
+            UPDATE notification_os_registrations
+            SET registration_status = CASE
+                    WHEN os_registration_id IS NULL THEN 'disabled'
+                    ELSE 'cancel_pending'
+                END,
+                last_attempted_at = NULL,
+                last_error = NULL,
+                deleted_at = CASE
+                    WHEN os_registration_id IS NULL THEN ?1
+                    ELSE NULL
+                END,
+                updated_at = ?1
+            WHERE deleted_at IS NULL
+              AND notification_rule_id IN (
+                SELECT id
+                FROM notification_rules
+                WHERE target_type = ?2
+                  AND target_id = ?3
+                  AND kind = ?4
+                  AND id <> ?5
+                  AND deleted_at IS NULL
+              )
+            ",
+            params![
+                now,
+                target.target_type.as_str(),
+                target.id.as_str(),
+                kind.as_str(),
+                keep_rule_id
+            ],
+        ),
+        None => transaction.execute(
+            "
+            UPDATE notification_os_registrations
+            SET registration_status = CASE
+                    WHEN os_registration_id IS NULL THEN 'disabled'
+                    ELSE 'cancel_pending'
+                END,
+                last_attempted_at = NULL,
+                last_error = NULL,
+                deleted_at = CASE
+                    WHEN os_registration_id IS NULL THEN ?1
+                    ELSE NULL
+                END,
+                updated_at = ?1
+            WHERE deleted_at IS NULL
+              AND notification_rule_id IN (
+                SELECT id
+                FROM notification_rules
+                WHERE target_type = ?2
+                  AND target_id = ?3
+                  AND kind = ?4
+                  AND deleted_at IS NULL
+              )
+            ",
+            params![
+                now,
+                target.target_type.as_str(),
+                target.id.as_str(),
+                kind.as_str()
+            ],
+        ),
+    }
+    .map(|_| ())
+    .map_err(|error| format!("通知OS登録状態を解除待ちにできません: {error}"))
+}
+
+fn mark_notification_os_registrations_cancel_pending_for_subtask(
+    transaction: &Transaction<'_>,
+    subtask_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE notification_os_registrations
+            SET registration_status = CASE
+                    WHEN os_registration_id IS NULL THEN 'disabled'
+                    ELSE 'cancel_pending'
+                END,
+                last_attempted_at = NULL,
+                last_error = NULL,
+                deleted_at = CASE
+                    WHEN os_registration_id IS NULL THEN ?1
+                    ELSE NULL
+                END,
+                updated_at = ?1
+            WHERE deleted_at IS NULL
+              AND notification_rule_id IN (
+                SELECT id
+                FROM notification_rules
+                WHERE target_type = 'subtask'
+                  AND target_id = ?2
+                  AND deleted_at IS NULL
+              )
+            ",
+            params![now, subtask_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("通知OS登録状態を解除待ちにできません: {error}"))
+}
+
+fn mark_notification_os_registrations_cancel_pending_for_task_graph(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    now: &str,
+) -> RepositoryResult<()> {
+    transaction
+        .execute(
+            "
+            UPDATE notification_os_registrations
+            SET registration_status = CASE
+                    WHEN os_registration_id IS NULL THEN 'disabled'
+                    ELSE 'cancel_pending'
+                END,
+                last_attempted_at = NULL,
+                last_error = NULL,
+                deleted_at = CASE
+                    WHEN os_registration_id IS NULL THEN ?1
+                    ELSE NULL
+                END,
+                updated_at = ?1
+            WHERE deleted_at IS NULL
+              AND notification_rule_id IN (
+                SELECT id
+                FROM notification_rules
+                WHERE deleted_at IS NULL
+                  AND (
+                    (target_type = 'task' AND target_id = ?2)
+                    OR (
+                      target_type = 'subtask'
+                      AND target_id IN (
+                        SELECT id
+                        FROM subtasks
+                        WHERE task_id = ?2
+                      )
+                    )
+                  )
+              )
+            ",
+            params![now, task_id],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("通知OS登録状態を解除待ちにできません: {error}"))
 }
 
 fn notification_time_for_date(date: &str, time: Option<&str>) -> String {
@@ -2931,6 +3301,78 @@ fn select_next_pending_notification(
         )
         .optional()
         .map_err(|error| format!("次回通知予定を取得できません: {error}"))
+}
+
+fn select_notification_os_registration_jobs(
+    connection: &Connection,
+    now: &str,
+    limit: i64,
+) -> RepositoryResult<Vec<NotificationOsRegistrationJob>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT registrations.id,
+                   registrations.notification_rule_id,
+                   registrations.os_registration_id,
+                   notification_rules.target_type,
+                   notification_rules.target_id,
+                   notification_rules.kind,
+                   notification_rules.notify_at,
+                   registrations.registration_status,
+                   registrations.last_attempted_at,
+                   registrations.last_error
+            FROM notification_os_registrations AS registrations
+            INNER JOIN notification_rules
+              ON notification_rules.id = registrations.notification_rule_id
+            WHERE registrations.deleted_at IS NULL
+              AND (
+                (
+                  registrations.registration_status IN ('pending', 'failed')
+                  AND notification_rules.enabled = 1
+                  AND notification_rules.deleted_at IS NULL
+                  AND notification_rules.notify_at > ?1
+                )
+                OR registrations.registration_status = 'cancel_pending'
+              )
+            ORDER BY CASE
+                       WHEN registrations.registration_status = 'cancel_pending' THEN 0
+                       ELSE 1
+                     END,
+                     notification_rules.notify_at ASC,
+                     registrations.updated_at ASC,
+                     registrations.id ASC
+            LIMIT ?2
+            ",
+        )
+        .map_err(|error| format!("通知OS登録ジョブクエリを準備できません: {error}"))?;
+
+    let rows = statement
+        .query_map(params![now, limit], |row| {
+            let target_type_text: String = row.get(3)?;
+            let target_type = WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?;
+            let kind_text: String = row.get(5)?;
+            let registration_status_text: String = row.get(7)?;
+            let registration_status =
+                NotificationOsRegistrationStatus::from_db(&registration_status_text)
+                    .map_err(db_value_error)?;
+            let action = NotificationOsRegistrationAction::from_status(&registration_status);
+            Ok(NotificationOsRegistrationJob {
+                id: row.get(0)?,
+                notification_rule_id: row.get(1)?,
+                os_registration_id: row.get(2)?,
+                target: target_ref(target_type, row.get(4)?),
+                kind: NotificationKind::from_db(&kind_text).map_err(db_value_error)?,
+                notify_at: row.get(6)?,
+                registration_status,
+                action,
+                last_attempted_at: row.get(8)?,
+                last_error: row.get(9)?,
+            })
+        })
+        .map_err(|error| format!("通知OS登録ジョブを取得できません: {error}"))?;
+
+    rows.map(|row| row.map_err(|error| format!("通知OS登録ジョブ行を読めません: {error}")))
+        .collect()
 }
 
 fn select_notification_failure_history(
@@ -3872,6 +4314,7 @@ fn soft_delete_subtask_graph(
         )
         .map_err(|error| format!("サブタスクの一時停止履歴を削除できません: {error}"))?;
 
+    mark_notification_os_registrations_cancel_pending_for_subtask(transaction, subtask_id, now)?;
     transaction
         .execute(
             "
@@ -3983,6 +4426,7 @@ fn soft_delete_notification_rules_for_task_graph(
     task_id: &str,
     now: &str,
 ) -> RepositoryResult<()> {
+    mark_notification_os_registrations_cancel_pending_for_task_graph(transaction, task_id, now)?;
     transaction
         .execute(
             "
@@ -5375,6 +5819,7 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
     run_ui_read_model_migration(connection)?;
     run_tag_migration(connection)?;
     run_notification_preference_migration(connection)?;
+    run_notification_os_registration_migration(connection)?;
     run_notification_delivery_attempt_migration(connection)
 }
 
@@ -5413,6 +5858,77 @@ fn run_notification_preference_migration(connection: &Connection) -> RepositoryR
         "notifications_enabled",
         "ALTER TABLE notification_preferences ADD COLUMN notifications_enabled INTEGER NOT NULL DEFAULT 1 CHECK (notifications_enabled IN (0, 1))",
     )
+}
+
+fn run_notification_os_registration_migration(connection: &Connection) -> RepositoryResult<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS notification_os_registrations (
+              id TEXT PRIMARY KEY,
+              notification_rule_id TEXT NOT NULL,
+              os_registration_id TEXT NULL CHECK (
+                os_registration_id IS NULL OR length(trim(os_registration_id)) > 0
+              ),
+              registration_status TEXT NOT NULL CHECK (
+                registration_status IN (
+                  'pending',
+                  'registered',
+                  'failed',
+                  'cancel_pending',
+                  'disabled'
+                )
+              ),
+              last_attempted_at TEXT NULL,
+              last_error TEXT NULL,
+              deleted_at TEXT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              FOREIGN KEY (notification_rule_id) REFERENCES notification_rules(id) ON DELETE RESTRICT
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS notification_os_registrations_rule_active_idx
+            ON notification_os_registrations (notification_rule_id)
+            WHERE deleted_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS notification_os_registrations_status_idx
+            ON notification_os_registrations (registration_status, updated_at)
+            WHERE deleted_at IS NULL;
+
+            INSERT INTO notification_os_registrations (
+              id, notification_rule_id, os_registration_id, registration_status,
+              last_attempted_at, last_error, deleted_at, created_at, updated_at
+            )
+            SELECT lower(hex(randomblob(16))),
+                   notification_rules.id,
+                   NULL,
+                   CASE
+                     WHEN notification_rules.enabled = 1
+                      AND notification_rules.deleted_at IS NULL
+                     THEN 'pending'
+                     ELSE 'disabled'
+                   END,
+                   NULL,
+                   NULL,
+                   CASE
+                     WHEN notification_rules.enabled = 1
+                      AND notification_rules.deleted_at IS NULL
+                     THEN NULL
+                     ELSE notification_rules.updated_at
+                   END,
+                   notification_rules.created_at,
+                   notification_rules.updated_at
+            FROM notification_rules
+            WHERE NOT EXISTS (
+              SELECT 1
+              FROM notification_os_registrations AS registrations
+              WHERE registrations.notification_rule_id = notification_rules.id
+                AND registrations.deleted_at IS NULL
+            );
+            ",
+        )
+        .map(|_| ())
+        .map_err(|error| format!("通知OS登録状態テーブルを作成できません: {error}"))
 }
 
 fn run_tag_migration(connection: &Connection) -> RepositoryResult<()> {
@@ -6333,6 +6849,35 @@ fn write_csv_export_files(
             .collect(),
     )?;
     write_csv_file(
+        &export_dir.join("notification_os_registrations.csv"),
+        &[
+            "id",
+            "notification_rule_id",
+            "os_registration_id",
+            "registration_status",
+            "last_attempted_at",
+            "last_error",
+            "created_at",
+            "updated_at",
+        ],
+        dataset
+            .notification_os_registrations
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.notification_rule_id.clone(),
+                    option_text(&row.os_registration_id),
+                    row.registration_status.clone(),
+                    option_text(&row.last_attempted_at),
+                    option_text(&row.last_error),
+                    row.created_at.clone(),
+                    row.updated_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
         &export_dir.join("recurrence_rules.csv"),
         &[
             "id",
@@ -6381,6 +6926,7 @@ fn csv_export_file_names() -> Vec<&'static str> {
         "pomodoro_settings.csv",
         "pomodoro_sessions.csv",
         "notification_rules.csv",
+        "notification_os_registrations.csv",
         "recurrence_rules.csv",
     ]
 }
@@ -6451,6 +6997,7 @@ fn select_export_dataset(connection: &Connection) -> RepositoryResult<ExportData
         pomodoro_settings: select_export_pomodoro_settings(connection)?,
         pomodoro_sessions: select_export_pomodoro_sessions(connection)?,
         notification_rules: select_export_notification_rules(connection)?,
+        notification_os_registrations: select_export_notification_os_registrations(connection)?,
         recurrence_rules: select_export_recurrence_rules(connection)?,
     })
 }
@@ -6764,6 +7311,37 @@ fn select_export_notification_rules(
         })
         .map_err(|error| format!("エクスポート用通知ルールを取得できません: {error}"))?;
     collect_export_rows(rows, "エクスポート用通知ルールを読めません")
+}
+
+fn select_export_notification_os_registrations(
+    connection: &Connection,
+) -> RepositoryResult<Vec<ExportNotificationOsRegistrationRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, notification_rule_id, os_registration_id, registration_status,
+                   last_attempted_at, last_error, created_at, updated_at
+            FROM notification_os_registrations
+            WHERE deleted_at IS NULL
+            ORDER BY updated_at, created_at, id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用通知OS登録状態取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportNotificationOsRegistrationRow {
+                id: row.get(0)?,
+                notification_rule_id: row.get(1)?,
+                os_registration_id: row.get(2)?,
+                registration_status: row.get(3)?,
+                last_attempted_at: row.get(4)?,
+                last_error: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用通知OS登録状態を取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用通知OS登録状態を読めません")
 }
 
 fn select_export_recurrence_rules(
@@ -7086,7 +7664,10 @@ mod tests {
             usecases,
         },
         domain::{
-            notification::{NotificationDeliveryResult, NotificationDisplayMode, NotificationKind},
+            notification::{
+                NotificationDeliveryResult, NotificationDisplayMode, NotificationKind,
+                NotificationOsRegistrationAction, NotificationOsRegistrationStatus,
+            },
             pomodoro::{PomodoroPhase, PomodoroStatus},
             task::WorkStatus,
             timer::WorkTargetType,
@@ -7518,6 +8099,80 @@ mod tests {
 
         assert_eq!(count, 1);
         assert_eq!(error_message, "permission denied");
+    }
+
+    #[test]
+    fn migration_backfills_notification_os_registrations() {
+        let connection = Connection::open_in_memory().expect("in-memory database");
+        configure_connection(&connection).expect("configure");
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE notification_rules (
+                  id TEXT PRIMARY KEY,
+                  target_type TEXT NOT NULL CHECK (target_type IN ('task', 'subtask')),
+                  target_id TEXT NOT NULL,
+                  kind TEXT NOT NULL CHECK (kind IN ('planned_start', 'due')),
+                  notify_at TEXT NOT NULL,
+                  enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+                  registration_status TEXT NOT NULL CHECK (
+                    registration_status IN ('pending', 'registered', 'failed', 'disabled')
+                  ),
+                  last_error TEXT NULL,
+                  deleted_at TEXT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+
+                INSERT INTO notification_rules (
+                  id, target_type, target_id, kind, notify_at, enabled,
+                  registration_status, created_at, updated_at
+                )
+                VALUES
+                  (
+                    'active-rule', 'task', 'task-1', 'due',
+                    '2026-07-06T09:00:00Z', 1, 'pending',
+                    '2026-07-06T00:00:00Z', '2026-07-06T00:00:00Z'
+                  ),
+                  (
+                    'disabled-rule', 'task', 'task-2', 'due',
+                    '2026-07-06T09:00:00Z', 0, 'disabled',
+                    '2026-07-06T00:00:00Z', '2026-07-06T00:05:00Z'
+                  );
+                ",
+            )
+            .expect("legacy notification rules");
+
+        run_initial_migration(&connection).expect("migrate");
+
+        let active_status: String = connection
+            .query_row(
+                "
+                SELECT registration_status
+                FROM notification_os_registrations
+                WHERE notification_rule_id = 'active-rule'
+                  AND deleted_at IS NULL
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .expect("active os registration");
+        let disabled_count: i64 = connection
+            .query_row(
+                "
+                SELECT COUNT(*)
+                FROM notification_os_registrations
+                WHERE notification_rule_id = 'disabled-rule'
+                  AND registration_status = 'disabled'
+                  AND deleted_at IS NOT NULL
+                ",
+                [],
+                |row| row.get(0),
+            )
+            .expect("disabled os registration");
+
+        assert_eq!(active_status, "pending");
+        assert_eq!(disabled_count, 1);
     }
 
     #[test]
@@ -10093,6 +10748,202 @@ mod tests {
             )
         );
         assert_eq!(disabled_due_rules, 1);
+    }
+
+    #[test]
+    fn task_update_marks_os_registration_pending_without_reopening_dispatch_status() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T09:00:00Z",
+        };
+        let update_clock = FixedClock {
+            now: "2026-07-06T09:05:00Z",
+        };
+        let task = usecases::create_task(
+            &database,
+            &create_clock,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "OS登録状態更新".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-07".to_string()),
+                due_time: Some("10:00".to_string()),
+                memo: None,
+            },
+        )
+        .expect("create task");
+
+        database
+            .with_connection(|connection| {
+                connection
+                    .execute(
+                        "
+                        UPDATE notification_rules
+                        SET registration_status = 'registered'
+                        WHERE target_type = 'task'
+                          AND target_id = ?1
+                          AND kind = 'due'
+                        ",
+                        params![task.id.as_str()],
+                    )
+                    .map_err(|error| format!("mark rule registered: {error}"))?;
+                connection
+                    .execute(
+                        "
+                        UPDATE notification_os_registrations
+                        SET os_registration_id = 'windows-notification-id',
+                            registration_status = 'registered',
+                            last_attempted_at = '2026-07-06T09:01:00Z'
+                        WHERE notification_rule_id IN (
+                          SELECT id
+                          FROM notification_rules
+                          WHERE target_type = 'task'
+                            AND target_id = ?1
+                            AND kind = 'due'
+                        )
+                        ",
+                        params![task.id.as_str()],
+                    )
+                    .map_err(|error| format!("mark os registered: {error}"))?;
+                Ok(())
+            })
+            .expect("prepare registered state");
+
+        usecases::update_task(
+            &database,
+            &update_clock,
+            task.id.clone(),
+            usecases::WorkItemUpdateDraft {
+                list_id: None,
+                title: "OS登録状態更新 タイトル変更".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-07".to_string()),
+                due_time: Some("10:00".to_string()),
+                timer_target_seconds: None,
+                recurrence_rule: None,
+                memo: None,
+            },
+        )
+        .expect("update task");
+
+        let (rule_status, os_status, os_registration_id): (String, String, String) = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "
+                        SELECT notification_rules.registration_status,
+                               notification_os_registrations.registration_status,
+                               notification_os_registrations.os_registration_id
+                        FROM notification_rules
+                        INNER JOIN notification_os_registrations
+                          ON notification_os_registrations.notification_rule_id = notification_rules.id
+                         AND notification_os_registrations.deleted_at IS NULL
+                        WHERE notification_rules.target_type = 'task'
+                          AND notification_rules.target_id = ?1
+                          AND notification_rules.kind = 'due'
+                        ",
+                        params![task.id.as_str()],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )
+                    .map_err(|error| format!("select statuses: {error}"))
+            })
+            .expect("statuses");
+        let jobs = usecases::list_notification_os_registration_jobs(&database, &update_clock)
+            .expect("os registration jobs");
+
+        assert_eq!(rule_status, "registered");
+        assert_eq!(os_status, "pending");
+        assert_eq!(os_registration_id, "windows-notification-id");
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(
+            jobs[0].action,
+            NotificationOsRegistrationAction::RegisterOrReplace
+        );
+        assert_eq!(
+            jobs[0].registration_status,
+            NotificationOsRegistrationStatus::Pending
+        );
+        assert_eq!(
+            jobs[0].os_registration_id.as_deref(),
+            Some("windows-notification-id")
+        );
+    }
+
+    #[test]
+    fn deleting_task_keeps_os_registration_cancel_job_until_cancelled() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-06T09:00:00Z",
+        };
+        let delete_clock = FixedClock {
+            now: "2026-07-06T09:05:00Z",
+        };
+        let cancelled_clock = FixedClock {
+            now: "2026-07-06T09:06:00Z",
+        };
+        let task = usecases::create_task(
+            &database,
+            &create_clock,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "削除時OS解除".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-07".to_string()),
+                due_time: Some("10:00".to_string()),
+                memo: None,
+            },
+        )
+        .expect("create task");
+
+        database
+            .with_connection(|connection| {
+                connection
+                    .execute(
+                        "
+                        UPDATE notification_os_registrations
+                        SET os_registration_id = 'windows-delete-id',
+                            registration_status = 'registered',
+                            last_attempted_at = '2026-07-06T09:01:00Z'
+                        WHERE notification_rule_id IN (
+                          SELECT id
+                          FROM notification_rules
+                          WHERE target_type = 'task'
+                            AND target_id = ?1
+                            AND kind = 'due'
+                        )
+                        ",
+                        params![task.id.as_str()],
+                    )
+                    .map(|_| ())
+                    .map_err(|error| format!("mark os registered: {error}"))
+            })
+            .expect("prepare os registration");
+
+        usecases::delete_task(&database, &delete_clock, task.id.clone()).expect("delete task");
+        let jobs = usecases::list_notification_os_registration_jobs(&database, &delete_clock)
+            .expect("cancel jobs");
+
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].action, NotificationOsRegistrationAction::Cancel);
+        assert_eq!(
+            jobs[0].registration_status,
+            NotificationOsRegistrationStatus::CancelPending
+        );
+        assert_eq!(
+            jobs[0].os_registration_id.as_deref(),
+            Some("windows-delete-id")
+        );
+
+        usecases::mark_notification_os_registration_cancelled(
+            &database,
+            &cancelled_clock,
+            jobs[0].id.clone(),
+        )
+        .expect("mark cancelled");
+        let remaining =
+            usecases::list_notification_os_registration_jobs(&database, &cancelled_clock)
+                .expect("remaining jobs");
+        assert!(remaining.is_empty());
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use crate::domain::{
     notification::{
         NotificationDeliveryResult, NotificationDisplayMode, NotificationKind,
+        NotificationOsRegistrationAction, NotificationOsRegistrationStatus,
         NotificationRegistrationStatus,
     },
     pomodoro::{PomodoroPhase, PomodoroStatus},
@@ -301,6 +302,20 @@ pub struct NotificationSyncResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotificationOsRegistrationJob {
+    pub id: String,
+    pub notification_rule_id: String,
+    pub os_registration_id: Option<String>,
+    pub target: WorkTargetRef,
+    pub kind: NotificationKind,
+    pub notify_at: String,
+    pub registration_status: NotificationOsRegistrationStatus,
+    pub action: NotificationOsRegistrationAction,
+    pub last_attempted_at: Option<String>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationDeliveryAttemptRecord {
     pub id: String,
     pub notification_rule_id: String,
@@ -400,7 +415,7 @@ pub struct UiPreferencesUpdate {
 }
 
 pub type RepositoryResult<T> = Result<T, String>;
-pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 4;
+pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 5;
 
 pub trait CalendarRepository {
     fn list_calendar_items(
@@ -589,6 +604,35 @@ pub trait NotificationHistoryRepository {
         &self,
         limit: i64,
     ) -> RepositoryResult<Vec<NotificationDeliveryAttemptRecord>>;
+}
+
+#[allow(dead_code)]
+pub trait NotificationOsRegistrationRepository {
+    fn list_notification_os_registration_jobs(
+        &self,
+        now: &str,
+        limit: i64,
+    ) -> RepositoryResult<Vec<NotificationOsRegistrationJob>>;
+
+    fn mark_notification_os_registration_registered(
+        &self,
+        registration_id: String,
+        os_registration_id: String,
+        now: String,
+    ) -> RepositoryResult<()>;
+
+    fn mark_notification_os_registration_failed(
+        &self,
+        registration_id: String,
+        error: &str,
+        now: String,
+    ) -> RepositoryResult<()>;
+
+    fn mark_notification_os_registration_cancelled(
+        &self,
+        registration_id: String,
+        now: String,
+    ) -> RepositoryResult<()>;
 }
 
 pub trait NotificationCommandRepository {

@@ -25,7 +25,7 @@ flowchart TD
 
 | 対象 | 扱い | 理由 |
 | --- | --- | --- |
-| `tasktimer.sqlite3` | フルバックアップ対象 | タスク、サブタスク、タグ、タイマー履歴、通知ルール、通知設定、UI設定の正。 |
+| `tasktimer.sqlite3` | フルバックアップ対象 | タスク、サブタスク、タグ、タイマー履歴、通知ルール、通知OS登録状態、通知設定、UI設定の正。 |
 | `backup-manifest.json` | バックアップ作成時に同梱 | アプリバージョン、スキーマ確認結果、作成日時、プラットフォームを記録する。 |
 | Release version | manifestに記録 | 復元時の互換性判断に使う。 |
 | OS通知の登録状態 | DB内の通知ルールを正とする | OS側登録そのものは復元せず、復元後にアプリ側で再同期する。 |
@@ -59,7 +59,7 @@ TaskTimer-backup-YYYYMMDD-HHMMSS/
   "format": "tasktimer-sqlite-backup",
   "formatVersion": 1,
   "appVersion": "0.1.0",
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "createdAt": "2026-07-15T00:00:00+09:00",
   "platform": "windows",
   "databaseFile": "tasktimer.sqlite3",
@@ -91,6 +91,7 @@ TaskTimer-export-YYYYMMDD-HHMMSS.json
 - `pomodoro_settings`
 - `pomodoro_sessions`
 - `notification_rules`
+- `notification_os_registrations`
 - `recurrence_rules`
 
 `manifest` には以下を記録する。
@@ -134,6 +135,7 @@ TaskTimer-export-YYYYMMDD-HHMMSS-csv/
 - `pomodoro_settings.csv`
 - `pomodoro_sessions.csv`
 - `notification_rules.csv`
+- `notification_os_registrations.csv`
 - `recurrence_rules.csv`
 
 CSVは改行、カンマ、ダブルクォートを正しくエスケープする。表計算ソフトで開いたときの数式実行を避けるため、`=`, `+`, `-`, `@` などで始まるセルは先頭にアポストロフィを付けて安全化する。CSVからの復元はMVP外とする。正確な値を機械的に参照したい場合はJSONエクスポートを使う。
