@@ -138,7 +138,8 @@ flowchart LR
 | DeleteTask | タスク、子サブタスク、タイマーセッション、ポモドーロセッション、通知ルールをソフト削除する。開始中タイマー/ポモドーロも通常検索から除外する。 |
 | DeleteSubtask | サブタスク、タイマーセッション、ポモドーロセッション、通知ルールをソフト削除する。開始中タイマー/ポモドーロも通常検索から除外する。 |
 | UpdateNotificationPreference | ローカル通知表示モードと通知全体ON/OFFを保存する。 |
-| DispatchDueNotifications | 期限到来した通知ルールを取得し、OS通知送信後に `registered` または `failed` を保存する。 |
+| GetNextPendingNotification | アプリ起動中のローカルスケジューラ用に、未来の `pending` / `failed` 通知から最も近い1件を取得する。読み取り専用。 |
+| DispatchDueNotifications | 期限到来した通知ルールを取得し、OS通知送信後に `registered` または `failed` を保存する。アプリ起動中スケジューラも期限到達時にこのUse Caseを呼ぶ。 |
 | ListTaskLists | 左ペインのリスト一覧を取得する。読み取り専用。 |
 | CreateTaskList | リスト名を検証し、リストを作成する。 |
 | UpdateTaskList | 初期リストではないことを確認し、リスト名を検証して名称を変更する。 |
@@ -159,13 +160,15 @@ flowchart LR
 | GetUiPreferences | 左ペイン開閉、最後のビュー、最後のリストID、カレンダー表示モードを取得する。 |
 | UpdateUiPreferences | 左ペイン開閉、最後のビュー、最後のリストID、カレンダー表示モードを同一トランザクションで保存する。 |
 
-OS通知登録はDBトランザクションに含めない。DBコミット後に実行し、失敗時は再試行状態を記録する。
+OS通知送信、アプリ起動中のローカルタイマー予約、将来のネイティブOS登録はDBトランザクションに含めない。`notification_rules` を通知意図の正とし、DBコミット後の副作用として実行する。失敗時は通知意図を失わず、再試行状態を記録する。
 
 Issue #29 の右詳細ペインでは、`UpdateTask` と `UpdateSubtask` をUI更新境界として使う。タイトル、開始予定日、期限、メモ、タイマー目標時間を同時に検証し、開始予定日/期限に対応する通知ルールを同一トランザクションで同期する。日付が未設定になった通知ルールは無効化し、日付が追加または変更された通知ルールは `pending` として再試行対象に戻す。
 
 Issue #30 では、`PauseActiveTimer`、`ResumeActiveTimer`、`StopActiveTimer` をタイマー操作境界として使う。`StopActiveTimer` は互換名のまま「終了」として扱い、未再開の一時停止区間を終了時刻で閉じてから、一時停止合計秒数を差し引いた `elapsed_seconds` を保存する。`UpdateTask` と `UpdateSubtask` は繰り返し設定も同じトランザクションで保存し、繰り返し有効時は開始予定日または期限日の少なくとも一方を必須にする。
 
 Issue #58 では、OS復帰またはウィンドウ再フォーカス相当のイベントでPresentationがスナップショットを再取得し、期限到来通知dispatchを再実行する。タイマーの正はDBに置き、停止時の `elapsed_seconds` は `started_at` と停止時刻のwall-clock差分から一時停止区間を差し引いて確定する。成功済み通知は `registered` として保持し、復帰後のdispatch対象から除外する。
+
+Issue #51 では、将来時刻通知を段階導入にする。第1段階ではアプリ起動中だけローカルスケジューラが次回 `notify_at` まで待機し、期限到達時に既存の `DispatchDueNotifications` を呼ぶ。起動、ウィンドウ復帰、通知設定変更、タスク/サブタスク日付変更後は、期限到来通知を処理してから次回通知を再予約する。第2段階ではWindows/macOSのネイティブ永続登録を検証するが、OS登録状態は `notification_rules.registration_status` に混ぜず、必要なら専用Repository境界を追加する。
 
 Issue #60 では、カレンダーRead Modelを週専用から開始予定日・期限日の範囲取得へ拡張する。表示切替、基準日、選択中カレンダー項目はPresentation状態であり、DB更新を行わない。取得範囲は93日以内に制限し、週/日/月表示で必要な範囲だけをSQLiteから読み取る。サブタスク項目は親タスク名をRead Modelに含め、実行中タイマーは `started_at` から表示用時刻を派生する。
 
@@ -210,6 +213,7 @@ sequenceDiagram
   participant UI
   participant UseCase
   participant DB
+  participant Scheduler as Local Scheduler
   participant Notify as OS Notification
 
   UI->>UseCase: 期限日を更新
@@ -217,7 +221,11 @@ sequenceDiagram
   UseCase->>DB: タスク/サブタスク更新
   UseCase->>DB: 通知ルール更新
   UseCase->>DB: コミット
-  UseCase->>Notify: ローカル通知登録
+  UI->>UseCase: 次回通知予定を取得
+  UseCase->>DB: pending/failedの最も近い未来通知を取得
+  UseCase-->>Scheduler: ローカルタイマーを張り直す
+  Scheduler->>UseCase: 期限到達
+  UseCase->>Notify: 期限到来通知を即時送信
   Notify-->>UseCase: 成功または失敗
   UseCase->>DB: 必要に応じて登録結果を記録
 ```
@@ -235,7 +243,7 @@ sequenceDiagram
 - `target_type` と `target_id` により、タイマーと通知の共通処理は簡単になるが、DBレベルの外部キー制約は弱くなる。
 - `tasks` と `subtasks` を分けることでドメイン意味は保てるが、共通処理のApplication Service設計が必要になる。
 - Tauriは実行時サイズを抑えられる一方、Rust側実装とパッケージングの複雑さが増える。
-- MVPの通知はアプリ起動中または再読み込み時に期限到来ルールをdispatchする。OS側の将来時刻スケジューリングは後続改善とする。
+- 将来時刻通知は、まずアプリ起動中のローカルスケジューラで既存dispatch境界を再利用する。アプリ完全終了中の通知保証はWindows/macOSネイティブ登録の検証後に扱う。
 - UI/UX改修はRead Modelを増やすためRepository境界が増えるが、大量タスク時にPresentationで全件集計するより安全である。
 - タイマー一時停止/再開は実務上便利だが、単純な開始/停止よりDB設計と境界ケースが増える。
 
