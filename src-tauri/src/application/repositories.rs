@@ -316,6 +316,31 @@ pub struct NotificationOsRegistrationJob {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeNotificationOsRegistrationJob {
+    pub id: String,
+    pub notification_rule_id: String,
+    pub os_registration_id: Option<String>,
+    pub target: WorkTargetRef,
+    pub target_title: String,
+    pub kind: NotificationKind,
+    pub notify_at: String,
+    pub registration_status: NotificationOsRegistrationStatus,
+    pub action: NotificationOsRegistrationAction,
+    pub last_attempted_at: Option<String>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeNotificationRegistrationSummary {
+    pub attempted: usize,
+    pub registered: usize,
+    pub cancelled: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationDeliveryAttemptRecord {
     pub id: String,
     pub notification_rule_id: String,
@@ -633,6 +658,15 @@ pub trait NotificationOsRegistrationRepository {
         registration_id: String,
         now: String,
     ) -> RepositoryResult<()>;
+}
+
+#[allow(dead_code)]
+pub trait NativeNotificationOsRegistrationRepository: NotificationOsRegistrationRepository {
+    fn list_native_notification_os_registration_jobs(
+        &self,
+        now: &str,
+        limit: i64,
+    ) -> RepositoryResult<Vec<NativeNotificationOsRegistrationJob>>;
 }
 
 pub trait NotificationCommandRepository {

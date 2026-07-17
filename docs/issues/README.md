@@ -54,6 +54,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [046 起動・復帰・設定変更時の通知再同期を実装する](046-notification-resync-events.md) / GitHub #117
 - [047 通知OS登録状態のRepository境界とDB状態を追加する](047-notification-os-registration-state.md) / GitHub #115
 - [048 Windows/macOSネイティブ将来通知adapterの実現性を検証する](048-native-notification-adapter-feasibility.md) / GitHub #118
+- [049 Windowsネイティブ将来通知adapterのPoCを実装する](049-windows-native-notification-poc.md) / GitHub #123
 
 ## 運用
 

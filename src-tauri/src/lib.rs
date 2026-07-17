@@ -12,15 +12,17 @@ use application::commands::{
     get_pomodoro_settings, get_ui_preferences, health_check, list_archived_task_rows,
     list_calendar_items, list_notification_failure_history, list_tags, list_task_lists,
     list_task_rows, list_tasks, list_week_calendar_items, pause_active_timer, pause_pomodoro,
-    reopen_subtask, reopen_task, restore_archived_task, restore_sqlite_backup, resume_active_timer,
-    resume_pomodoro, skip_pomodoro_break, start_pomodoro, start_pomodoro_break, start_timer,
-    stop_active_timer, sync_expired_pomodoro, sync_notifications, toggle_task_favorite,
-    update_notification_display_mode, update_notifications_enabled, update_pomodoro_settings,
-    update_subtask, update_tag, update_task, update_task_list, update_task_status,
-    update_ui_preferences,
+    process_notification_os_registrations, reopen_subtask, reopen_task, restore_archived_task,
+    restore_sqlite_backup, resume_active_timer, resume_pomodoro, skip_pomodoro_break,
+    start_pomodoro, start_pomodoro_break, start_timer, stop_active_timer, sync_expired_pomodoro,
+    sync_notifications, toggle_task_favorite, update_notification_display_mode,
+    update_notifications_enabled, update_pomodoro_settings, update_subtask, update_tag,
+    update_task, update_task_list, update_task_status, update_ui_preferences,
 };
 use infrastructure::{
-    clock::SystemClock, notification::TauriLocalNotificationGateway, sqlite::SqliteDatabase,
+    clock::SystemClock,
+    notification::{TauriLocalNotificationGateway, TauriNativeNotificationRegistrationGateway},
+    sqlite::SqliteDatabase,
 };
 use tauri::Manager;
 
@@ -34,6 +36,9 @@ pub fn run() {
             app.manage(database);
             app.manage(SystemClock);
             app.manage(TauriLocalNotificationGateway::new(app.handle().clone()));
+            app.manage(TauriNativeNotificationRegistrationGateway::new(
+                app.handle().clone(),
+            ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -54,6 +59,7 @@ pub fn run() {
             get_notifications_enabled,
             get_next_pending_notification,
             sync_notifications,
+            process_notification_os_registrations,
             get_ui_preferences,
             update_ui_preferences,
             list_notification_failure_history,

@@ -62,6 +62,10 @@ flowchart TD
 - 既存 `notification_rules` から `notification_os_registrations` がbackfillされる。
 - タスク更新時、`notification_rules.registration_status` を重複dispatch対象に戻さず、OS登録状態だけを `pending` に戻す。
 - タスク削除時、OS登録IDがある通知登録状態は `cancel_pending` として残り、解除完了後にジョブ対象から外れる。
+- Windows以外ではネイティブOS登録PoCのUse CaseがDBに触らずスキップする。
+- WindowsネイティブOS登録PoCで、`generic` 設定時に対象タイトルやメモ本文をadapterへ渡さない。
+- WindowsネイティブOS登録PoCで、登録失敗時は `failed` とOSエラーだけを保存する。
+- WindowsネイティブOS登録PoCで、`cancel_pending` がOS解除後に解除済みになる。
 - UI設定取得で左ペイン開閉、最後のビュー、最後のリストID、カレンダー表示モードが返る。
 - UI設定更新で許可された値だけが保存される。
 - UI設定値が破損していても既定値へフォールバックして取得できる。
@@ -119,6 +123,7 @@ flowchart TD
 - SQLiteバックアップ復元後、復元後DBの通知予定だけが再同期される。
 - `generic` 通知でタスク/サブタスクタイトルがOS通知に出ない。
 - 通知送信失敗時に設定画面で失敗が分かり、再試行できる。
+- Windowsネイティブ将来通知PoCは、インストール済みWindows 11アプリを非昇格で起動し、登録、期限変更による差し替え、削除による解除、通知全体OFFによる解除、`generic` 表示、アプリ完全終了中の発火、アンインストール後の予約通知残存可否を手動確認する。
 - OSスリープ/復帰後も操作できる。
 
 詳細なリリース判定は [リリース前チェックリスト](release-checklist.md) に記録する。
@@ -139,7 +144,7 @@ CIで確認するもの:
 CIで保証しないもの:
 
 - macOS/Windows固有の通知権限。
-- アプリ完全終了中の将来時刻通知。#118 の実現性検証では本実装せず、Windows先行PoC #123 まで保証対象外とする。
+- アプリ完全終了中の将来時刻通知。#123 でWindows先行PoC adapterを追加したが、Windows 11のインストール済みアプリで手動検証が完了するまで公開保証対象外とする。
 - インストーラーartifactの実インストール。
 - macOS artifactを配布する場合の署名・公証済みDMGのGatekeeper実機挙動。
 - Windows未署名artifactに対するOS警告。

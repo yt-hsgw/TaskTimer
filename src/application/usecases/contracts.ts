@@ -92,6 +92,15 @@ export type NotificationSyncResult = {
   nextSchedule: NextNotificationSchedule | null;
 };
 
+export type NativeNotificationRegistrationSummary = {
+  attempted: number;
+  registered: number;
+  cancelled: number;
+  skipped: number;
+  failed: number;
+  lastError: string | null;
+};
+
 export type PomodoroSettings = {
   id: string;
   workSeconds: number;
@@ -307,6 +316,7 @@ export type TaskTimerGateway = {
   updateNotificationsEnabled(enabled: boolean): Promise<boolean>;
   getNextPendingNotification(): Promise<NextNotificationSchedule | null>;
   syncNotifications(): Promise<NotificationSyncResult>;
+  processNativeNotificationRegistrations(): Promise<NativeNotificationRegistrationSummary>;
   dispatchDueNotifications(): Promise<NotificationDispatchSummary>;
   listNotificationFailureHistory(): Promise<NotificationDeliveryAttempt[]>;
   createSqliteBackup(destinationDir: string): Promise<SqliteBackupResult>;

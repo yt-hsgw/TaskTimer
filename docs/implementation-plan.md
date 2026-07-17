@@ -141,6 +141,7 @@ UI専用にすべてのタスク、サブタスク、タイマー履歴を一括
 - アプリ起動中は、最も近い未来の `pending` / `failed` 通知を読み取り、React側の単一ローカルタイマーから既存 `dispatch_due_notifications` を呼び出せる。
 - 起動、復帰、通知設定変更、タスク/サブタスク期限変更、バックアップ復元後は `sync_notifications` を通知再同期入口として使い、期限到来dispatch後に次回通知予定を再予約する。
 - 将来のネイティブOS通知予約adapterに備え、OS登録ID、OS登録状態、最終試行時刻、最終エラーは `notification_os_registrations` に分離して保存できる。
+- Windowsネイティブ将来通知PoCとして、Rust Infrastructure内に `ScheduledToastNotification` adapter、Application Use Case、Tauri command、Presentationの同期呼び出しを追加した。
 
 設計判断:
 
@@ -151,7 +152,8 @@ UI専用にすべてのタスク、サブタスク、タイマー履歴を一括
 - `sync_notifications` は新しいOS永続登録状態を持たず、DB上の `notification_rules` からローカルタイマーを再生成する。
 - `notification_rules.registration_status` は期限到来dispatch状態のまま維持し、OS永続登録状態は `notification_os_registrations.registration_status` へ分離する。
 - 現行 `tauri-plugin-notification 2.3.3` のdesktop `show()` は即時通知として扱い、`schedule` をアプリ完全終了中の永続予約として採用しない。
-- Windowsネイティブ将来通知adapterは #123 でPoCし、macOS adapterは署名・公証準備ができるまで後回しにする。
+- Windowsネイティブ将来通知adapterは #123 でPoCを追加したが、公開保証としての採用はWindows 11のインストール済みアプリで登録、変更、解除、アプリ完全終了中発火、アンインストール後の予約通知残存可否を確認してから判断する。
+- macOS adapterは署名・公証準備ができるまで後回しにする。
 
 ## Phase 5: リリース前強化
 

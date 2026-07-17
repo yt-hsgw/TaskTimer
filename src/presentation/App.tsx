@@ -243,6 +243,7 @@ export function App() {
       setNotificationsEnabled(nextNotificationsEnabled);
       const notificationSyncResult =
         await tauriTaskTimerGateway.syncNotifications();
+      await tauriTaskTimerGateway.processNativeNotificationRegistrations();
       setNotificationSummary(
         combineNotificationSummaries(
           pomodoroSyncResult.notificationSummary,

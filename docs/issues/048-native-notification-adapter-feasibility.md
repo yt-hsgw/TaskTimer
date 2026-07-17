@@ -155,6 +155,11 @@ sequenceDiagram
 - #123 Windowsネイティブ将来通知adapterのPoCを実装する。
 - macOS adapterは #24 の署名・公証準備後に、別IssueでPoCまたは実装判断する。
 
+## 後続状況
+
+- #123 ではWindows限定の `ScheduledToastNotification` PoC adapterを追加する。
+- ただし、Microsoft Learn上のdesktop app制限があるため、Windows 11のインストール済みアプリで登録、変更、解除、アプリ完全終了中の発火を確認するまで、本採用または公開保証とは扱わない。
+
 ## 受け入れ条件
 
 - Windows/macOSそれぞれの採用可否、制限、実装コストがdocsに記録されている。

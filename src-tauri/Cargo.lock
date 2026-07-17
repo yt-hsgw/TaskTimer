@@ -3392,6 +3392,7 @@ dependencies = [
  "tauri-plugin-notification",
  "time",
  "uuid",
+ "windows",
 ]
 
 [[package]]
