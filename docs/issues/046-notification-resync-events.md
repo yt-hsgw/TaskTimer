@@ -28,7 +28,7 @@ GitHub Issue: #117
 - Windows/macOSネイティブ通知予約adapter。
 - OS登録状態専用テーブル。
 
-これらは #118 と #115 で扱う。
+これらは #115、#118、Windows先行PoC #123 で扱う。
 
 ## トランザクション境界
 
@@ -100,4 +100,4 @@ sequenceDiagram
 承認。
 
 - #117はアプリ起動中の再同期入口の明示化として完了する。
-- OS永続登録状態のDB設計は #115、ネイティブadapter実現性は #118 で扱う。
+- OS永続登録状態のDB設計は #115、ネイティブadapter実現性は #118、Windows adapterのPoCは #123 で扱う。

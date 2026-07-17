@@ -69,6 +69,7 @@ Application境界で検証する。
 - OS通知はTauri公式notification pluginをRust側adapterから呼び出す。JS側へ通知plugin権限を追加しない。
 - アプリ起動中の将来時刻通知スケジューラは外部通信を行わず、OS通知adapterへ渡す本文は通知表示モードに従う。
 - アプリ完全終了中の通知を保証するネイティブOS登録、常駐プロセス、OSタスクを追加する場合は、ユーザー同意、署名、公証、アンインストール時の登録解除を別途レビューする。
+- 現時点では `tauri-plugin-notification` の `schedule` を永続予約として採用しない。Windows PoCでもJS側notification capabilityを追加せず、Rust Infrastructure側adapterに閉じる。
 
 ## ログルール
 
