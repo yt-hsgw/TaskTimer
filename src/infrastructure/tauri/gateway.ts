@@ -5,6 +5,7 @@ import type {
   DataExportResult,
   NotificationDeliveryAttempt,
   NotificationDispatchSummary,
+  NextNotificationSchedule,
   PomodoroExpirySyncResult,
   PomodoroSettings,
   PomodoroSettingsDraft,
@@ -135,6 +136,8 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<boolean>("update_notifications_enabled", {
       request: { enabled },
     }),
+  getNextPendingNotification: () =>
+    invoke<NextNotificationSchedule | null>("get_next_pending_notification"),
   dispatchDueNotifications: () =>
     invoke<NotificationDispatchSummary>("dispatch_due_notifications"),
   listNotificationFailureHistory: () =>

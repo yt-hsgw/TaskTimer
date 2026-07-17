@@ -8,10 +8,11 @@ use crate::domain::{
 use super::{
     repositories::{
         ActivePomodoro, ActiveTimer, DataExportManifestRecord, DataExportRecord,
-        NotificationDeliveryAttemptRecord, NotificationDispatchSummary, PomodoroSettingsRecord,
-        RecurrenceRuleRecord, SqliteBackupManifestRecord, SqliteBackupRecord, SqliteRestoreRecord,
-        SubtaskRecord, TagRecord, TaskListRecord, TaskRecord, TaskRowRecord, TaskTagRecord,
-        TaskWithSubtasksRecord, UiPreferencesRecord, WeekCalendarItem,
+        NextNotificationSchedule, NotificationDeliveryAttemptRecord, NotificationDispatchSummary,
+        PomodoroSettingsRecord, RecurrenceRuleRecord, SqliteBackupManifestRecord,
+        SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord, TagRecord, TaskListRecord,
+        TaskRecord, TaskRowRecord, TaskTagRecord, TaskWithSubtasksRecord, UiPreferencesRecord,
+        WeekCalendarItem,
     },
     usecases::{
         DataExportCreateDraft, PomodoroSettingsDraft, RecurrenceRuleDraft, SqliteBackupCreateDraft,
@@ -476,6 +477,13 @@ pub struct NotificationDispatchSummaryDto {
     pub succeeded: usize,
     pub failed: usize,
     pub last_error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NextNotificationScheduleDto {
+    pub notification_rule_id: String,
+    pub notify_at: String,
 }
 
 #[derive(Serialize)]
@@ -965,6 +973,15 @@ impl From<NotificationDispatchSummary> for NotificationDispatchSummaryDto {
             succeeded: value.succeeded,
             failed: value.failed,
             last_error: value.last_error,
+        }
+    }
+}
+
+impl From<NextNotificationSchedule> for NextNotificationScheduleDto {
+    fn from(value: NextNotificationSchedule) -> Self {
+        Self {
+            notification_rule_id: value.notification_rule_id,
+            notify_at: value.notify_at,
         }
     }
 }

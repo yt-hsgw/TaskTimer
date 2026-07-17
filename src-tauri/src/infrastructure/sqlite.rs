@@ -21,11 +21,11 @@ use crate::{
     application::repositories::{
         target_ref, ActivePomodoro, ActiveTimer, CalendarMarker, CalendarRepository,
         DataExportCreate, DataExportManifestRecord, DataExportRecord, DataExportRepository,
-        NotificationCommandRepository, NotificationDeliveryAttemptRecord,
+        NextNotificationSchedule, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationHistoryRepository, NotificationJob, NotificationPreferenceRepository,
-        PomodoroExpiry, PomodoroRepository, PomodoroSettingsRecord, PomodoroSettingsUpdate,
-        RecurrenceRuleInput, RecurrenceRuleRecord, RepositoryResult, SqliteBackupCreate,
-        SqliteBackupManifestRecord, SqliteBackupRecord, SqliteBackupRepository,
+        NotificationScheduleRepository, PomodoroExpiry, PomodoroRepository, PomodoroSettingsRecord,
+        PomodoroSettingsUpdate, RecurrenceRuleInput, RecurrenceRuleRecord, RepositoryResult,
+        SqliteBackupCreate, SqliteBackupManifestRecord, SqliteBackupRecord, SqliteBackupRepository,
         SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord,
         TagRepository, TagUpdate, TaskListCommandRepository, TaskListCreate, TaskListRecord,
         TaskListUpdate, TaskReadRepository, TaskRecord, TaskRowRecord, TaskStatusUpdate,
@@ -1723,6 +1723,15 @@ impl NotificationPreferenceRepository for SqliteDatabase {
     }
 }
 
+impl NotificationScheduleRepository for SqliteDatabase {
+    fn get_next_pending_notification(
+        &self,
+        now: &str,
+    ) -> RepositoryResult<Option<NextNotificationSchedule>> {
+        self.with_connection(|connection| select_next_pending_notification(connection, now))
+    }
+}
+
 impl NotificationHistoryRepository for SqliteDatabase {
     fn list_notification_failure_history(
         &self,
@@ -2866,6 +2875,62 @@ fn select_due_notification_jobs(
 
     rows.map(|row| row.map_err(|error| format!("通知ジョブ行を読めません: {error}")))
         .collect()
+}
+
+fn select_next_pending_notification(
+    connection: &Connection,
+    now: &str,
+) -> RepositoryResult<Option<NextNotificationSchedule>> {
+    connection
+        .query_row(
+            "
+            SELECT notification_rules.id,
+                   notification_rules.notify_at
+            FROM notification_rules
+            LEFT JOIN tasks
+              ON notification_rules.target_type = 'task'
+             AND notification_rules.target_id = tasks.id
+             AND tasks.deleted_at IS NULL
+             AND tasks.status <> 'archived'
+            LEFT JOIN subtasks
+              ON notification_rules.target_type = 'subtask'
+             AND notification_rules.target_id = subtasks.id
+             AND subtasks.deleted_at IS NULL
+             AND subtasks.status <> 'archived'
+            LEFT JOIN tasks AS subtask_parent_tasks
+              ON notification_rules.target_type = 'subtask'
+             AND subtasks.task_id = subtask_parent_tasks.id
+             AND subtask_parent_tasks.deleted_at IS NULL
+             AND subtask_parent_tasks.status <> 'archived'
+            WHERE notification_rules.enabled = 1
+              AND notification_rules.deleted_at IS NULL
+              AND notification_rules.notify_at > ?1
+              AND notification_rules.registration_status IN ('pending', 'failed')
+              AND (
+                (
+                  notification_rules.target_type = 'task'
+                  AND tasks.id IS NOT NULL
+                )
+                OR (
+                  notification_rules.target_type = 'subtask'
+                  AND subtasks.id IS NOT NULL
+                  AND subtask_parent_tasks.id IS NOT NULL
+                )
+              )
+            ORDER BY notification_rules.notify_at ASC,
+                     notification_rules.created_at ASC
+            LIMIT 1
+            ",
+            params![now],
+            |row| {
+                Ok(NextNotificationSchedule {
+                    notification_rule_id: row.get(0)?,
+                    notify_at: row.get(1)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|error| format!("次回通知予定を取得できません: {error}"))
 }
 
 fn select_notification_failure_history(
@@ -10097,6 +10162,70 @@ mod tests {
     }
 
     #[test]
+    fn get_next_pending_notification_returns_earliest_future_rule() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T09:00:00Z",
+        };
+
+        for (title, due_time) in [
+            ("過去の通知", "08:00"),
+            ("後の通知", "10:00"),
+            ("最初の未来通知", "09:30"),
+        ] {
+            usecases::create_task(
+                &database,
+                &clock,
+                usecases::WorkItemDraft {
+                    list_id: None,
+                    title: title.to_string(),
+                    planned_start_date: None,
+                    due_date: Some("2026-07-06".to_string()),
+                    due_time: Some(due_time.to_string()),
+                    memo: None,
+                },
+            )
+            .expect("create task");
+        }
+
+        let next = usecases::get_next_pending_notification(&database, &clock)
+            .expect("next pending notification")
+            .expect("future notification");
+
+        assert_eq!(next.notify_at, "2026-07-06T09:30:00Z");
+    }
+
+    #[test]
+    fn get_next_pending_notification_respects_notifications_enabled() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T09:00:00Z",
+        };
+
+        usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "通知OFF確認".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-06".to_string()),
+                due_time: Some("10:00".to_string()),
+                memo: None,
+            },
+        )
+        .expect("create task");
+
+        usecases::update_notifications_enabled(&database, &clock, false)
+            .expect("disable notifications");
+
+        let next = usecases::get_next_pending_notification(&database, &clock)
+            .expect("next pending notification");
+
+        assert_eq!(next, None);
+    }
+
+    #[test]
     fn update_task_detail_saves_and_disables_recurrence_rule() {
         let database = in_memory_database();
         let create_clock = FixedClock {
@@ -10782,6 +10911,8 @@ mod tests {
         let second_summary =
             usecases::dispatch_due_notifications(&database, &notification_gateway, &resume_clock)
                 .expect("resume dispatch");
+        let next_notification = usecases::get_next_pending_notification(&database, &resume_clock)
+            .expect("next pending notification");
         let registered_count: i64 = database
             .with_connection(|connection| {
                 connection
@@ -10804,5 +10935,6 @@ mod tests {
         assert_eq!(second_summary.succeeded, 0);
         assert_eq!(notification_gateway.messages().len(), 1);
         assert_eq!(registered_count, 1);
+        assert_eq!(next_notification, None);
     }
 }

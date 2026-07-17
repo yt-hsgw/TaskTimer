@@ -50,6 +50,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [042 かんばん形式の画面を追加する](042-kanban-board.md) / GitHub #81
 - [043 ポモドーロタイマーを設計・実装する](043-pomodoro-timer.md) / GitHub #107
 - [044 OSへの将来時刻通知スケジューリング方式を設計する](044-notification-future-scheduling.md) / GitHub #51
+- [045 アプリ起動中の将来時刻通知スケジューラを実装する](045-notification-in-app-scheduler.md) / GitHub #116
 
 ## 運用
 

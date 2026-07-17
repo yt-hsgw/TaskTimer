@@ -281,6 +281,12 @@ pub struct NotificationJob {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NextNotificationSchedule {
+    pub notification_rule_id: String,
+    pub notify_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationDispatchSummary {
     pub attempted: usize,
     pub succeeded: usize,
@@ -563,6 +569,13 @@ pub trait NotificationPreferenceRepository {
     fn get_notification_display_mode(&self) -> RepositoryResult<NotificationDisplayMode>;
 
     fn get_notifications_enabled(&self) -> RepositoryResult<bool>;
+}
+
+pub trait NotificationScheduleRepository {
+    fn get_next_pending_notification(
+        &self,
+        now: &str,
+    ) -> RepositoryResult<Option<NextNotificationSchedule>>;
 }
 
 pub trait NotificationHistoryRepository {
