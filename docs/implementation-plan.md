@@ -138,6 +138,7 @@ UI専用にすべてのタスク、サブタスク、タイマー履歴を一括
 - 設定画面で通知全体をON/OFFできる。
 - 設定画面でdispatch結果と失敗メッセージを確認でき、再試行できる。
 - 通知送信の成功/失敗は `notification_delivery_attempts` に保存し、設定画面で最新履歴を確認できる。
+- アプリ起動中は、最も近い未来の `pending` / `failed` 通知を読み取り、React側の単一ローカルタイマーから既存 `dispatch_due_notifications` を呼び出せる。
 
 設計判断:
 

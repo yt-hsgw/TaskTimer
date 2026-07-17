@@ -19,15 +19,16 @@ use super::{
     notification::{LocalNotificationGateway, LocalNotificationMessage},
     repositories::{
         ActivePomodoro, ActiveTimer, DataExportCreate, DataExportRecord, DataExportRepository,
-        NotificationCommandRepository, NotificationDeliveryAttemptRecord,
+        NextNotificationSchedule, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationDispatchSummary, NotificationHistoryRepository,
-        NotificationPreferenceRepository, PomodoroRepository, PomodoroSettingsRecord,
-        PomodoroSettingsUpdate, RecurrenceRuleInput, RepositoryResult, SqliteBackupCreate,
-        SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore, SqliteRestoreRecord,
-        SubtaskRecord, TagCreate, TagRecord, TagRepository, TagUpdate, TaskListCommandRepository,
-        TaskListCreate, TaskListRecord, TaskListUpdate, TaskRecord, TaskStatusUpdate,
-        TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository, UiPreferencesRecord,
-        UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        NotificationPreferenceRepository, NotificationScheduleRepository, PomodoroRepository,
+        PomodoroSettingsRecord, PomodoroSettingsUpdate, RecurrenceRuleInput, RepositoryResult,
+        SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore,
+        SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord, TagRepository, TagUpdate,
+        TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskRecord,
+        TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository,
+        UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate,
+        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
 
@@ -567,6 +568,17 @@ pub fn update_notifications_enabled(
     enabled: bool,
 ) -> RepositoryResult<bool> {
     repository.update_notifications_enabled(enabled, clock.now_utc_iso8601())
+}
+
+pub fn get_next_pending_notification(
+    repository: &(impl NotificationPreferenceRepository + NotificationScheduleRepository),
+    clock: &impl Clock,
+) -> RepositoryResult<Option<NextNotificationSchedule>> {
+    if !repository.get_notifications_enabled()? {
+        return Ok(None);
+    }
+
+    repository.get_next_pending_notification(&clock.now_utc_iso8601())
 }
 
 pub fn dispatch_due_notifications(

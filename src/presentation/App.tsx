@@ -40,6 +40,9 @@ type LoadSnapshotOptions = {
   showLoading?: boolean;
 };
 
+const NOTIFICATION_SCHEDULER_MAX_TIMEOUT_MS = 60_000;
+const NOTIFICATION_SCHEDULER_DUE_DELAY_MS = 500;
+
 export function App() {
   const [tasks, setTasks] = useState<TaskWithSubtasks[]>([]);
   const [taskRows, setTaskRows] = useState<TaskRow[]>([]);
@@ -70,6 +73,8 @@ export function App() {
   const [notificationFailureHistory, setNotificationFailureHistory] = useState<
     NotificationDeliveryAttempt[]
   >([]);
+  const [notificationScheduleVersion, setNotificationScheduleVersion] =
+    useState(0);
   const [calendarViewMode, setCalendarViewMode] =
     useState<CalendarViewMode>("week");
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(
@@ -246,6 +251,7 @@ export function App() {
       setNotificationFailureHistory(
         await tauriTaskTimerGateway.listNotificationFailureHistory(),
       );
+      setNotificationScheduleVersion((version) => version + 1);
     } catch (error) {
       setErrorMessage(toErrorMessage(error));
     } finally {
@@ -390,6 +396,46 @@ export function App() {
     }, timeoutMs);
     return () => window.clearTimeout(timerId);
   }, [activePomodoro, loadSnapshot]);
+
+  useEffect(() => {
+    if (!hasHydratedUiPreferences || !notificationsEnabled) {
+      return;
+    }
+
+    let isCancelled = false;
+    let timerId: number | null = null;
+
+    async function scheduleNextNotification() {
+      try {
+        const nextNotification =
+          await tauriTaskTimerGateway.getNextPendingNotification();
+        if (isCancelled || !nextNotification) {
+          return;
+        }
+
+        timerId = window.setTimeout(() => {
+          void loadSnapshot({ showLoading: false });
+        }, getNotificationScheduleTimeoutMs(nextNotification.notifyAt));
+      } catch (error) {
+        if (!isCancelled) {
+          setErrorMessage(toErrorMessage(error));
+        }
+      }
+    }
+
+    void scheduleNextNotification();
+    return () => {
+      isCancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [
+    hasHydratedUiPreferences,
+    loadSnapshot,
+    notificationScheduleVersion,
+    notificationsEnabled,
+  ]);
 
   useEffect(() => {
     if (activeView.kind !== "list" || taskLists.length === 0) {
@@ -1709,6 +1755,22 @@ function getPomodoroSyncTimeoutMs(activePomodoro: ActivePomodoro | null) {
     return 500;
   }
   return Math.min(remainingMs + 500, 60_000);
+}
+
+function getNotificationScheduleTimeoutMs(notifyAt: string) {
+  const scheduledAt = new Date(notifyAt).getTime();
+  if (Number.isNaN(scheduledAt)) {
+    return NOTIFICATION_SCHEDULER_MAX_TIMEOUT_MS;
+  }
+
+  const remainingMs = scheduledAt - Date.now();
+  if (remainingMs <= 0) {
+    return NOTIFICATION_SCHEDULER_DUE_DELAY_MS;
+  }
+  return Math.min(
+    remainingMs + NOTIFICATION_SCHEDULER_DUE_DELAY_MS,
+    NOTIFICATION_SCHEDULER_MAX_TIMEOUT_MS,
+  );
 }
 
 function shiftDate(value: string, days: number) {

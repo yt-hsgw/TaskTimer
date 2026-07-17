@@ -155,6 +155,15 @@ pub fn get_notifications_enabled(database: DatabaseState<'_>) -> Result<bool, St
 }
 
 #[tauri::command]
+pub fn get_next_pending_notification(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+) -> Result<Option<super::dto::NextNotificationScheduleDto>, String> {
+    super::usecases::get_next_pending_notification(database.inner(), clock.inner())
+        .map(|schedule| schedule.map(Into::into))
+}
+
+#[tauri::command]
 pub fn get_ui_preferences(
     database: DatabaseState<'_>,
 ) -> Result<super::dto::UiPreferencesDto, String> {

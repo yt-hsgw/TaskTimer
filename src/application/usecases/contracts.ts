@@ -82,6 +82,11 @@ export type NotificationDeliveryAttempt = {
   attemptCount: number;
 };
 
+export type NextNotificationSchedule = {
+  notificationRuleId: string;
+  notifyAt: string;
+};
+
 export type PomodoroSettings = {
   id: string;
   workSeconds: number;
@@ -295,6 +300,7 @@ export type TaskTimerGateway = {
   ): Promise<NotificationDisplayMode>;
   getNotificationsEnabled(): Promise<boolean>;
   updateNotificationsEnabled(enabled: boolean): Promise<boolean>;
+  getNextPendingNotification(): Promise<NextNotificationSchedule | null>;
   dispatchDueNotifications(): Promise<NotificationDispatchSummary>;
   listNotificationFailureHistory(): Promise<NotificationDeliveryAttempt[]>;
   createSqliteBackup(destinationDir: string): Promise<SqliteBackupResult>;
