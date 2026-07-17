@@ -193,6 +193,8 @@ export function App() {
 
     try {
       await tauriTaskTimerGateway.healthCheck();
+      const pomodoroSyncResult =
+        await tauriTaskTimerGateway.syncExpiredPomodoro();
       const listId =
         activeView.kind === "list" ? activeView.listId : undefined;
       const [
@@ -233,8 +235,13 @@ export function App() {
       setPomodoroSettings(nextPomodoroSettings);
       setDisplayMode(nextDisplayMode);
       setNotificationsEnabled(nextNotificationsEnabled);
+      const dueNotificationSummary =
+        await tauriTaskTimerGateway.dispatchDueNotifications();
       setNotificationSummary(
-        await tauriTaskTimerGateway.dispatchDueNotifications(),
+        combineNotificationSummaries(
+          pomodoroSyncResult.notificationSummary,
+          dueNotificationSummary,
+        ),
       );
       setNotificationFailureHistory(
         await tauriTaskTimerGateway.listNotificationFailureHistory(),
@@ -371,6 +378,18 @@ export function App() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [loadSnapshot]);
+
+  useEffect(() => {
+    const timeoutMs = getPomodoroSyncTimeoutMs(activePomodoro);
+    if (timeoutMs === null) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      void loadSnapshot({ showLoading: false });
+    }, timeoutMs);
+    return () => window.clearTimeout(timerId);
+  }, [activePomodoro, loadSnapshot]);
 
   useEffect(() => {
     if (activeView.kind !== "list" || taskLists.length === 0) {
@@ -1658,6 +1677,38 @@ function isSameTarget(
   return (
     selectedTarget?.type === target.type && selectedTarget.id === target.id
   );
+}
+
+function combineNotificationSummaries(
+  first: NotificationDispatchSummary,
+  second: NotificationDispatchSummary,
+): NotificationDispatchSummary {
+  return {
+    attempted: first.attempted + second.attempted,
+    succeeded: first.succeeded + second.succeeded,
+    failed: first.failed + second.failed,
+    lastError: second.lastError ?? first.lastError,
+  };
+}
+
+function getPomodoroSyncTimeoutMs(activePomodoro: ActivePomodoro | null) {
+  if (!activePomodoro || activePomodoro.status !== "running") {
+    return null;
+  }
+
+  const startedAt = new Date(activePomodoro.phaseStartedAt).getTime();
+  if (Number.isNaN(startedAt)) {
+    return 60_000;
+  }
+
+  const phaseDurationMs = activePomodoro.phaseDurationSeconds * 1_000;
+  const pausedMs = activePomodoro.pausedTotalSeconds * 1_000;
+  const phaseEndAt = startedAt + phaseDurationMs + pausedMs;
+  const remainingMs = phaseEndAt - Date.now();
+  if (remainingMs <= 0) {
+    return 500;
+  }
+  return Math.min(remainingMs + 500, 60_000);
 }
 
 function shiftDate(value: string, days: number) {

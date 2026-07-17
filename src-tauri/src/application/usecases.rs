@@ -1,6 +1,9 @@
 use crate::domain::{
     notification::{build_notification_content, NotificationDisplayMode},
-    pomodoro::{validate_pomodoro_cycles_until_long_break, validate_pomodoro_duration_seconds},
+    pomodoro::{
+        validate_pomodoro_cycles_until_long_break, validate_pomodoro_duration_seconds,
+        PomodoroPhase,
+    },
     recurrence::RecurrenceFrequency,
     task::{
         validate_date_range, validate_due_time_requires_due_date, validate_memo,
@@ -114,6 +117,13 @@ pub struct PomodoroSettingsDraft {
     pub cycles_until_long_break: i64,
     pub auto_start_break: bool,
     pub auto_start_next_work: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PomodoroExpirySyncResult {
+    pub expired_pomodoro: Option<ActivePomodoro>,
+    pub active_pomodoro: Option<ActivePomodoro>,
+    pub notification_summary: NotificationDispatchSummary,
 }
 
 pub fn create_task(
@@ -379,6 +389,47 @@ pub fn cancel_pomodoro(
     repository.cancel_pomodoro(clock.now_utc_iso8601())
 }
 
+pub fn sync_expired_pomodoro(
+    repository: &(impl PomodoroRepository + NotificationPreferenceRepository),
+    notification_gateway: &impl LocalNotificationGateway,
+    clock: &impl Clock,
+) -> RepositoryResult<PomodoroExpirySyncResult> {
+    let now = clock.now_utc_iso8601();
+    let Some(expiry) = repository.sync_expired_pomodoro(now)? else {
+        return Ok(PomodoroExpirySyncResult {
+            expired_pomodoro: None,
+            active_pomodoro: None,
+            notification_summary: empty_notification_summary(),
+        });
+    };
+
+    let mut notification_summary = empty_notification_summary();
+    if repository.get_notifications_enabled()? {
+        notification_summary.attempted = 1;
+        let display_mode = repository.get_notification_display_mode()?;
+        let message = build_pomodoro_expiry_notification(
+            &display_mode,
+            &expiry.target_title,
+            &expiry.expired_pomodoro.phase,
+        );
+        match notification_gateway.send(&message) {
+            Ok(()) => {
+                notification_summary.succeeded = 1;
+            }
+            Err(error) => {
+                notification_summary.failed = 1;
+                notification_summary.last_error = Some(error);
+            }
+        }
+    }
+
+    Ok(PomodoroExpirySyncResult {
+        expired_pomodoro: Some(expiry.expired_pomodoro),
+        active_pomodoro: expiry.active_pomodoro,
+        notification_summary,
+    })
+}
+
 pub fn pause_active_timer(
     repository: &impl TaskTimerCommandRepository,
     clock: &impl Clock,
@@ -564,6 +615,38 @@ pub fn dispatch_due_notifications(
     }
 
     Ok(summary)
+}
+
+fn empty_notification_summary() -> NotificationDispatchSummary {
+    NotificationDispatchSummary {
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        last_error: None,
+    }
+}
+
+fn build_pomodoro_expiry_notification(
+    mode: &NotificationDisplayMode,
+    target_title: &str,
+    phase: &PomodoroPhase,
+) -> LocalNotificationMessage {
+    let body = match phase {
+        PomodoroPhase::Work => "ポモドーロの作業時間が終了しました。",
+        PomodoroPhase::ShortBreak | PomodoroPhase::LongBreak => {
+            "ポモドーロの休憩時間が終了しました。"
+        }
+    };
+    match mode {
+        NotificationDisplayMode::TitleOnly => LocalNotificationMessage {
+            title: target_title.trim().to_string(),
+            body: body.to_string(),
+        },
+        NotificationDisplayMode::Generic => LocalNotificationMessage {
+            title: "TaskTimer".to_string(),
+            body: body.to_string(),
+        },
+    }
 }
 
 pub fn list_notification_failure_history(
