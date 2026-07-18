@@ -137,6 +137,8 @@ CIで確認するもの:
 - 必須設計ファイルが揃っている。
 - SQLiteスキーマと初期マイグレーションを空DBへ適用できる。
 - Rust format、test、clippyが成功する。
+- `Windows復帰回帰検証`で、Windows向け依存を含むRustテストが成功する。
+- Windows VM上で、開始中・一時停止中タイマーのDB再接続、wall-clock差分、通知重複防止が成功する。
 - TypeScript/Vite buildが成功する。
 - `.env` と `.env.*` がコミットされていない。
 - 空白エラーがない。
@@ -148,7 +150,7 @@ CIで保証しないもの:
 - インストーラーartifactの実インストール。
 - macOS artifactを配布する場合の署名・公証済みDMGのGatekeeper実機挙動。
 - Windows未署名artifactに対するOS警告。
-- Windows実機またはVMでのOSスリープ/復帰後のタイマー復元、経過時間、通知重複なし確認。手順は [Issue 025](issues/025-sleep-resume-timer-notification.md) に記録する。
+- Windows実機での実電源スリープ、WebView2フォーカス復帰、OS通知表示。手順は [Issue 025](issues/025-sleep-resume-timer-notification.md) に記録する。
 - オフライン起動の実機確認。
 
 ## パフォーマンス確認

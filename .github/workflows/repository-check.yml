@@ -75,6 +75,7 @@ jobs:
           test -f .github/dependabot.yml
           test -f .github/workflows/release.yml
           test -f .github/workflows/performance-large-dataset.yml
+          test -f .github/workflows/windows-resume-regression.yml
           test -f docs/mvp-spec.md
           test -f docs/architecture.md
           test -f docs/domain-model.md
@@ -86,6 +87,7 @@ jobs:
           test -f docs/public-readiness.md
           test -f docs/release-checklist.md
           test -f docs/review/checklist.md
+          test -f docs/review/2026-07-19-windows-resume-regression-review.md
           test -f docs/adr/0004-public-distribution-license.md
           test -f docs/adr/0007-glib-linux-target-risk-acceptance.md
           test -f src-tauri/icons/icon.ico

@@ -70,6 +70,13 @@ GitHubをアプリ実行時データの保存先には使わない。
 - Rust cacheの効果はGitHub Actionsの実行時間で確認する。`Cargo.lock`、Rust toolchain、OSが変わる場合はキャッシュが分かれる前提で扱う。
 - OS固有の通知権限、インストーラー、署名警告はCIだけでは保証しない。リリース前チェックリストで手動確認する。
 
+`Windows復帰回帰検証` ワークフローは、関連するPull Requestと手動実行でWindows runner上のRustテストを実行する。
+
+- 開始中・一時停止中タイマーのDB再接続とwall-clock差分を検証する。
+- 復帰相当の通知同期と重複送信防止を検証する。
+- 実際のOS電源スリープ、WebView2のフォーカス復帰、OS通知表示は保証しないため、Release前手動確認を省略しない。
+- workflow権限は `contents: read` に限定する。
+
 `依存関係アラート監視` ワークフローは、週1回と手動実行で `glib` advisoryの上流制約を再評価する。
 
 Dependency advisory workflowの権限:
