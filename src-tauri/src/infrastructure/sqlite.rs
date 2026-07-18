@@ -8838,6 +8838,44 @@ mod tests {
         std::env::temp_dir().join(format!("{prefix}-{}", Uuid::new_v4()))
     }
 
+    fn create_legacy_task_schema(connection: &Connection) {
+        connection
+            .execute_batch(
+                "
+                CREATE TABLE tasks (
+                  id TEXT PRIMARY KEY,
+                  title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+                  status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
+                  planned_start_date TEXT NULL,
+                  due_date TEXT NULL,
+                  memo TEXT NOT NULL DEFAULT '',
+                  sort_order INTEGER NOT NULL DEFAULT 0,
+                  completed_at TEXT NULL,
+                  deleted_at TEXT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE subtasks (
+                  id TEXT PRIMARY KEY,
+                  task_id TEXT NOT NULL,
+                  title TEXT NOT NULL CHECK (length(trim(title)) > 0),
+                  status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
+                  planned_start_date TEXT NULL,
+                  due_date TEXT NULL,
+                  memo TEXT NOT NULL DEFAULT '',
+                  sort_order INTEGER NOT NULL DEFAULT 0,
+                  completed_at TEXT NULL,
+                  deleted_at TEXT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE RESTRICT
+                );
+                ",
+            )
+            .expect("legacy task schema");
+    }
+
     fn insert_notification_rule(
         database: &SqliteDatabase,
         target_type: WorkTargetType,
@@ -9267,39 +9305,10 @@ mod tests {
     fn migration_backfills_ui_read_model_defaults_for_existing_database() {
         let connection = Connection::open_in_memory().expect("in-memory database");
         configure_connection(&connection).expect("configure");
+        create_legacy_task_schema(&connection);
         connection
             .execute_batch(
                 "
-                CREATE TABLE tasks (
-                  id TEXT PRIMARY KEY,
-                  title TEXT NOT NULL CHECK (length(trim(title)) > 0),
-                  status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
-                  planned_start_date TEXT NULL,
-                  due_date TEXT NULL,
-                  memo TEXT NOT NULL DEFAULT '',
-                  sort_order INTEGER NOT NULL DEFAULT 0,
-                  completed_at TEXT NULL,
-                  deleted_at TEXT NULL,
-                  created_at TEXT NOT NULL,
-                  updated_at TEXT NOT NULL
-                );
-
-                CREATE TABLE subtasks (
-                  id TEXT PRIMARY KEY,
-                  task_id TEXT NOT NULL,
-                  title TEXT NOT NULL CHECK (length(trim(title)) > 0),
-                  status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
-                  planned_start_date TEXT NULL,
-                  due_date TEXT NULL,
-                  memo TEXT NOT NULL DEFAULT '',
-                  sort_order INTEGER NOT NULL DEFAULT 0,
-                  completed_at TEXT NULL,
-                  deleted_at TEXT NULL,
-                  created_at TEXT NOT NULL,
-                  updated_at TEXT NOT NULL,
-                  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE RESTRICT
-                );
-
                 INSERT INTO tasks (
                   id, title, status, memo, sort_order, created_at, updated_at
                 )
@@ -9375,6 +9384,59 @@ mod tests {
             column_exists(&connection, "subtasks", "timer_target_seconds")
                 .expect("subtask timer target column")
         );
+    }
+
+    #[test]
+    fn opening_existing_app_database_adds_schedule_columns_before_indexes() {
+        let data_dir = temp_dir("tasktimer-schedule-startup-migration");
+        fs::create_dir_all(&data_dir).expect("create data directory");
+        let database_path = data_dir.join("tasktimer.sqlite3");
+        {
+            let connection = Connection::open(&database_path).expect("open legacy database");
+            configure_connection(&connection).expect("configure legacy database");
+            create_legacy_task_schema(&connection);
+        }
+
+        {
+            let database = SqliteDatabase::open_in_dir(data_dir.clone())
+                .expect("open and migrate existing app database");
+            database
+                .with_connection(|connection| {
+                    for table_name in ["tasks", "subtasks"] {
+                        for column_name in [
+                            "scheduled_start_date",
+                            "scheduled_start_time",
+                            "scheduled_end_date",
+                            "scheduled_end_time",
+                            "scheduled_is_all_day",
+                        ] {
+                            assert!(column_exists(connection, table_name, column_name)?);
+                        }
+                    }
+                    let schedule_index_count: i64 = connection
+                        .query_row(
+                            "
+                            SELECT COUNT(*)
+                            FROM sqlite_master
+                            WHERE type = 'index'
+                              AND name IN (
+                                'tasks_schedule_range_idx',
+                                'subtasks_schedule_range_idx'
+                              )
+                            ",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .map_err(|error| {
+                            format!("予定期間インデックスを確認できません: {error}")
+                        })?;
+                    assert_eq!(schedule_index_count, 2);
+                    Ok(())
+                })
+                .expect("verify schedule migration");
+        }
+
+        fs::remove_dir_all(data_dir).expect("remove data directory");
     }
 
     #[test]
