@@ -50,6 +50,13 @@ CREATE TABLE IF NOT EXISTS tasks (
       AND substr(due_time, 4, 2) BETWEEN '00' AND '59'
     )
   ),
+  scheduled_start_date TEXT NULL,
+  scheduled_start_time TEXT NULL,
+  scheduled_end_date TEXT NULL,
+  scheduled_end_time TEXT NULL,
+  scheduled_is_all_day INTEGER NOT NULL DEFAULT 0 CHECK (
+    scheduled_is_all_day IN (0, 1)
+  ),
   timer_target_seconds INTEGER NULL CHECK (
     timer_target_seconds IS NULL OR timer_target_seconds >= 0
   ),
@@ -65,6 +72,23 @@ CREATE TABLE IF NOT EXISTS tasks (
     planned_start_date IS NULL
     OR due_date IS NULL
     OR due_date >= planned_start_date
+  ),
+  CHECK (
+    (
+      scheduled_start_date IS NULL
+      AND scheduled_start_time IS NULL
+      AND scheduled_end_date IS NULL
+      AND scheduled_end_time IS NULL
+      AND scheduled_is_all_day = 0
+    )
+    OR (
+      scheduled_start_date IS NOT NULL
+      AND scheduled_end_date IS NOT NULL
+      AND (
+        (scheduled_is_all_day = 1 AND scheduled_start_time IS NULL AND scheduled_end_time IS NULL)
+        OR (scheduled_is_all_day = 0 AND scheduled_start_time IS NOT NULL AND scheduled_end_time IS NOT NULL)
+      )
+    )
   )
 );
 
@@ -93,6 +117,13 @@ CREATE TABLE IF NOT EXISTS subtasks (
       AND substr(due_time, 4, 2) BETWEEN '00' AND '59'
     )
   ),
+  scheduled_start_date TEXT NULL,
+  scheduled_start_time TEXT NULL,
+  scheduled_end_date TEXT NULL,
+  scheduled_end_time TEXT NULL,
+  scheduled_is_all_day INTEGER NOT NULL DEFAULT 0 CHECK (
+    scheduled_is_all_day IN (0, 1)
+  ),
   timer_target_seconds INTEGER NULL CHECK (
     timer_target_seconds IS NULL OR timer_target_seconds >= 0
   ),
@@ -107,6 +138,23 @@ CREATE TABLE IF NOT EXISTS subtasks (
     planned_start_date IS NULL
     OR due_date IS NULL
     OR due_date >= planned_start_date
+  ),
+  CHECK (
+    (
+      scheduled_start_date IS NULL
+      AND scheduled_start_time IS NULL
+      AND scheduled_end_date IS NULL
+      AND scheduled_end_time IS NULL
+      AND scheduled_is_all_day = 0
+    )
+    OR (
+      scheduled_start_date IS NOT NULL
+      AND scheduled_end_date IS NOT NULL
+      AND (
+        (scheduled_is_all_day = 1 AND scheduled_start_time IS NULL AND scheduled_end_time IS NULL)
+        OR (scheduled_is_all_day = 0 AND scheduled_start_time IS NOT NULL AND scheduled_end_time IS NOT NULL)
+      )
+    )
   )
 );
 

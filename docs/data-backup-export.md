@@ -59,7 +59,7 @@ TaskTimer-backup-YYYYMMDD-HHMMSS/
   "format": "tasktimer-sqlite-backup",
   "formatVersion": 1,
   "appVersion": "0.1.0",
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "createdAt": "2026-07-15T00:00:00+09:00",
   "platform": "windows",
   "databaseFile": "tasktimer.sqlite3",
@@ -100,7 +100,7 @@ TaskTimer-export-YYYYMMDD-HHMMSS.json
 ```json
 {
   "format": "tasktimer-json-export",
-  "formatVersion": 2,
+  "formatVersion": 3,
   "appVersion": "0.1.0",
   "createdAt": "2026-07-15T00:00:00+09:00",
   "platform": "windows",
@@ -130,8 +130,8 @@ TaskTimer-export-YYYYMMDD-HHMMSS-csv/
 - `board_columns.csv`: `id`, `title`, `sort_order`, `created_at`, `updated_at`
 - `tags.csv`: `id`, `name`, `sort_order`, `created_at`, `updated_at`
 - `task_tags.csv`: `task_id`, `tag_id`, `created_at`
-- `tasks.csv`: `board_column_id` と `lifecycle_status` を含む
-- `subtasks.csv`
+- `tasks.csv`: `board_column_id`、`lifecycle_status`、`scheduled_start_date/time`、`scheduled_end_date/time`、`scheduled_is_all_day` を含む
+- `subtasks.csv`: タスクと同じ予定期間列を含む
 - `timer_sessions.csv`
 - `timer_pauses.csv`
 - `pomodoro_settings.csv`

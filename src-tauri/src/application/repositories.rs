@@ -6,12 +6,13 @@ use crate::domain::{
     },
     pomodoro::{PomodoroPhase, PomodoroStatus},
     recurrence::RecurrenceFrequency,
-    task::WorkStatus,
+    task::{WorkSchedule, WorkStatus},
     timer::{WorkTargetRef, WorkTargetType},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CalendarMarker {
+    Scheduled,
     PlannedStart,
     Due,
     ActiveTimer,
@@ -20,6 +21,7 @@ pub enum CalendarMarker {
 impl CalendarMarker {
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::Scheduled => "scheduled",
             Self::PlannedStart => "planned_start",
             Self::Due => "due",
             Self::ActiveTimer => "active_timer",
@@ -35,6 +37,9 @@ pub struct WeekCalendarItem {
     pub parent_title: Option<String>,
     pub date: String,
     pub time: Option<String>,
+    pub end_date: Option<String>,
+    pub end_time: Option<String>,
+    pub is_all_day: bool,
     pub marker: CalendarMarker,
     pub status: WorkStatus,
     pub color_token: String,
@@ -122,6 +127,12 @@ pub struct WorkItemUpdate {
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleInput>,
     pub memo: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkScheduleUpdate {
+    pub schedule: WorkSchedule,
     pub now: String,
 }
 
@@ -483,7 +494,7 @@ pub struct UiPreferencesUpdate {
 }
 
 pub type RepositoryResult<T> = Result<T, String>;
-pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 6;
+pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 7;
 
 pub trait CalendarRepository {
     fn list_calendar_items(
@@ -590,6 +601,12 @@ pub trait BoardColumnRepository {
 pub trait TaskTimerCommandRepository {
     fn create_task(&self, input: WorkItemCreate) -> RepositoryResult<TaskRecord>;
 
+    fn create_scheduled_task(
+        &self,
+        input: WorkItemCreate,
+        schedule: WorkScheduleUpdate,
+    ) -> RepositoryResult<TaskRecord>;
+
     fn create_subtask(
         &self,
         task_id: String,
@@ -603,6 +620,12 @@ pub trait TaskTimerCommandRepository {
         subtask_id: String,
         input: WorkItemUpdate,
     ) -> RepositoryResult<SubtaskRecord>;
+
+    fn resize_scheduled_work_item(
+        &self,
+        target: WorkTargetRef,
+        input: WorkScheduleUpdate,
+    ) -> RepositoryResult<()>;
 
     fn start_timer(&self, target: WorkTargetRef, now: String) -> RepositoryResult<ActiveTimer>;
 

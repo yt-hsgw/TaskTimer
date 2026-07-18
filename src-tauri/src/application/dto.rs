@@ -18,7 +18,7 @@ use super::{
     usecases::{
         BoardColumnDraft, DataExportCreateDraft, PomodoroSettingsDraft, RecurrenceRuleDraft,
         SqliteBackupCreateDraft, SqliteBackupRestoreDraft, TagDraft, TaskListDraft,
-        UiPreferencesDraft, WorkItemDraft, WorkItemUpdateDraft,
+        UiPreferencesDraft, WorkItemDraft, WorkItemUpdateDraft, WorkScheduleDraft,
     },
 };
 
@@ -49,6 +49,32 @@ pub struct CreateSubtaskRequestDto {
     pub due_date: Option<String>,
     pub due_time: Option<String>,
     pub memo: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkScheduleRequestDto {
+    pub start_date: String,
+    pub start_time: Option<String>,
+    pub end_date: String,
+    pub end_time: Option<String>,
+    pub is_all_day: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateScheduledTaskRequestDto {
+    pub list_id: Option<String>,
+    pub title: String,
+    pub memo: Option<String>,
+    pub schedule: WorkScheduleRequestDto,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResizeScheduledWorkItemRequestDto {
+    pub target: WorkTargetRefDto,
+    pub schedule: WorkScheduleRequestDto,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -313,6 +339,9 @@ pub struct WeekCalendarItemDto {
     pub parent_title: Option<String>,
     pub date: String,
     pub time: Option<String>,
+    pub end_date: Option<String>,
+    pub end_time: Option<String>,
+    pub is_all_day: bool,
     pub marker: String,
     pub status: String,
     pub color_token: String,
@@ -671,6 +700,34 @@ impl From<CreateSubtaskRequestDto> for WorkItemDraft {
     }
 }
 
+impl From<WorkScheduleRequestDto> for WorkScheduleDraft {
+    fn from(value: WorkScheduleRequestDto) -> Self {
+        Self {
+            start_date: value.start_date,
+            start_time: value.start_time,
+            end_date: value.end_date,
+            end_time: value.end_time,
+            is_all_day: value.is_all_day,
+        }
+    }
+}
+
+impl From<CreateScheduledTaskRequestDto> for (WorkItemDraft, WorkScheduleDraft) {
+    fn from(value: CreateScheduledTaskRequestDto) -> Self {
+        (
+            WorkItemDraft {
+                list_id: value.list_id,
+                title: value.title,
+                planned_start_date: None,
+                due_date: None,
+                due_time: None,
+                memo: value.memo,
+            },
+            value.schedule.into(),
+        )
+    }
+}
+
 impl From<UpdateTaskRequestDto> for WorkItemUpdateDraft {
     fn from(value: UpdateTaskRequestDto) -> Self {
         Self {
@@ -812,6 +869,9 @@ impl From<WeekCalendarItem> for WeekCalendarItemDto {
             parent_title: value.parent_title,
             date: value.date,
             time: value.time,
+            end_date: value.end_date,
+            end_time: value.end_time,
+            is_all_day: value.is_all_day,
             marker: value.marker.as_str().to_string(),
             status: value.status.as_str().to_string(),
             color_token: value.color_token,

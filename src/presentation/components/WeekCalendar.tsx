@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  CSSProperties,
   DragEvent,
   FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
 } from "react";
+import { GripHorizontal, GripVertical } from "lucide-react";
 import type {
+  ScheduledTaskDraft,
   TaskListItem,
   WeekCalendarItem,
-  WorkItemDraft,
+  WorkScheduleDraft,
 } from "../../application/usecases/contracts";
 import type { WorkTargetRef } from "../../domain/task/types";
 
@@ -29,17 +33,22 @@ type WeekCalendarProps = {
   onNextRange(): void;
   onToday(): void;
   onSelectItem(item: WeekCalendarItem): void;
-  onCreateTask(input: WorkItemDraft): Promise<boolean>;
+  onCreateTask(input: ScheduledTaskDraft): Promise<boolean>;
   onRescheduleItem(
     item: WeekCalendarItem,
     dueDate: string,
     dueTime: string | null,
+  ): Promise<boolean>;
+  onResizeItem(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft,
   ): Promise<boolean>;
 };
 
 const dayLabels = ["月", "火", "水", "木", "金", "土", "日"];
 const businessHours = Array.from({ length: 15 }, (_, index) => 8 + index);
 const markerLabels: Record<WeekCalendarItem["marker"], string> = {
+  scheduled: "予定",
   planned_start: "開始予定",
   due: "期限",
   active_timer: "実行中",
@@ -53,8 +62,11 @@ const viewModeLabels: Record<CalendarViewMode, string> = {
 type CalendarTaskDraft = {
   title: string;
   listId: string;
-  dueDate: string;
-  dueTime: string;
+  startDate: string;
+  startTime: string;
+  endDate: string;
+  endTime: string;
+  isAllDay: boolean;
   memo: string;
   sourceLabel: string;
 };
@@ -81,6 +93,7 @@ export function WeekCalendar({
   onSelectItem,
   onCreateTask,
   onRescheduleItem,
+  onResizeItem,
 }: WeekCalendarProps) {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const [createDraft, setCreateDraft] = useState<CalendarTaskDraft | null>(null);
@@ -120,14 +133,20 @@ export function WeekCalendar({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [createDraft]);
 
-  function openCreateForm(dueDate: string, dueTime: string | null) {
+  function openCreateForm(startDate: string, startTime: string | null) {
+    const end = startTime
+      ? addMinutesToLocalDateTime(startDate, startTime, 60)
+      : { date: startDate, time: "" };
     setCreateDraft({
       title: "",
       listId: fallbackListId,
-      dueDate,
-      dueTime: dueTime ?? "",
+      startDate,
+      startTime: startTime ?? "",
+      endDate: end.date,
+      endTime: end.time,
+      isAllDay: !startTime,
       memo: "",
-      sourceLabel: formatCreateSourceLabel(dueDate, dueTime),
+      sourceLabel: formatCreateSourceLabel(startDate, startTime),
     });
   }
 
@@ -201,14 +220,17 @@ export function WeekCalendar({
       return;
     }
 
-    const dueDate = normalizeOptionalText(createDraft.dueDate);
     const created = await onCreateTask({
       title: createDraft.title,
       listId: createDraft.listId || fallbackListId,
-      plannedStartDate: null,
-      dueDate,
-      dueTime: dueDate ? normalizeOptionalText(createDraft.dueTime) : null,
       memo: createDraft.memo,
+      schedule: {
+        startDate: createDraft.startDate,
+        startTime: createDraft.isAllDay ? null : createDraft.startTime,
+        endDate: createDraft.endDate,
+        endTime: createDraft.isAllDay ? null : createDraft.endTime,
+        isAllDay: createDraft.isAllDay,
+      },
     });
     if (created) {
       setCreateDraft(null);
@@ -330,38 +352,96 @@ export function WeekCalendar({
                 </select>
               </label>
               <label>
-                <span>期限日</span>
+                <span>開始日</span>
                 <input
                   type="date"
-                  value={createDraft.dueDate}
+                  value={createDraft.startDate}
                   onChange={(event) =>
                     setCreateDraft((current) =>
                       current
                         ? {
                             ...current,
-                            dueDate: event.target.value,
-                            dueTime: event.target.value ? current.dueTime : "",
+                            startDate: event.target.value,
                           }
                         : current,
                     )
                   }
                   disabled={isCreatingTaskPending}
+                  required
                 />
               </label>
               <label>
-                <span>期限時刻</span>
+                <span>開始時刻</span>
                 <input
                   type="time"
-                  value={createDraft.dueTime}
+                  step={900}
+                  value={createDraft.startTime}
                   onChange={(event) =>
                     setCreateDraft((current) =>
-                      current ? { ...current, dueTime: event.target.value } : current,
+                      current ? { ...current, startTime: event.target.value } : current,
                     )
                   }
-                  disabled={isCreatingTaskPending || !createDraft.dueDate}
+                  disabled={isCreatingTaskPending || createDraft.isAllDay}
+                  required={!createDraft.isAllDay}
+                />
+              </label>
+              <label>
+                <span>終了日</span>
+                <input
+                  type="date"
+                  value={createDraft.endDate}
+                  onChange={(event) =>
+                    setCreateDraft((current) =>
+                      current ? { ...current, endDate: event.target.value } : current,
+                    )
+                  }
+                  disabled={isCreatingTaskPending}
+                  required
+                />
+              </label>
+              <label>
+                <span>終了時刻</span>
+                <input
+                  type="time"
+                  step={900}
+                  value={createDraft.endTime}
+                  onChange={(event) =>
+                    setCreateDraft((current) =>
+                      current ? { ...current, endTime: event.target.value } : current,
+                    )
+                  }
+                  disabled={isCreatingTaskPending || createDraft.isAllDay}
+                  required={!createDraft.isAllDay}
                 />
               </label>
             </div>
+
+            <label className="calendar-all-day-toggle">
+              <input
+                type="checkbox"
+                checked={createDraft.isAllDay}
+                onChange={(event) =>
+                  setCreateDraft((current) =>
+                    current
+                      ? {
+                          ...current,
+                          isAllDay: event.target.checked,
+                          startTime:
+                            event.target.checked || current.startTime
+                              ? current.startTime
+                              : "09:00",
+                          endTime:
+                            event.target.checked || current.endTime
+                              ? current.endTime
+                              : "10:00",
+                        }
+                      : current,
+                  )
+                }
+                disabled={isCreatingTaskPending}
+              />
+              <span>終日</span>
+            </label>
 
             <label>
               <span>メモ</span>
@@ -416,6 +496,7 @@ export function WeekCalendar({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
+          onResizeItem={onResizeItem}
         />
       ) : (
         <TimeGridCalendar
@@ -434,6 +515,7 @@ export function WeekCalendar({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
+          onResizeItem={onResizeItem}
         />
       )}
     </section>
@@ -456,6 +538,7 @@ function TimeGridCalendar({
   onDragOver,
   onDragLeave,
   onDrop,
+  onResizeItem,
 }: {
   days: CalendarDay[];
   items: WeekCalendarItem[];
@@ -472,6 +555,10 @@ function TimeGridCalendar({
   onDragOver(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
   onDragLeave(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
   onDrop(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
+  onResizeItem(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft,
+  ): Promise<boolean>;
 }) {
   const currentTime = getCurrentTimeMarker(days);
 
@@ -495,7 +582,11 @@ function TimeGridCalendar({
       <div className="calendar-time-label">終日</div>
       {days.map((day) => {
         const dateOnlyItems = items
-          .filter((item) => item.date === day.date && !item.time)
+          .filter((item) =>
+            item.marker === "scheduled"
+              ? item.isAllDay && isDateWithinSchedule(item, day.date)
+              : item.date === day.date && !item.time,
+          )
           .sort(sortCalendarItems);
         const dropTargetForDay = { dueDate: day.date, dueTime: null };
         return (
@@ -506,6 +597,7 @@ function TimeGridCalendar({
                 : ""
             }`}
             key={`${day.date}:all-day`}
+            data-calendar-date={day.date}
             role="gridcell"
             tabIndex={0}
             aria-label={`${formatCreateSourceLabel(day.date, null)}。ダブルクリックまたはEnterでタスクを追加`}
@@ -527,9 +619,11 @@ function TimeGridCalendar({
               draggedItem={draggedItem}
               isReschedulingItem={isReschedulingItem}
               variant="all-day"
+              displayDate={day.date}
               onSelectItem={onSelectItem}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
+              onResizeItem={onResizeItem}
             />
           </div>
         );
@@ -554,6 +648,7 @@ function TimeGridCalendar({
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
           onDrop={onDrop}
+          onResizeItem={onResizeItem}
         />
       ))}
     </div>
@@ -577,6 +672,7 @@ function TimeGridRow({
   onDragOver,
   onDragLeave,
   onDrop,
+  onResizeItem,
 }: {
   hour: number;
   days: CalendarDay[];
@@ -594,13 +690,25 @@ function TimeGridRow({
   onDragOver(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
   onDragLeave(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
   onDrop(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
+  onResizeItem(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft,
+  ): Promise<boolean>;
 }) {
   return (
     <>
       <div className="calendar-time-label">{formatHourLabel(hour)}</div>
       {days.map((day) => {
         const hourItems = items
-          .filter((item) => item.date === day.date && getDisplayHour(item) === hour)
+          .filter((item) => {
+            if (item.marker === "scheduled") {
+              return (
+                !item.isAllDay &&
+                getTimedScheduleSegment(item, day.date)?.startHour === hour
+              );
+            }
+            return item.date === day.date && getDisplayHour(item) === hour;
+          })
           .sort(sortCalendarItems);
         const shouldShowCurrentTime =
           currentTime?.date === day.date && currentTime.hour === hour;
@@ -618,6 +726,7 @@ function TimeGridRow({
                 : ""
             }`}
             key={`${day.date}:${hour}`}
+            data-calendar-date={day.date}
             role="gridcell"
             tabIndex={0}
             aria-label={`${formatCreateSourceLabel(day.date, formatHourInput(hour))}。ダブルクリックまたはEnterでタスクを追加`}
@@ -655,9 +764,11 @@ function TimeGridRow({
               draggedItem={draggedItem}
               isReschedulingItem={isReschedulingItem}
               variant="timed"
+              displayDate={day.date}
               onSelectItem={onSelectItem}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
+              onResizeItem={onResizeItem}
             />
           </div>
         );
@@ -673,9 +784,11 @@ function CalendarCellItems({
   draggedItem,
   isReschedulingItem,
   variant,
+  displayDate,
   onSelectItem,
   onDragStart,
   onDragEnd,
+  onResizeItem,
 }: {
   isLoading: boolean;
   items: WeekCalendarItem[];
@@ -683,9 +796,14 @@ function CalendarCellItems({
   draggedItem: WeekCalendarItem | null;
   isReschedulingItem: boolean;
   variant: "all-day" | "timed";
+  displayDate: string;
   onSelectItem(item: WeekCalendarItem): void;
   onDragStart(item: WeekCalendarItem, event: DragEvent<HTMLButtonElement>): void;
   onDragEnd(): void;
+  onResizeItem(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft,
+  ): Promise<boolean>;
 }) {
   if (isLoading) {
     return <p className="calendar-empty">読み込み中</p>;
@@ -700,7 +818,8 @@ function CalendarCellItems({
       {items.map((item) => (
         <CalendarItemButton
           item={item}
-          key={item.id}
+          key={`${item.id}:${displayDate}`}
+          displayDate={displayDate}
           selectedTarget={selectedTarget}
           draggedItem={draggedItem}
           isReschedulingItem={isReschedulingItem}
@@ -708,6 +827,7 @@ function CalendarCellItems({
           onSelectItem={onSelectItem}
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
+          onResizeItem={onResizeItem}
         />
       ))}
     </div>
@@ -730,6 +850,7 @@ function MonthCalendar({
   onDragOver,
   onDragLeave,
   onDrop,
+  onResizeItem,
 }: {
   days: CalendarDay[];
   anchorDate: string;
@@ -746,6 +867,10 @@ function MonthCalendar({
   onDragOver(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
   onDragLeave(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
   onDrop(target: CalendarDropTarget, event: DragEvent<HTMLElement>): void;
+  onResizeItem(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft,
+  ): Promise<boolean>;
 }) {
   const anchor = parseDateInputValue(anchorDate);
   const currentMonth = anchor.getMonth();
@@ -760,7 +885,11 @@ function MonthCalendar({
       <div className="calendar-month-grid">
         {days.map((day) => {
           const dayItems = items
-            .filter((item) => item.date === day.date)
+            .filter((item) =>
+              item.marker === "scheduled"
+                ? isDateWithinSchedule(item, day.date)
+                : item.date === day.date,
+            )
             .sort(sortCalendarItems);
           const visibleItems = dayItems.slice(0, 3);
           const hiddenCount = dayItems.length - visibleItems.length;
@@ -777,6 +906,7 @@ function MonthCalendar({
                   : ""
               }`}
               key={day.date}
+              data-calendar-date={day.date}
               role="gridcell"
               tabIndex={0}
               aria-label={`${formatCreateSourceLabel(day.date, null)}。ダブルクリックまたはEnterでタスクを追加`}
@@ -806,7 +936,8 @@ function MonthCalendar({
                   {visibleItems.map((item) => (
                     <CalendarItemButton
                       item={item}
-                      key={item.id}
+                      key={`${item.id}:${day.date}`}
+                      displayDate={day.date}
                       selectedTarget={selectedTarget}
                       draggedItem={draggedItem}
                       isReschedulingItem={isReschedulingItem}
@@ -814,6 +945,7 @@ function MonthCalendar({
                       onSelectItem={onSelectItem}
                       onDragStart={onDragStart}
                       onDragEnd={onDragEnd}
+                      onResizeItem={onResizeItem}
                     />
                   ))}
                   {hiddenCount > 0 ? (
@@ -831,6 +963,7 @@ function MonthCalendar({
 
 function CalendarItemButton({
   item,
+  displayDate,
   selectedTarget,
   draggedItem,
   isReschedulingItem,
@@ -838,8 +971,10 @@ function CalendarItemButton({
   onSelectItem,
   onDragStart,
   onDragEnd,
+  onResizeItem,
 }: {
   item: WeekCalendarItem;
+  displayDate: string;
   selectedTarget: WorkTargetRef | null;
   draggedItem: WeekCalendarItem | null;
   isReschedulingItem: boolean;
@@ -847,17 +982,32 @@ function CalendarItemButton({
   onSelectItem(item: WeekCalendarItem): void;
   onDragStart(item: WeekCalendarItem, event: DragEvent<HTMLButtonElement>): void;
   onDragEnd(): void;
+  onResizeItem(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft,
+  ): Promise<boolean>;
 }) {
   const isSelected = isSameTarget(item.target, selectedTarget);
   const isDraggable = canRescheduleItem(item) && !isReschedulingItem;
   const isDragging = draggedItem?.id === item.id;
   const relationLabel = item.parentTitle ? `親: ${item.parentTitle}` : null;
-  const markerText = item.time
-    ? `${item.time} ${markerLabels[item.marker]}`
-    : markerLabels[item.marker];
+  const markerText = formatCalendarItemMarker(item);
+  const isScheduled = item.marker === "scheduled";
+  const hasStartHandle = isScheduled && displayDate === item.date;
+  const hasEndHandle = isScheduled && displayDate === item.endDate;
+  const isVerticalResize = variant === "timed" && !item.isAllDay;
+  const timedSegment = isVerticalResize
+    ? getTimedScheduleSegment(item, displayDate)
+    : null;
+  const style = timedSegment
+    ? ({
+        "--schedule-offset": `${timedSegment.offsetMinutes * 0.9}px`,
+        "--schedule-height": `${Math.max(timedSegment.durationMinutes * 0.9, 24)}px`,
+      } as CSSProperties)
+    : undefined;
 
   return (
-    <button
+    <div
       className={`calendar-item marker-${item.marker} color-${item.colorToken} is-${variant} ${
         item.target.type === "subtask" ? "is-subtask" : ""
       } ${item.status === "done" ? "is-done" : ""} ${
@@ -865,28 +1015,274 @@ function CalendarItemButton({
       } ${isDraggable ? "is-draggable" : ""} ${
         isDragging ? "is-dragging" : ""
       }`}
-      type="button"
-      draggable={isDraggable}
-      aria-pressed={isSelected}
-      aria-label={`${relationLabel ? `${relationLabel}、` : ""}${item.title}の${markerText}を開く${isDraggable ? "。ドラッグで期限を移動できます" : ""}`}
-      title={isDraggable ? "ドラッグで期限を移動" : undefined}
-      onDragStart={(event) => onDragStart(item, event)}
-      onDragEnd={onDragEnd}
-      onClick={(event) => {
-        event.stopPropagation();
-        onSelectItem(item);
-      }}
+      style={style}
       onDoubleClick={(event) => event.stopPropagation()}
     >
-      <span className="calendar-item-title">{item.title}</span>
-      {relationLabel ? (
-        <small className="calendar-item-parent">{relationLabel}</small>
+      {hasStartHandle ? (
+        <ScheduleResizeHandle
+          edge="start"
+          isVertical={isVerticalResize}
+          disabled={isReschedulingItem}
+          item={item}
+          displayDate={displayDate}
+          onResizeItem={onResizeItem}
+        />
       ) : null}
-      {variant === "timed" || variant === "month" ? (
-        <small>{markerText}</small>
+      <button
+        className="calendar-item-content"
+        type="button"
+        draggable={isDraggable}
+        aria-pressed={isSelected}
+        aria-label={`${relationLabel ? `${relationLabel}、` : ""}${item.title}の${markerText}を開く${isDraggable ? "。ドラッグで期限を移動できます" : ""}`}
+        title={isDraggable ? "ドラッグで期限を移動" : undefined}
+        onDragStart={(event) => onDragStart(item, event)}
+        onDragEnd={onDragEnd}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelectItem(item);
+        }}
+      >
+        <span className="calendar-item-title">{item.title}</span>
+        {relationLabel ? (
+          <small className="calendar-item-parent">{relationLabel}</small>
+        ) : null}
+        {variant === "timed" || variant === "month" ? (
+          <small>{markerText}</small>
+        ) : null}
+      </button>
+      {hasEndHandle ? (
+        <ScheduleResizeHandle
+          edge="end"
+          isVertical={isVerticalResize}
+          disabled={isReschedulingItem}
+          item={item}
+          displayDate={displayDate}
+          onResizeItem={onResizeItem}
+        />
       ) : null}
+    </div>
+  );
+}
+
+function ScheduleResizeHandle({
+  edge,
+  isVertical,
+  disabled,
+  item,
+  displayDate,
+  onResizeItem,
+}: {
+  edge: "start" | "end";
+  isVertical: boolean;
+  disabled: boolean;
+  item: WeekCalendarItem;
+  displayDate: string;
+  onResizeItem(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft,
+  ): Promise<boolean>;
+}) {
+  const edgeLabel = edge === "start" ? "開始" : "終了";
+  const directionLabel = isVertical ? "上下" : "左右";
+
+  return (
+    <button
+      className={`calendar-resize-handle is-${edge} ${
+        isVertical ? "is-vertical" : "is-horizontal"
+      }`}
+      type="button"
+      aria-label={`${item.title}の${edgeLabel}を${directionLabel}に調整`}
+      title={`${edgeLabel}を${directionLabel}にドラッグして調整`}
+      disabled={disabled}
+      onClick={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) =>
+        beginScheduleResize(
+          event,
+          item,
+          displayDate,
+          edge,
+          isVertical,
+          onResizeItem,
+        )
+      }
+      onKeyDown={(event) =>
+        handleScheduleResizeKeyDown(
+          event,
+          item,
+          edge,
+          isVertical,
+          onResizeItem,
+        )
+      }
+    >
+      {isVertical ? (
+        <GripHorizontal aria-hidden="true" size={14} strokeWidth={2} />
+      ) : (
+        <GripVertical aria-hidden="true" size={14} strokeWidth={2} />
+      )}
     </button>
   );
+}
+
+function beginScheduleResize(
+  event: ReactPointerEvent<HTMLButtonElement>,
+  item: WeekCalendarItem,
+  displayDate: string,
+  edge: "start" | "end",
+  isVertical: boolean,
+  onResizeItem: (
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft,
+  ) => Promise<boolean>,
+) {
+  if (event.button !== 0) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  const handle = event.currentTarget;
+  const pointerId = event.pointerId;
+  const originX = event.clientX;
+  const originY = event.clientY;
+  handle.setPointerCapture(pointerId);
+  handle.classList.add("is-active");
+
+  const cleanup = () => {
+    handle.classList.remove("is-active");
+    if (handle.hasPointerCapture(pointerId)) {
+      handle.releasePointerCapture(pointerId);
+    }
+    window.removeEventListener("pointerup", handlePointerUp);
+    window.removeEventListener("pointercancel", handlePointerCancel);
+  };
+  const handlePointerCancel = () => cleanup();
+  const handlePointerUp = (pointerEvent: PointerEvent) => {
+    const delta = isVertical
+      ? roundToQuarterHour(((pointerEvent.clientY - originY) / 54) * 60)
+      : resolveDayResizeDelta(
+          displayDate,
+          pointerEvent.clientX,
+          pointerEvent.clientY,
+          pointerEvent.clientX - originX,
+          handle,
+        );
+    cleanup();
+    if (delta === 0) {
+      return;
+    }
+    const schedule = shiftScheduleEdge(item, edge, delta, isVertical);
+    if (schedule) {
+      void onResizeItem(item, schedule);
+    }
+  };
+
+  window.addEventListener("pointerup", handlePointerUp, { once: true });
+  window.addEventListener("pointercancel", handlePointerCancel, { once: true });
+}
+
+function handleScheduleResizeKeyDown(
+  event: ReactKeyboardEvent<HTMLButtonElement>,
+  item: WeekCalendarItem,
+  edge: "start" | "end",
+  isVertical: boolean,
+  onResizeItem: (
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft,
+  ) => Promise<boolean>,
+) {
+  const delta = isVertical
+    ? event.key === "ArrowUp"
+      ? -15
+      : event.key === "ArrowDown"
+        ? 15
+        : 0
+    : event.key === "ArrowLeft"
+      ? -1
+      : event.key === "ArrowRight"
+        ? 1
+        : 0;
+  if (delta === 0) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  const schedule = shiftScheduleEdge(item, edge, delta, isVertical);
+  if (schedule) {
+    void onResizeItem(item, schedule);
+  }
+}
+
+function shiftScheduleEdge(
+  item: WeekCalendarItem,
+  edge: "start" | "end",
+  delta: number,
+  isVertical: boolean,
+): WorkScheduleDraft | null {
+  if (item.marker !== "scheduled" || !item.endDate) {
+    return null;
+  }
+
+  if (!isVertical) {
+    const nextStartDate =
+      edge === "start" ? addDaysToDateInput(item.date, delta) : item.date;
+    const nextEndDate =
+      edge === "end" ? addDaysToDateInput(item.endDate, delta) : item.endDate;
+    if (nextStartDate > nextEndDate) {
+      return null;
+    }
+    return {
+      startDate: nextStartDate,
+      startTime: item.isAllDay ? null : item.time,
+      endDate: nextEndDate,
+      endTime: item.isAllDay ? null : item.endTime,
+      isAllDay: item.isAllDay,
+    };
+  }
+
+  if (!item.time || !item.endTime) {
+    return null;
+  }
+  const start = parseLocalDateTime(item.date, item.time);
+  const end = parseLocalDateTime(item.endDate, item.endTime);
+  if (edge === "start") {
+    start.setMinutes(start.getMinutes() + delta);
+  } else {
+    end.setMinutes(end.getMinutes() + delta);
+  }
+  if (end.getTime() <= start.getTime()) {
+    return null;
+  }
+  return {
+    startDate: toDateInputValue(start),
+    startTime: toTimeInputValue(start),
+    endDate: toDateInputValue(end),
+    endTime: toTimeInputValue(end),
+    isAllDay: false,
+  };
+}
+
+function resolveDayResizeDelta(
+  originDate: string,
+  clientX: number,
+  clientY: number,
+  deltaX: number,
+  handle: HTMLElement,
+) {
+  const target = document
+    .elementFromPoint(clientX, clientY)
+    ?.closest<HTMLElement>("[data-calendar-date]");
+  const targetDate = target?.dataset.calendarDate;
+  if (targetDate) {
+    return differenceInCalendarDays(originDate, targetDate);
+  }
+  const cell = handle.closest<HTMLElement>("[data-calendar-date]");
+  const cellWidth = cell?.getBoundingClientRect().width ?? 1;
+  return Math.round(deltaX / Math.max(cellWidth, 1));
+}
+
+function roundToQuarterHour(minutes: number) {
+  return Math.round(minutes / 15) * 15;
 }
 
 function handleCreateCellDoubleClick(
@@ -918,6 +1314,64 @@ function canRescheduleItem(item: WeekCalendarItem) {
   return item.marker === "due";
 }
 
+function isDateWithinSchedule(item: WeekCalendarItem, date: string) {
+  return (
+    item.marker === "scheduled" &&
+    item.endDate !== null &&
+    item.date <= date &&
+    date <= item.endDate
+  );
+}
+
+function getTimedScheduleSegment(item: WeekCalendarItem, date: string) {
+  if (
+    item.marker !== "scheduled" ||
+    item.isAllDay ||
+    !item.time ||
+    !item.endDate ||
+    !item.endTime ||
+    !isDateWithinSchedule(item, date)
+  ) {
+    return null;
+  }
+
+  const businessStartMinutes = (businessHours[0] ?? 8) * 60;
+  const businessEndMinutes = ((businessHours.at(-1) ?? 22) + 1) * 60;
+  const rawStartMinutes =
+    date === item.date ? parseTimeInputMinutes(item.time) : businessStartMinutes;
+  const rawEndMinutes =
+    date === item.endDate
+      ? parseTimeInputMinutes(item.endTime)
+      : businessEndMinutes;
+  const startMinutes = Math.max(rawStartMinutes, businessStartMinutes);
+  const endMinutes = Math.min(rawEndMinutes, businessEndMinutes);
+  if (endMinutes <= startMinutes) {
+    return null;
+  }
+
+  return {
+    startHour: Math.floor(startMinutes / 60),
+    offsetMinutes: startMinutes % 60,
+    durationMinutes: endMinutes - startMinutes,
+  };
+}
+
+function formatCalendarItemMarker(item: WeekCalendarItem) {
+  if (item.marker !== "scheduled" || !item.endDate) {
+    return item.time
+      ? `${item.time} ${markerLabels[item.marker]}`
+      : markerLabels[item.marker];
+  }
+  if (item.isAllDay) {
+    return item.date === item.endDate
+      ? "終日予定"
+      : `${formatShortDate(item.date)}-${formatShortDate(item.endDate)} 予定`;
+  }
+  const start = `${formatShortDate(item.date)} ${item.time ?? ""}`.trim();
+  const end = `${formatShortDate(item.endDate)} ${item.endTime ?? ""}`.trim();
+  return `${start}-${end}`;
+}
+
 function getDisplayHour(item: WeekCalendarItem) {
   if (!item.time) {
     return null;
@@ -930,13 +1384,6 @@ function getDisplayHour(item: WeekCalendarItem) {
   }
 
   return Math.min(Math.max(hour, businessHours[0]), businessHours.at(-1) ?? hour);
-}
-
-function normalizeOptionalText(value: string | null | undefined) {
-  if (!value) {
-    return null;
-  }
-  return value;
 }
 
 function formatHourInput(hour: number) {
@@ -982,10 +1429,13 @@ function markerWeight(marker: WeekCalendarItem["marker"]) {
   if (marker === "active_timer") {
     return 0;
   }
-  if (marker === "planned_start") {
+  if (marker === "scheduled") {
     return 1;
   }
-  return 2;
+  if (marker === "planned_start") {
+    return 2;
+  }
+  return 3;
 }
 
 function isSameTarget(target: WorkTargetRef, selectedTarget: WorkTargetRef | null) {
@@ -1074,11 +1524,56 @@ function parseDateInputValue(value: string) {
   return new Date(year, month - 1, day);
 }
 
+function parseLocalDateTime(dateValue: string, timeValue: string) {
+  const date = parseDateInputValue(dateValue);
+  const [hour, minute] = timeValue.split(":").map(Number);
+  date.setHours(hour, minute, 0, 0);
+  return date;
+}
+
+function parseTimeInputMinutes(value: string) {
+  const [hour, minute] = value.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+function addMinutesToLocalDateTime(
+  dateValue: string,
+  timeValue: string,
+  minutes: number,
+) {
+  const date = parseLocalDateTime(dateValue, timeValue);
+  date.setMinutes(date.getMinutes() + minutes);
+  return { date: toDateInputValue(date), time: toTimeInputValue(date) };
+}
+
+function addDaysToDateInput(value: string, days: number) {
+  const date = parseDateInputValue(value);
+  date.setDate(date.getDate() + days);
+  return toDateInputValue(date);
+}
+
+function differenceInCalendarDays(startValue: string, endValue: string) {
+  const start = parseDateInputValue(startValue);
+  const end = parseDateInputValue(endValue);
+  return Math.round((end.getTime() - start.getTime()) / 86_400_000);
+}
+
 function toDateInputValue(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function toTimeInputValue(date: Date) {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(
+    date.getMinutes(),
+  ).padStart(2, "0")}`;
+}
+
+function formatShortDate(value: string) {
+  const date = parseDateInputValue(value);
+  return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 function formatCalendarHeading(viewMode: CalendarViewMode, anchorDate: string) {

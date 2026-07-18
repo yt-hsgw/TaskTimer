@@ -17,6 +17,21 @@ export type WorkItemUpdateDraft = WorkItemDraft & {
   recurrenceRule?: RecurrenceRuleDraft | null;
 };
 
+export type WorkScheduleDraft = {
+  startDate: string;
+  startTime: string | null;
+  endDate: string;
+  endTime: string | null;
+  isAllDay: boolean;
+};
+
+export type ScheduledTaskDraft = {
+  listId?: string | null;
+  title: string;
+  memo?: string | null;
+  schedule: WorkScheduleDraft;
+};
+
 export type RecurrenceRuleDraft = {
   frequency: RecurrenceFrequency;
   interval: number;
@@ -58,7 +73,10 @@ export type WeekCalendarItem = {
   parentTitle: string | null;
   date: string;
   time: string | null;
-  marker: "planned_start" | "due" | "active_timer";
+  endDate: string | null;
+  endTime: string | null;
+  isAllDay: boolean;
+  marker: "scheduled" | "planned_start" | "due" | "active_timer";
   status: Task["status"];
   colorToken: TaskListColorToken;
 };
@@ -285,6 +303,7 @@ export type TaskTimerGateway = {
   getUiPreferences(): Promise<UiPreferences>;
   updateUiPreferences(input: UiPreferences): Promise<UiPreferences>;
   createTask(input: WorkItemDraft): Promise<Task>;
+  createScheduledTask(input: ScheduledTaskDraft): Promise<Task>;
   createTaskList(input: TaskListDraft): Promise<TaskListItem>;
   updateTaskList(listId: string, input: TaskListDraft): Promise<TaskListItem>;
   deleteTaskList(listId: string): Promise<void>;
@@ -301,6 +320,10 @@ export type TaskTimerGateway = {
   createSubtask(input: CreateSubtaskDraft): Promise<Subtask>;
   updateTask(input: UpdateTaskDraft): Promise<Task>;
   updateSubtask(input: UpdateSubtaskDraft): Promise<Subtask>;
+  resizeScheduledWorkItem(
+    target: WorkTargetRef,
+    schedule: WorkScheduleDraft,
+  ): Promise<void>;
   startTimer(target: WorkTargetRef): Promise<ActiveTimer>;
   startPomodoro(target: WorkTargetRef): Promise<ActivePomodoro>;
   pausePomodoro(): Promise<ActivePomodoro>;

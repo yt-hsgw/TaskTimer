@@ -194,9 +194,11 @@ Issue #54 では、`TaskList` をタスク分類の境界として扱う。`Crea
 
 Issue #57 では、UI設定を `ui_preferences` に保存する。保存対象は `left_pane_open`、`last_view`、`last_task_list_id`、`calendar_view_mode` に限定する。壊れた値はRepositoryの読み取り時に既定値へフォールバックし、Use Caseの更新時はホワイトリスト化された値だけを受け付ける。選択中タスクや右詳細ペイン開閉は、削除やアーカイブで無効になりやすいため保存しない。
 
-Issue #82 では、カレンダーからのタスク作成も既存の `CreateTask` を使う。Presentationはカレンダーの選択位置から `due_date` と `due_time` の初期値を組み立てるだけに留め、保存、入力検証、通知ルール同期、SQLiteトランザクションはApplication/Infrastructureの既存境界に委ねる。作成後の右詳細ペイン自動表示は行わない。
+Issue #82 では、カレンダーからのタスク作成を既存の `CreateTask` で導入した。GitHub #127以降は `CreateScheduledTask` へ移行し、Presentationが選択位置から1時間または1日の初期予定期間を組み立て、Application/Infrastructureがタスク本体と期間を1トランザクションで保存する。期限は自動設定せず、作成後の右詳細ペイン自動表示も行わない。
 
 Issue #83 では、カレンダー上の期限マーカー移動も既存の `UpdateTask` / `UpdateSubtask` を使う。Presentationはドラッグ中の対象とドロップ先セルを一時状態として持ち、新しい `due_date` と `due_time` を組み立てる。開始予定日、タイトル、メモ、繰り返し設定、目標時間は既存値を保持し、保存と通知ルール同期はApplication/Infrastructureの既存境界に委ねる。リサイズや開始/終了期間モデルはGitHub #127で先行設計してから扱う。
+
+GitHub #127では、期限と独立したローカル予定期間を `scheduled_start_date/time`、`scheduled_end_date/time`、`scheduled_is_all_day` でタスクとサブタスクに追加する。`ResizeScheduledWorkItem` が対象と期間を検証して1トランザクションで保存し、Calendar Read Modelは表示範囲と重なる期間を返す。週/日は15分、終日/月は1日単位で両端を調整する。予定期間の変更では `planned_start_date`、`due_date/time`、期限通知を変更しない。
 
 Issue #84 では、カレンダー項目の色をリスト単位で管理する。`TaskList` に `color_token` を追加し、`UpdateTaskList` がリスト名と色トークンの検証・保存トランザクション境界を持つ。Calendar Read Modelはタスクまたは親タスクの所属リスト色を `WeekCalendarItem` へ含め、Presentationは許可済みトークンからCSSクラスを選ぶ。色の変更操作は左ナビゲーションではなくタスク詳細に配置するが、保存単位はリストのままとする。タグ単位色とタスク個別色は後続Issueで扱う。
 

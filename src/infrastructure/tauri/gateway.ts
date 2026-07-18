@@ -12,6 +12,7 @@ import type {
   PomodoroExpirySyncResult,
   PomodoroSettings,
   PomodoroSettingsDraft,
+  ScheduledTaskDraft,
   SqliteBackupResult,
   SqliteRestoreResult,
   TagDraft,
@@ -27,6 +28,7 @@ import type {
   UpdateTaskDraft,
   WeekCalendarItem,
   WorkItemDraft,
+  WorkScheduleDraft,
 } from "../../application/usecases/contracts";
 import type { ActiveTimer, TimerSession } from "../../domain/timer/types";
 import type { NotificationDisplayMode } from "../../domain/notification/types";
@@ -59,6 +61,8 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<UiPreferences>("update_ui_preferences", { request: input }),
   createTask: (input: WorkItemDraft) =>
     invoke<Task>("create_task", { request: input }),
+  createScheduledTask: (input: ScheduledTaskDraft) =>
+    invoke<Task>("create_scheduled_task", { request: input }),
   createTaskList: (input: TaskListDraft) =>
     invoke<TaskListItem>("create_task_list", { request: input }),
   updateTaskList: (listId: string, input: TaskListDraft) =>
@@ -98,6 +102,13 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<Task>("update_task", { request: input }),
   updateSubtask: (input: UpdateSubtaskDraft) =>
     invoke<Subtask>("update_subtask", { request: input }),
+  resizeScheduledWorkItem: (
+    target: WorkTargetRef,
+    schedule: WorkScheduleDraft,
+  ) =>
+    invoke<void>("resize_scheduled_work_item", {
+      request: { target, schedule },
+    }),
   startTimer: (target: WorkTargetRef) =>
     invoke<ActiveTimer>("start_timer", { request: { target } }),
   startPomodoro: (target: WorkTargetRef) =>
