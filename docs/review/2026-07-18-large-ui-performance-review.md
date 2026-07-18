@@ -58,6 +58,7 @@
 
 - Presentation smoke: 50タスク、200サブタスク、4リストでWARN 0。複数回の保守的な記録で最大1,007ms。
 - Presentation standard: 一覧集計5,000件、描画200タスク、800サブタスク、12リストでWARN 0。複数回の保守的な記録で最大1,411ms。
+- Windows runner Presentation smoke: WARN 0。最大3,078msで、Chrome起動、PowerShell引数、summary、artifact保存まで成功。
 - SQLite standard: 5,000タスク、20,000サブタスク、50,000停止済み履歴でWARN 0。最大68ms。
 - Rust: 全92テスト成功。Clippyは全ターゲット・全機能を警告エラー扱いで成功。
 - Frontend: TypeScript型検査、Vite本番ビルド、READMEスクリーンショット生成に成功。
@@ -65,7 +66,7 @@
 
 ## 残余リスク
 
-- Windows runnerのChrome結果はPRのCIで確認する。
+- Windows runnerのChrome計測は確認済みだが、標準5,000件集計・200件描画プロファイルは手動workflowで継続確認する。
 - Windows実機のTauri IPC、WebView2、OSウィンドウ操作は未計測であり、#72の手動ゲートとして残る。
 - 201件目以降への到達性は未解消であり、#131を完了するまで大量DBの全タスクをUIから操作できない。
 

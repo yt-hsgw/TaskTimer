@@ -246,6 +246,7 @@ Presentation描画計測結果:
 
 | 日時 | OS/ブラウザ | TaskTimer commit | プロファイル | コマンド | WARN件数 | メモ |
 | --- | --- | --- | --- | --- | ---: | --- |
+| 2026-07-18 | GitHub-hosted Windows runner / headless Chrome | PR #132 | 一覧集計・描画50タスク / 200サブタスク / 4リスト | `大量データ性能検証` PR trigger | 0 | 最大3,078ms。`initial_task_list` が最大。かんばん192ms、週カレンダー142ms、右詳細200ms。 |
 | 2026-07-18 | Darwin 25.5.0 arm64 / headless Chrome | `5f26529` + #72差分 | 一覧集計5,000件 / 描画200タスク / 800サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 複数回の保守的な記録で最大1,411ms。`initial_task_list` が最大。かんばん974ms、週カレンダー434ms。 |
 | 2026-07-18 | Darwin 25.5.0 arm64 / headless Chrome | `5f26529` + #72差分 | 一覧集計・描画50タスク / 200サブタスク / 4リスト | `npm run perf:ui -- --profile smoke --fail-on-warning` | 0 | 複数回の保守的な記録で最大1,007ms。`initial_task_list` が最大。 |
 
