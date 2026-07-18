@@ -59,7 +59,7 @@ TaskTimer-backup-YYYYMMDD-HHMMSS/
   "format": "tasktimer-sqlite-backup",
   "formatVersion": 1,
   "appVersion": "0.1.0",
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "createdAt": "2026-07-15T00:00:00+09:00",
   "platform": "windows",
   "databaseFile": "tasktimer.sqlite3",
@@ -82,6 +82,7 @@ TaskTimer-export-YYYYMMDD-HHMMSS.json
 トップレベル項目:
 
 - `task_lists`
+- `board_columns`
 - `tags`
 - `task_tags`
 - `tasks`
@@ -99,7 +100,7 @@ TaskTimer-export-YYYYMMDD-HHMMSS.json
 ```json
 {
   "format": "tasktimer-json-export",
-  "formatVersion": 1,
+  "formatVersion": 2,
   "appVersion": "0.1.0",
   "createdAt": "2026-07-15T00:00:00+09:00",
   "platform": "windows",
@@ -126,9 +127,10 @@ TaskTimer-export-YYYYMMDD-HHMMSS-csv/
 
 - `export-manifest.json`
 - `task_lists.csv`: `id`, `name`, `color_token`, `sort_order`, `created_at`, `updated_at`
+- `board_columns.csv`: `id`, `title`, `sort_order`, `created_at`, `updated_at`
 - `tags.csv`: `id`, `name`, `sort_order`, `created_at`, `updated_at`
 - `task_tags.csv`: `task_id`, `tag_id`, `created_at`
-- `tasks.csv`
+- `tasks.csv`: `board_column_id` と `lifecycle_status` を含む
 - `subtasks.csv`
 - `timer_sessions.csv`
 - `timer_pauses.csv`

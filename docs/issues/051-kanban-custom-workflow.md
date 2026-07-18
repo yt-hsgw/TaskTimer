@@ -41,7 +41,20 @@ erDiagram
 - `lifecycle_status`: 未完了、完了、アーカイブのライフサイクル。
 - `completed_at`: 完了日時。
 
-既存 `status` の移行方法、一覧/今日/お気に入り/エクスポート/通知との互換性は実装前設計で確定する。
+`tasks.status` は既存一覧、通知、アーカイブとの後方互換のため削除しない。正規の完了状態は `lifecycle_status`、かんばん上の位置は `board_column_id` とし、互換 `status` はApplication/Infrastructureが同一トランザクションで同期する。
+
+## 移行と互換方針
+
+- `board_columns` に `未着手` と `進行中` の2列を初期投入する。
+- 既存 `status = in_progress` は `進行中`、それ以外は `未着手` へ割り当てる。既存完了タスクは完了前の列を復元できないため、決定的な移行先として `未着手` を使う。
+- `lifecycle_status` は既存 `done` を `done`、`archived` を `archived`、それ以外を `active` へ移行する。
+- 新規タスクは `未着手` 列かつ `lifecycle_status = active` で作成する。
+- カスタム列へ移動した未完了タスクの互換 `status` は `in_progress` とする。`未着手` 列だけは `todo` とする。
+- 完了時は列IDを保持したまま `lifecycle_status = done`、`status = done`、`completed_at` を保存する。
+- 再開時は列IDを保持して `lifecycle_status = active` に戻し、互換 `status` は列に応じて `todo` または `in_progress` とする。
+- アーカイブ時は列IDを保持して `lifecycle_status = archived`、`status = archived` とする。復元時は完了時刻の有無に応じて `done` または `active` へ戻す。
+- 一覧、今日、お気に入り、カレンダー、通知は当面互換 `status` を利用できるが、かんばんRead Modelは `board_column_id` を必須情報として返す。
+- JSON/CSVには `board_columns`、`board_column_id`、`lifecycle_status` を追加する。SQLiteバックアップのスキーマバージョンを更新する。
 
 ## トランザクション境界
 
@@ -49,6 +62,16 @@ erDiagram
 - 列並べ替えは `ReorderBoardColumns` Use Caseで全対象の順序を1トランザクションで更新する。
 - 列削除時は、所属タスクの移動先を明示してから同じトランザクションで列をソフト削除する。
 - 完了/未完了は既存完了ルールを保ち、未完了サブタスク確認を維持する。
+- 列作成、名称変更、削除では、trim後の名称、重複名、ID存在、最終1列の削除禁止をApplication/Repositoryの両境界で検証する。
+
+## UI状態とDnD
+
+- `@dnd-kit/core` と `@dnd-kit/sortable` のPointer/Keyboard sensorを使う。
+- 列のドラッグは専用ハンドルから開始し、カード選択、完了チェック、名称編集と競合させない。
+- カードのドラッグは専用ハンドルから開始し、ドロップ先列IDだけを永続化する。列内のカード順は本Issueでは変更しない。
+- 完了タスクは各列の下部にある折りたたみセクションへ表示する。完了タスクを別列へ移動しても `completed_at` は変更しない。
+- DnD結果を楽観反映せず、保存成功後のスナップショットだけを表示する。失敗時はカード/列を直前のDB読込状態へ戻す。
+- 列削除UIは移動先を明示して確認し、最終1列の削除操作を無効にする。
 
 ## 設計理由
 
@@ -78,6 +101,8 @@ erDiagram
 - 並べ替え途中の失敗で順序が重複する。
 - 大量カードの全再描画で操作が遅くなる。
 - 完了済みカードを移動した際に `completed_at` が失われる。
+- ドラッグハンドルとカード選択が同時発火し、詳細が意図せず開く。
+- 互換 `status` と `lifecycle_status` が不一致になり、一覧と完了セクションで表示が分かれる。
 
 ## 受け入れ条件
 
@@ -86,3 +111,4 @@ erDiagram
 - 列の追加、名称変更、並べ替え、削除が再起動後も保持される。
 - 既存タスクを移行しても一覧、カレンダー、通知、エクスポートが破綻しない。
 - 大量データ検証にかんばん操作を追加する。
+- 列削除時に移動先が存在しない、同じ列である、最終1列である場合は保存されない。

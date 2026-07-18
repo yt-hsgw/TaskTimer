@@ -9,11 +9,14 @@ const TIME_FORMAT: &[time::format_description::FormatItem<'_>] =
 const MEMO_MAX_CHARS: usize = 10_000;
 const TASK_LIST_NAME_MAX_CHARS: usize = 80;
 const TAG_NAME_MAX_CHARS: usize = 40;
+const BOARD_COLUMN_NAME_MAX_CHARS: usize = 80;
 
 pub const DEFAULT_TASK_LIST_ID: &str = "default";
 pub const DEFAULT_TASK_LIST_NAME: &str = "タスク";
 pub const DEFAULT_TASK_LIST_COLOR_TOKEN: &str = "green";
 pub const TASK_LIST_COLOR_TOKENS: &[&str] = &["green", "blue", "amber", "rose", "violet", "gray"];
+pub const DEFAULT_BOARD_COLUMN_ID: &str = "board-todo";
+pub const IN_PROGRESS_BOARD_COLUMN_ID: &str = "board-in-progress";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkStatus {
@@ -153,6 +156,22 @@ pub fn validate_tag_name(name: &str) -> Result<String, String> {
     }
     if trimmed.chars().any(char::is_control) {
         return Err("タグ名に制御文字は使用できません".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+pub fn validate_board_column_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("状態名は必須です".to_string());
+    }
+    if trimmed.chars().count() > BOARD_COLUMN_NAME_MAX_CHARS {
+        return Err(format!(
+            "状態名は{BOARD_COLUMN_NAME_MAX_CHARS}文字以内で入力してください"
+        ));
+    }
+    if trimmed.chars().any(char::is_control) {
+        return Err("状態名に制御文字は使用できません".to_string());
     }
     Ok(trimmed.to_string())
 }

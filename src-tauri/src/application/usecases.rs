@@ -8,8 +8,8 @@ use crate::domain::{
     },
     recurrence::RecurrenceFrequency,
     task::{
-        validate_date_range, validate_due_time_requires_due_date, validate_memo,
-        validate_optional_date, validate_optional_time, validate_tag_name,
+        validate_board_column_name, validate_date_range, validate_due_time_requires_due_date,
+        validate_memo, validate_optional_date, validate_optional_time, validate_tag_name,
         validate_task_list_color_token, validate_task_list_name, validate_title, WorkStatus,
         DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID,
     },
@@ -23,7 +23,9 @@ use super::{
         NativeNotificationRegistrationRequest,
     },
     repositories::{
-        ActivePomodoro, ActiveTimer, DataExportCreate, DataExportRecord, DataExportRepository,
+        ActivePomodoro, ActiveTimer, BoardColumnCreate, BoardColumnDelete, BoardColumnRecord,
+        BoardColumnReorder, BoardColumnRepository, BoardColumnUpdate, BoardTaskMove,
+        DataExportCreate, DataExportRecord, DataExportRepository,
         NativeNotificationOsRegistrationRepository, NativeNotificationRegistrationSummary,
         NextNotificationSchedule, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationDispatchSummary, NotificationHistoryRepository, NotificationOsRegistrationJob,
@@ -96,6 +98,11 @@ pub struct TaskListDraft {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TagDraft {
     pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoardColumnDraft {
+    pub title: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,6 +238,95 @@ pub fn delete_tag(
 ) -> RepositoryResult<()> {
     let tag_id = validate_identifier(&tag_id, "タグID")?;
     repository.delete_tag(tag_id, clock.now_utc_iso8601())
+}
+
+pub fn list_board_columns(
+    repository: &impl BoardColumnRepository,
+) -> RepositoryResult<Vec<BoardColumnRecord>> {
+    repository.list_board_columns()
+}
+
+pub fn create_board_column(
+    repository: &impl BoardColumnRepository,
+    clock: &impl Clock,
+    draft: BoardColumnDraft,
+) -> RepositoryResult<BoardColumnRecord> {
+    repository.create_board_column(BoardColumnCreate {
+        title: validate_board_column_name(&draft.title)?,
+        now: clock.now_utc_iso8601(),
+    })
+}
+
+pub fn update_board_column(
+    repository: &impl BoardColumnRepository,
+    clock: &impl Clock,
+    column_id: String,
+    draft: BoardColumnDraft,
+) -> RepositoryResult<BoardColumnRecord> {
+    repository.update_board_column(
+        validate_identifier(&column_id, "状態ID")?,
+        BoardColumnUpdate {
+            title: validate_board_column_name(&draft.title)?,
+            now: clock.now_utc_iso8601(),
+        },
+    )
+}
+
+pub fn reorder_board_columns(
+    repository: &impl BoardColumnRepository,
+    clock: &impl Clock,
+    ordered_column_ids: Vec<String>,
+) -> RepositoryResult<Vec<BoardColumnRecord>> {
+    if ordered_column_ids.is_empty() {
+        return Err("状態の並び順は1件以上必要です".to_string());
+    }
+    let mut validated_ids = Vec::with_capacity(ordered_column_ids.len());
+    for column_id in ordered_column_ids {
+        let column_id = validate_identifier(&column_id, "状態ID")?;
+        if validated_ids.contains(&column_id) {
+            return Err("状態の並び順に重複があります".to_string());
+        }
+        validated_ids.push(column_id);
+    }
+    repository.reorder_board_columns(BoardColumnReorder {
+        ordered_column_ids: validated_ids,
+        now: clock.now_utc_iso8601(),
+    })
+}
+
+pub fn delete_board_column(
+    repository: &impl BoardColumnRepository,
+    clock: &impl Clock,
+    column_id: String,
+    move_tasks_to_column_id: String,
+) -> RepositoryResult<()> {
+    let column_id = validate_identifier(&column_id, "削除する状態ID")?;
+    let move_tasks_to_column_id = validate_identifier(&move_tasks_to_column_id, "移動先状態ID")?;
+    if column_id == move_tasks_to_column_id {
+        return Err("削除する状態と移動先状態は別にしてください".to_string());
+    }
+    repository.delete_board_column(
+        column_id,
+        BoardColumnDelete {
+            move_tasks_to_column_id,
+            now: clock.now_utc_iso8601(),
+        },
+    )
+}
+
+pub fn move_task_to_board_column(
+    repository: &impl BoardColumnRepository,
+    clock: &impl Clock,
+    task_id: String,
+    board_column_id: String,
+) -> RepositoryResult<()> {
+    repository.move_task_to_board_column(
+        validate_identifier(&task_id, "タスクID")?,
+        BoardTaskMove {
+            board_column_id: validate_identifier(&board_column_id, "移動先状態ID")?,
+            now: clock.now_utc_iso8601(),
+        },
+    )
 }
 
 pub fn attach_tag_to_task(

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ActivePomodoro,
+  BoardColumn,
   CreateSubtaskDraft,
   DataExportResult,
   NotificationDeliveryAttempt,
@@ -35,6 +36,7 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   healthCheck: () => invoke<string>("health_check"),
   listTasks: () => invoke<TaskWithSubtasks[]>("list_tasks"),
   listTaskLists: () => invoke<TaskListItem[]>("list_task_lists"),
+  listBoardColumns: () => invoke<BoardColumn[]>("list_board_columns"),
   listTags: () => invoke<TagItem[]>("list_tags"),
   listTaskRows: (listId?: string | null) =>
     invoke<TaskRow[]>("list_task_rows", { listId: listId ?? null }),
@@ -63,6 +65,24 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<TaskListItem>("update_task_list", { request: { ...input, listId } }),
   deleteTaskList: (listId: string) =>
     invoke<void>("delete_task_list", { request: { listId } }),
+  createBoardColumn: (title: string) =>
+    invoke<BoardColumn>("create_board_column", { request: { title } }),
+  updateBoardColumn: (columnId: string, title: string) =>
+    invoke<BoardColumn>("update_board_column", {
+      request: { columnId, title },
+    }),
+  reorderBoardColumns: (orderedColumnIds: string[]) =>
+    invoke<BoardColumn[]>("reorder_board_columns", {
+      request: { orderedColumnIds },
+    }),
+  deleteBoardColumn: (columnId: string, moveTasksToColumnId: string) =>
+    invoke<void>("delete_board_column", {
+      request: { columnId, moveTasksToColumnId },
+    }),
+  moveTaskToBoardColumn: (taskId: string, boardColumnId: string) =>
+    invoke<void>("move_task_to_board_column", {
+      request: { taskId, boardColumnId },
+    }),
   createTag: (input: TagDraft) => invoke<TagItem>("create_tag", { request: input }),
   updateTag: (tagId: string, input: TagDraft) =>
     invoke<TagItem>("update_tag", { request: { ...input, tagId } }),

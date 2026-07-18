@@ -53,8 +53,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("大量データ性能DB計測");
     println!("DB: {}", config.db.display());
     println!(
-        "件数: task_lists={}, tasks={}, subtasks={}, timer_sessions={}, pomodoro_sessions={}",
+        "件数: task_lists={}, board_columns={}, tasks={}, subtasks={}, timer_sessions={}, pomodoro_sessions={}",
         counts.task_lists,
+        counts.board_columns,
         counts.tasks,
         counts.subtasks,
         counts.timer_sessions,
@@ -73,6 +74,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let measurements = vec![
         measure_task_lists(&connection, config.threshold)?,
+        measure_board_columns(&connection, config.threshold)?,
         measure_initial_task_tree(&connection, config.threshold)?,
         measure_task_rows(
             &connection,
@@ -193,6 +195,7 @@ fn parse_u64(value: &str) -> Result<u64, Box<dyn Error>> {
 #[derive(Debug)]
 struct Counts {
     task_lists: i64,
+    board_columns: i64,
     tasks: i64,
     subtasks: i64,
     timer_sessions: i64,
@@ -202,6 +205,7 @@ struct Counts {
 fn read_counts(connection: &Connection) -> Result<Counts, Box<dyn Error>> {
     Ok(Counts {
         task_lists: count_table(connection, "task_lists")?,
+        board_columns: count_table(connection, "board_columns")?,
         tasks: count_table(connection, "tasks")?,
         subtasks: count_table(connection, "subtasks")?,
         timer_sessions: count_table(connection, "timer_sessions")?,
@@ -270,6 +274,41 @@ fn measure_task_lists(
                    task_lists.updated_at
           ORDER BY task_lists.sort_order ASC,
                    task_lists.created_at ASC
+        )
+        ",
+        threshold,
+    )
+}
+
+fn measure_board_columns(
+    connection: &Connection,
+    threshold: Duration,
+) -> Result<Measurement, Box<dyn Error>> {
+    measure_count_query(
+        connection,
+        "board_columns_with_lifecycle_counts",
+        "
+        SELECT COUNT(*)
+        FROM (
+          SELECT board_columns.id,
+                 COUNT(tasks.id) AS task_count,
+                 COALESCE(SUM(CASE WHEN tasks.lifecycle_status = 'active' THEN 1 ELSE 0 END), 0)
+                   AS active_task_count,
+                 COALESCE(SUM(CASE WHEN tasks.lifecycle_status = 'done' THEN 1 ELSE 0 END), 0)
+                   AS completed_task_count
+          FROM board_columns
+          LEFT JOIN tasks
+            ON tasks.board_column_id = board_columns.id
+           AND tasks.deleted_at IS NULL
+           AND tasks.lifecycle_status <> 'archived'
+          WHERE board_columns.deleted_at IS NULL
+          GROUP BY board_columns.id,
+                   board_columns.title,
+                   board_columns.sort_order,
+                   board_columns.created_at,
+                   board_columns.updated_at
+          ORDER BY board_columns.sort_order,
+                   board_columns.created_at
         )
         ",
         threshold,
@@ -347,6 +386,7 @@ fn measure_task_rows(
             ),
             task_rows AS (
               SELECT tasks.id,
+                     tasks.board_column_id,
                      COUNT(subtasks.id) AS subtask_total_count,
                      COALESCE(SUM(CASE WHEN subtasks.status = 'done' THEN 1 ELSE 0 END), 0)
                        AS completed_subtask_count,
@@ -370,6 +410,7 @@ fn measure_task_rows(
                 AND tasks.status <> 'archived'
               GROUP BY tasks.id,
                        tasks.list_id,
+                       tasks.board_column_id,
                        tasks.title,
                        tasks.status,
                        tasks.is_favorite,

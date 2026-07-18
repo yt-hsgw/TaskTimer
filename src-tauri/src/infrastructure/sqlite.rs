@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -19,8 +19,10 @@ use uuid::Uuid;
 
 use crate::{
     application::repositories::{
-        target_ref, ActivePomodoro, ActiveTimer, CalendarMarker, CalendarRepository,
-        DataExportCreate, DataExportManifestRecord, DataExportRecord, DataExportRepository,
+        target_ref, ActivePomodoro, ActiveTimer, BoardColumnCreate, BoardColumnDelete,
+        BoardColumnRecord, BoardColumnReorder, BoardColumnRepository, BoardColumnUpdate,
+        BoardTaskMove, CalendarMarker, CalendarRepository, DataExportCreate,
+        DataExportManifestRecord, DataExportRecord, DataExportRepository,
         NativeNotificationOsRegistrationJob, NativeNotificationOsRegistrationRepository,
         NextNotificationSchedule, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationHistoryRepository, NotificationJob, NotificationOsRegistrationJob,
@@ -49,8 +51,9 @@ use crate::{
         },
         recurrence::RecurrenceFrequency,
         task::{
-            assert_completable, assert_timer_startable, WorkStatus, DEFAULT_TASK_LIST_COLOR_TOKEN,
-            DEFAULT_TASK_LIST_ID, DEFAULT_TASK_LIST_NAME,
+            assert_completable, assert_timer_startable, WorkStatus, DEFAULT_BOARD_COLUMN_ID,
+            DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID, DEFAULT_TASK_LIST_NAME,
+            IN_PROGRESS_BOARD_COLUMN_ID,
         },
         timer::{WorkTargetRef, WorkTargetType},
     },
@@ -66,7 +69,7 @@ const BACKUP_DATABASE_FILE: &str = "tasktimer.sqlite3";
 const BACKUP_MANIFEST_FILE: &str = "backup-manifest.json";
 const JSON_EXPORT_FORMAT: &str = "tasktimer-json-export";
 const CSV_EXPORT_FORMAT: &str = "tasktimer-csv-export";
-const DATA_EXPORT_FORMAT_VERSION: i64 = 1;
+const DATA_EXPORT_FORMAT_VERSION: i64 = 2;
 const DATA_EXPORT_COMPATIBILITY: &str = "viewing-and-migration-aid-not-restore";
 const CSV_EXPORT_MANIFEST_FILE: &str = "export-manifest.json";
 const UI_PREF_LEFT_PANE_OPEN: &str = "left_pane_open";
@@ -174,6 +177,7 @@ impl ExportManifestFile {
 struct JsonExportFile {
     manifest: ExportManifestFile,
     task_lists: Vec<ExportTaskListRow>,
+    board_columns: Vec<ExportBoardColumnRow>,
     tags: Vec<ExportTagRow>,
     task_tags: Vec<ExportTaskTagRow>,
     tasks: Vec<ExportTaskRow>,
@@ -190,6 +194,7 @@ struct JsonExportFile {
 #[derive(Debug, Clone)]
 struct ExportDataset {
     task_lists: Vec<ExportTaskListRow>,
+    board_columns: Vec<ExportBoardColumnRow>,
     tags: Vec<ExportTagRow>,
     task_tags: Vec<ExportTaskTagRow>,
     tasks: Vec<ExportTaskRow>,
@@ -208,6 +213,15 @@ struct ExportTaskListRow {
     id: String,
     name: String,
     color_token: String,
+    sort_order: i64,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportBoardColumnRow {
+    id: String,
+    title: String,
     sort_order: i64,
     created_at: String,
     updated_at: String,
@@ -233,8 +247,10 @@ struct ExportTaskTagRow {
 struct ExportTaskRow {
     id: String,
     list_id: String,
+    board_column_id: String,
     title: String,
     status: String,
+    lifecycle_status: String,
     is_favorite: bool,
     planned_start_date: Option<String>,
     due_date: Option<String>,
@@ -1045,6 +1061,171 @@ impl TaskReadRepository for SqliteDatabase {
     }
 }
 
+impl BoardColumnRepository for SqliteDatabase {
+    fn list_board_columns(&self) -> RepositoryResult<Vec<BoardColumnRecord>> {
+        self.with_connection(select_board_columns)
+    }
+
+    fn create_board_column(&self, input: BoardColumnCreate) -> RepositoryResult<BoardColumnRecord> {
+        self.with_transaction(|transaction| {
+            ensure_unique_board_column_title(transaction, &input.title, None)?;
+            let id = Uuid::new_v4().to_string();
+            let sort_order: i64 = transaction
+                .query_row(
+                    "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM board_columns WHERE deleted_at IS NULL",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|error| format!("状態の並び順を取得できません: {error}"))?;
+            transaction
+                .execute(
+                    "
+                    INSERT INTO board_columns (id, title, sort_order, created_at, updated_at)
+                    VALUES (?1, ?2, ?3, ?4, ?4)
+                    ",
+                    params![id, input.title, sort_order, input.now],
+                )
+                .map_err(|error| format!("状態を作成できません: {error}"))?;
+            select_board_column_by_id(transaction, &id)
+        })
+    }
+
+    fn update_board_column(
+        &self,
+        column_id: String,
+        input: BoardColumnUpdate,
+    ) -> RepositoryResult<BoardColumnRecord> {
+        self.with_transaction(|transaction| {
+            ensure_board_column_exists(transaction, &column_id)?;
+            ensure_unique_board_column_title(transaction, &input.title, Some(&column_id))?;
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE board_columns
+                    SET title = ?1, updated_at = ?2
+                    WHERE id = ?3 AND deleted_at IS NULL
+                    ",
+                    params![input.title, input.now, column_id],
+                )
+                .map_err(|error| format!("状態名を更新できません: {error}"))?;
+            if updated != 1 {
+                return Err("更新する状態が存在しません".to_string());
+            }
+            select_board_column_by_id(transaction, &column_id)
+        })
+    }
+
+    fn reorder_board_columns(
+        &self,
+        input: BoardColumnReorder,
+    ) -> RepositoryResult<Vec<BoardColumnRecord>> {
+        self.with_transaction(|transaction| {
+            let existing_ids = select_active_board_column_ids(transaction)?;
+            let requested_ids = input
+                .ordered_column_ids
+                .iter()
+                .cloned()
+                .collect::<HashSet<_>>();
+            let existing_id_set = existing_ids.iter().cloned().collect::<HashSet<_>>();
+            if requested_ids.len() != input.ordered_column_ids.len()
+                || requested_ids != existing_id_set
+            {
+                return Err("状態の並び順には現在の状態を重複なくすべて指定してください".to_string());
+            }
+
+            for (sort_order, column_id) in input.ordered_column_ids.iter().enumerate() {
+                transaction
+                    .execute(
+                        "UPDATE board_columns SET sort_order = ?1, updated_at = ?2 WHERE id = ?3 AND deleted_at IS NULL",
+                        params![sort_order as i64, input.now, column_id],
+                    )
+                    .map_err(|error| format!("状態の並び順を更新できません: {error}"))?;
+            }
+            select_board_columns(transaction)
+        })
+    }
+
+    fn delete_board_column(
+        &self,
+        column_id: String,
+        input: BoardColumnDelete,
+    ) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| {
+            let active_ids = select_active_board_column_ids(transaction)?;
+            if active_ids.len() <= 1 {
+                return Err("最後の状態は削除できません".to_string());
+            }
+            ensure_board_column_exists(transaction, &column_id)?;
+            ensure_board_column_exists(transaction, &input.move_tasks_to_column_id)?;
+            if column_id == input.move_tasks_to_column_id {
+                return Err("削除する状態と移動先状態は別にしてください".to_string());
+            }
+
+            let active_status = legacy_active_status_for_column(&input.move_tasks_to_column_id);
+            transaction
+                .execute(
+                    "
+                    UPDATE tasks
+                    SET board_column_id = ?1,
+                        status = CASE
+                          WHEN lifecycle_status = 'active' THEN ?2
+                          ELSE status
+                        END,
+                        updated_at = ?3
+                    WHERE board_column_id = ?4
+                      AND deleted_at IS NULL
+                    ",
+                    params![
+                        input.move_tasks_to_column_id,
+                        active_status,
+                        input.now,
+                        column_id
+                    ],
+                )
+                .map_err(|error| format!("削除する状態のタスクを移動できません: {error}"))?;
+            transaction
+                .execute(
+                    "UPDATE board_columns SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+                    params![input.now, column_id],
+                )
+                .map_err(|error| format!("状態を削除できません: {error}"))?;
+            normalize_board_column_sort_order(transaction, &input.now)
+        })
+    }
+
+    fn move_task_to_board_column(
+        &self,
+        task_id: String,
+        input: BoardTaskMove,
+    ) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| {
+            ensure_task_exists(transaction, &task_id)?;
+            ensure_board_column_exists(transaction, &input.board_column_id)?;
+            let active_status = legacy_active_status_for_column(&input.board_column_id);
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE tasks
+                    SET board_column_id = ?1,
+                        status = CASE
+                          WHEN lifecycle_status = 'active' THEN ?2
+                          ELSE status
+                        END,
+                        updated_at = ?3
+                    WHERE id = ?4
+                      AND deleted_at IS NULL
+                    ",
+                    params![input.board_column_id, active_status, input.now, task_id],
+                )
+                .map_err(|error| format!("タスクの状態を移動できません: {error}"))?;
+            if updated != 1 {
+                return Err("移動するタスクが存在しません".to_string());
+            }
+            Ok(())
+        })
+    }
+}
+
 impl SqliteBackupRepository for SqliteDatabase {
     fn create_sqlite_backup(
         &self,
@@ -1189,6 +1370,7 @@ impl DataExportRepository for SqliteDatabase {
         let export_file = JsonExportFile {
             manifest: manifest.clone(),
             task_lists: dataset.task_lists,
+            board_columns: dataset.board_columns,
             tags: dataset.tags,
             task_tags: dataset.task_tags,
             tasks: dataset.tasks,
@@ -1410,6 +1592,7 @@ impl TaskTimerCommandRepository for SqliteDatabase {
                     "
                     UPDATE tasks
                     SET status = 'done',
+                        lifecycle_status = 'done',
                         completed_at = COALESCE(completed_at, ?1),
                         updated_at = ?1
                     WHERE id = ?2
@@ -1447,20 +1630,44 @@ impl TaskTimerCommandRepository for SqliteDatabase {
                 }
             }
 
+            let board_column_id = match input.status {
+                WorkStatus::Todo => Some(select_preferred_active_board_column_id(
+                    transaction,
+                    DEFAULT_BOARD_COLUMN_ID,
+                )?),
+                WorkStatus::InProgress => Some(select_preferred_active_board_column_id(
+                    transaction,
+                    IN_PROGRESS_BOARD_COLUMN_ID,
+                )?),
+                WorkStatus::Done | WorkStatus::Archived => None,
+            };
+            let lifecycle_status = if input.status == WorkStatus::Done {
+                "done"
+            } else {
+                "active"
+            };
             transaction
                 .execute(
                     "
                     UPDATE tasks
                     SET status = ?1,
+                        lifecycle_status = ?2,
+                        board_column_id = COALESCE(?3, board_column_id),
                         completed_at = CASE
-                          WHEN ?1 = 'done' THEN COALESCE(completed_at, ?2)
+                          WHEN ?1 = 'done' THEN COALESCE(completed_at, ?4)
                           ELSE NULL
                         END,
-                        updated_at = ?2
-                    WHERE id = ?3
+                        updated_at = ?4
+                    WHERE id = ?5
                       AND deleted_at IS NULL
                     ",
-                    params![input.status.as_str(), input.now, task_id],
+                    params![
+                        input.status.as_str(),
+                        lifecycle_status,
+                        board_column_id.as_deref(),
+                        input.now,
+                        task_id
+                    ],
                 )
                 .map_err(|error| format!("タスク状態を更新できません: {error}"))?;
 
@@ -1482,13 +1689,17 @@ impl TaskTimerCommandRepository for SqliteDatabase {
                 .execute(
                     "
                     UPDATE tasks
-                    SET status = 'todo',
+                    SET status = CASE
+                          WHEN board_column_id = ?1 THEN 'todo'
+                          ELSE 'in_progress'
+                        END,
+                        lifecycle_status = 'active',
                         completed_at = NULL,
-                        updated_at = ?1
-                    WHERE id = ?2
+                        updated_at = ?2
+                    WHERE id = ?3
                       AND deleted_at IS NULL
                     ",
-                    params![now, task_id],
+                    params![DEFAULT_BOARD_COLUMN_ID, now, task_id],
                 )
                 .map_err(|error| format!("タスクを未完了に戻せません: {error}"))?;
 
@@ -1592,6 +1803,7 @@ impl TaskTimerCommandRepository for SqliteDatabase {
                     "
                     UPDATE tasks
                     SET status = 'archived',
+                        lifecycle_status = 'archived',
                         updated_at = ?1
                     WHERE id = ?2
                       AND deleted_at IS NULL
@@ -1616,14 +1828,19 @@ impl TaskTimerCommandRepository for SqliteDatabase {
                     "
                     UPDATE tasks
                     SET status = CASE
-                          WHEN completed_at IS NULL THEN 'todo'
+                          WHEN completed_at IS NULL AND board_column_id = ?1 THEN 'todo'
+                          WHEN completed_at IS NULL THEN 'in_progress'
                           ELSE 'done'
                         END,
-                        updated_at = ?1
-                    WHERE id = ?2
+                        lifecycle_status = CASE
+                          WHEN completed_at IS NULL THEN 'active'
+                          ELSE 'done'
+                        END,
+                        updated_at = ?2
+                    WHERE id = ?3
                       AND deleted_at IS NULL
                     ",
-                    params![now, task_id],
+                    params![DEFAULT_BOARD_COLUMN_ID, now, task_id],
                 )
                 .map_err(|error| format!("アーカイブ済みタスクを復元できません: {error}"))?;
 
@@ -2065,6 +2282,9 @@ fn insert_task(
     let id = Uuid::new_v4().to_string();
     ensure_default_task_list(transaction, &input.now)?;
     ensure_task_list_exists(transaction, &input.list_id)?;
+    ensure_default_board_columns(transaction, &input.now)?;
+    let board_column_id =
+        select_preferred_active_board_column_id(transaction, DEFAULT_BOARD_COLUMN_ID)?;
     let sort_order = next_task_sort_order(transaction, &input.list_id)?;
     let planned_start_date = input.planned_start_date.clone();
     let due_date = input.due_date.clone();
@@ -2074,15 +2294,16 @@ fn insert_task(
         .execute(
             "
             INSERT INTO tasks (
-              id, list_id, title, status, is_favorite,
+              id, list_id, board_column_id, title, status, lifecycle_status, is_favorite,
               planned_start_date, due_date, due_time, timer_target_seconds, memo,
               sort_order, created_at, updated_at
             )
-            VALUES (?1, ?2, ?3, 'todo', 0, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?9)
+            VALUES (?1, ?2, ?3, ?4, 'todo', 'active', 0, ?5, ?6, ?7, NULL, ?8, ?9, ?10, ?10)
             ",
             params![
                 id,
                 input.list_id,
+                board_column_id,
                 input.title,
                 input.planned_start_date,
                 input.due_date,
@@ -4076,6 +4297,7 @@ fn select_task_rows(
             )
             SELECT tasks.id,
                    tasks.list_id,
+                   COALESCE(tasks.board_column_id, 'board-todo') AS board_column_id,
                    tasks.title,
                    tasks.status,
                    tasks.is_favorite,
@@ -4113,6 +4335,7 @@ fn select_task_rows(
               )
             GROUP BY tasks.id,
                      tasks.list_id,
+                     tasks.board_column_id,
                      tasks.title,
                      tasks.status,
                      tasks.is_favorite,
@@ -4345,6 +4568,153 @@ fn ensure_task_list_exists(connection: &Connection, list_id: &str) -> Repository
         Ok(())
     } else {
         Err("タスクリストが存在しません".to_string())
+    }
+}
+
+fn ensure_board_column_exists(connection: &Connection, column_id: &str) -> RepositoryResult<()> {
+    let exists: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM board_columns WHERE id = ?1 AND deleted_at IS NULL)",
+            params![column_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("状態を確認できません: {error}"))?;
+    if exists {
+        Ok(())
+    } else {
+        Err("状態が存在しません".to_string())
+    }
+}
+
+fn ensure_unique_board_column_title(
+    connection: &Connection,
+    title: &str,
+    except_id: Option<&str>,
+) -> RepositoryResult<()> {
+    let existing_id = connection
+        .query_row(
+            "SELECT id FROM board_columns WHERE lower(title) = lower(?1) AND deleted_at IS NULL LIMIT 1",
+            params![title],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|error| format!("状態名の重複を確認できません: {error}"))?;
+    if let Some(existing_id) = existing_id {
+        if except_id != Some(existing_id.as_str()) {
+            return Err("同じ名前の状態がすでに存在します".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn select_active_board_column_ids(connection: &Connection) -> RepositoryResult<Vec<String>> {
+    let mut statement = connection
+        .prepare(
+            "SELECT id FROM board_columns WHERE deleted_at IS NULL ORDER BY sort_order, created_at",
+        )
+        .map_err(|error| format!("状態ID一覧を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| format!("状態ID一覧を取得できません: {error}"))?;
+    rows.map(|row| row.map_err(|error| format!("状態IDを読めません: {error}")))
+        .collect()
+}
+
+fn select_preferred_active_board_column_id(
+    connection: &Connection,
+    preferred_id: &str,
+) -> RepositoryResult<String> {
+    connection
+        .query_row(
+            "
+            SELECT id
+            FROM board_columns
+            WHERE deleted_at IS NULL
+            ORDER BY CASE WHEN id = ?1 THEN 0 ELSE 1 END,
+                     sort_order,
+                     created_at
+            LIMIT 1
+            ",
+            params![preferred_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("タスクの初期状態を取得できません: {error}"))
+}
+
+fn select_board_columns(connection: &Connection) -> RepositoryResult<Vec<BoardColumnRecord>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT board_columns.id, board_columns.title, board_columns.sort_order,
+                   board_columns.created_at, board_columns.updated_at,
+                   COUNT(tasks.id),
+                   COALESCE(SUM(CASE WHEN tasks.lifecycle_status = 'active' THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN tasks.lifecycle_status = 'done' THEN 1 ELSE 0 END), 0)
+            FROM board_columns
+            LEFT JOIN tasks
+              ON tasks.board_column_id = board_columns.id
+             AND tasks.deleted_at IS NULL
+             AND tasks.lifecycle_status <> 'archived'
+            WHERE board_columns.deleted_at IS NULL
+            GROUP BY board_columns.id, board_columns.title, board_columns.sort_order,
+                     board_columns.created_at, board_columns.updated_at
+            ORDER BY board_columns.sort_order, board_columns.created_at
+            ",
+        )
+        .map_err(|error| format!("状態一覧クエリを準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], map_board_column_row)
+        .map_err(|error| format!("状態一覧を取得できません: {error}"))?;
+    rows.map(|row| row.map_err(|error| format!("状態一覧を読めません: {error}")))
+        .collect()
+}
+
+fn select_board_column_by_id(
+    connection: &Connection,
+    column_id: &str,
+) -> RepositoryResult<BoardColumnRecord> {
+    select_board_columns(connection)?
+        .into_iter()
+        .find(|column| column.id == column_id)
+        .ok_or_else(|| "状態が存在しません".to_string())
+}
+
+fn map_board_column_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<BoardColumnRecord> {
+    Ok(BoardColumnRecord {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        sort_order: row.get(2)?,
+        created_at: row.get(3)?,
+        updated_at: row.get(4)?,
+        task_count: row.get(5)?,
+        active_task_count: row.get(6)?,
+        completed_task_count: row.get(7)?,
+    })
+}
+
+fn normalize_board_column_sort_order(
+    transaction: &Transaction<'_>,
+    now: &str,
+) -> RepositoryResult<()> {
+    for (sort_order, column_id) in select_active_board_column_ids(transaction)?
+        .iter()
+        .enumerate()
+    {
+        transaction
+            .execute(
+                "UPDATE board_columns SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
+                params![sort_order as i64, now, column_id],
+            )
+            .map_err(|error| format!("状態の並び順を正規化できません: {error}"))?;
+    }
+    Ok(())
+}
+
+fn legacy_active_status_for_column(column_id: &str) -> &'static str {
+    if column_id == DEFAULT_BOARD_COLUMN_ID {
+        "todo"
+    } else {
+        "in_progress"
     }
 }
 
@@ -5093,33 +5463,54 @@ fn mark_target_in_progress(
     target: &WorkTargetRef,
     now: &str,
 ) -> RepositoryResult<()> {
-    let sql = match target.target_type {
+    match target.target_type {
         WorkTargetType::Task => {
-            "
-            UPDATE tasks
-            SET status = 'in_progress',
-                updated_at = ?1
-            WHERE id = ?2
-              AND deleted_at IS NULL
-              AND status <> 'in_progress'
-            "
+            let progress_column_id =
+                select_preferred_active_board_column_id(transaction, IN_PROGRESS_BOARD_COLUMN_ID)?;
+            let progress_status = legacy_active_status_for_column(&progress_column_id);
+            transaction
+                .execute(
+                    "
+                    UPDATE tasks
+                    SET status = CASE
+                          WHEN board_column_id IS NULL OR board_column_id = ?3 THEN ?5
+                          ELSE 'in_progress'
+                        END,
+                        lifecycle_status = 'active',
+                        board_column_id = CASE
+                          WHEN board_column_id IS NULL OR board_column_id = ?3 THEN ?4
+                          ELSE board_column_id
+                        END,
+                        updated_at = ?1
+                    WHERE id = ?2
+                      AND deleted_at IS NULL
+                    ",
+                    params![
+                        now,
+                        target.id,
+                        DEFAULT_BOARD_COLUMN_ID,
+                        progress_column_id,
+                        progress_status
+                    ],
+                )
+                .map(|_| ())
+                .map_err(|error| format!("作業対象を進行中に更新できません: {error}"))
         }
-        WorkTargetType::Subtask => {
-            "
-            UPDATE subtasks
-            SET status = 'in_progress',
-                updated_at = ?1
-            WHERE id = ?2
-              AND deleted_at IS NULL
-              AND status <> 'in_progress'
-            "
-        }
-    };
-
-    transaction
-        .execute(sql, params![now, target.id])
-        .map(|_| ())
-        .map_err(|error| format!("作業対象を進行中に更新できません: {error}"))
+        WorkTargetType::Subtask => transaction
+            .execute(
+                "
+                    UPDATE subtasks
+                    SET status = 'in_progress',
+                        updated_at = ?1
+                    WHERE id = ?2
+                      AND deleted_at IS NULL
+                      AND status <> 'in_progress'
+                    ",
+                params![now, target.id],
+            )
+            .map(|_| ())
+            .map_err(|error| format!("作業対象を進行中に更新できません: {error}")),
+    }
 }
 
 fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<TaskRecord> {
@@ -5388,8 +5779,8 @@ fn map_optional_recurrence_rule(
 }
 
 fn map_task_read_model_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRowRecord> {
-    let active_target_type_text: Option<String> = row.get(15)?;
-    let active_target_id: Option<String> = row.get(16)?;
+    let active_target_type_text: Option<String> = row.get(16)?;
+    let active_target_id: Option<String> = row.get(17)?;
     let active_timer_target = match (active_target_type_text, active_target_id) {
         (Some(target_type_text), Some(target_id)) => Some(target_ref(
             WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?,
@@ -5401,19 +5792,20 @@ fn map_task_read_model_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRowR
     Ok(TaskRowRecord {
         id: row.get(0)?,
         list_id: row.get(1)?,
-        title: row.get(2)?,
-        status: WorkStatus::from_db(&row.get::<_, String>(3)?).map_err(db_value_error)?,
-        is_favorite: row.get::<_, i64>(4)? != 0,
-        planned_start_date: row.get(5)?,
-        due_date: row.get(6)?,
-        due_time: row.get(7)?,
-        timer_target_seconds: row.get(8)?,
-        sort_order: row.get(9)?,
-        completed_at: row.get(10)?,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
-        subtask_total_count: row.get(13)?,
-        completed_subtask_count: row.get(14)?,
+        board_column_id: row.get(2)?,
+        title: row.get(3)?,
+        status: WorkStatus::from_db(&row.get::<_, String>(4)?).map_err(db_value_error)?,
+        is_favorite: row.get::<_, i64>(5)? != 0,
+        planned_start_date: row.get(6)?,
+        due_date: row.get(7)?,
+        due_time: row.get(8)?,
+        timer_target_seconds: row.get(9)?,
+        sort_order: row.get(10)?,
+        completed_at: row.get(11)?,
+        created_at: row.get(12)?,
+        updated_at: row.get(13)?,
+        subtask_total_count: row.get(14)?,
+        completed_subtask_count: row.get(15)?,
         active_timer_target,
         tags: Vec::new(),
     })
@@ -6137,10 +6529,93 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
     run_pomodoro_migration(connection)?;
     run_due_time_migration(connection)?;
     run_ui_read_model_migration(connection)?;
+    run_board_column_migration(connection)?;
     run_tag_migration(connection)?;
     run_notification_preference_migration(connection)?;
     run_notification_os_registration_migration(connection)?;
     run_notification_delivery_attempt_migration(connection)
+}
+
+fn run_board_column_migration(connection: &Connection) -> RepositoryResult<()> {
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS board_columns (
+              id TEXT PRIMARY KEY,
+              title TEXT NOT NULL CHECK (length(trim(title)) > 0 AND length(title) <= 80),
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              deleted_at TEXT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS board_columns_active_title_unique_idx
+            ON board_columns (lower(title))
+            WHERE deleted_at IS NULL;
+
+            CREATE INDEX IF NOT EXISTS board_columns_order_idx
+            ON board_columns (sort_order, created_at)
+            WHERE deleted_at IS NULL;
+            ",
+        )
+        .map_err(|error| format!("かんばん状態テーブルを作成できません: {error}"))?;
+
+    ensure_column(
+        connection,
+        "tasks",
+        "board_column_id",
+        "ALTER TABLE tasks ADD COLUMN board_column_id TEXT NULL REFERENCES board_columns(id) ON DELETE RESTRICT",
+    )?;
+    ensure_column(
+        connection,
+        "tasks",
+        "lifecycle_status",
+        "ALTER TABLE tasks ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_status IN ('active', 'done', 'archived'))",
+    )?;
+
+    let now = current_timestamp_value(connection)?;
+    ensure_default_board_columns(connection, &now)?;
+    connection
+        .execute(
+            "
+            UPDATE tasks
+            SET lifecycle_status = CASE
+              WHEN status = 'done' THEN 'done'
+              WHEN status = 'archived' THEN 'archived'
+              ELSE 'active'
+            END
+            WHERE lifecycle_status <> CASE
+              WHEN status = 'done' THEN 'done'
+              WHEN status = 'archived' THEN 'archived'
+              ELSE 'active'
+            END
+            ",
+            [],
+        )
+        .map_err(|error| format!("既存タスクの完了状態を移行できません: {error}"))?;
+    connection
+        .execute(
+            "
+            UPDATE tasks
+            SET board_column_id = CASE
+              WHEN status = 'in_progress' THEN ?1
+              ELSE ?2
+            END
+            WHERE board_column_id IS NULL
+            ",
+            params![IN_PROGRESS_BOARD_COLUMN_ID, DEFAULT_BOARD_COLUMN_ID],
+        )
+        .map_err(|error| format!("既存タスクのかんばん状態を移行できません: {error}"))?;
+
+    connection
+        .execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS tasks_board_column_lifecycle_idx
+            ON tasks (board_column_id, lifecycle_status, sort_order, created_at)
+            WHERE deleted_at IS NULL;
+            ",
+        )
+        .map_err(|error| format!("かんばんRead Model用インデックスを作成できません: {error}"))
 }
 
 fn run_due_time_migration(connection: &Connection) -> RepositoryResult<()> {
@@ -6603,6 +7078,19 @@ fn ensure_default_task_list(connection: &Connection, now: &str) -> RepositoryRes
         .map_err(|error| format!("初期タスクリストを保存できません: {error}"))
 }
 
+fn ensure_default_board_columns(connection: &Connection, now: &str) -> RepositoryResult<()> {
+    connection
+        .execute(
+            "
+            INSERT OR IGNORE INTO board_columns (id, title, sort_order, created_at, updated_at)
+            VALUES (?1, '未着手', 0, ?3, ?3), (?2, '進行中', 1, ?3, ?3)
+            ",
+            params![DEFAULT_BOARD_COLUMN_ID, IN_PROGRESS_BOARD_COLUMN_ID, now],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("初期状態を保存できません: {error}"))
+}
+
 fn seed_default_ui_preferences(connection: &Connection) -> RepositoryResult<()> {
     connection
         .execute(
@@ -6902,6 +7390,23 @@ fn write_csv_export_files(
             .collect(),
     )?;
     write_csv_file(
+        &export_dir.join("board_columns.csv"),
+        &["id", "title", "sort_order", "created_at", "updated_at"],
+        dataset
+            .board_columns
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.title.clone(),
+                    row.sort_order.to_string(),
+                    row.created_at.clone(),
+                    row.updated_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
         &export_dir.join("tags.csv"),
         &["id", "name", "sort_order", "created_at", "updated_at"],
         dataset
@@ -6938,8 +7443,10 @@ fn write_csv_export_files(
         &[
             "id",
             "list_id",
+            "board_column_id",
             "title",
             "status",
+            "lifecycle_status",
             "is_favorite",
             "planned_start_date",
             "due_date",
@@ -6958,8 +7465,10 @@ fn write_csv_export_files(
                 vec![
                     row.id.clone(),
                     row.list_id.clone(),
+                    row.board_column_id.clone(),
                     row.title.clone(),
                     row.status.clone(),
+                    row.lifecycle_status.clone(),
                     row.is_favorite.to_string(),
                     option_text(&row.planned_start_date),
                     option_text(&row.due_date),
@@ -7237,6 +7746,7 @@ fn csv_export_file_names() -> Vec<&'static str> {
     vec![
         CSV_EXPORT_MANIFEST_FILE,
         "task_lists.csv",
+        "board_columns.csv",
         "tags.csv",
         "task_tags.csv",
         "tasks.csv",
@@ -7308,6 +7818,7 @@ fn option_i64_text(value: Option<i64>) -> String {
 fn select_export_dataset(connection: &Connection) -> RepositoryResult<ExportDataset> {
     Ok(ExportDataset {
         task_lists: select_export_task_lists(connection)?,
+        board_columns: select_export_board_columns(connection)?,
         tags: select_export_tags(connection)?,
         task_tags: select_export_task_tags(connection)?,
         tasks: select_export_tasks(connection)?,
@@ -7320,6 +7831,33 @@ fn select_export_dataset(connection: &Connection) -> RepositoryResult<ExportData
         notification_os_registrations: select_export_notification_os_registrations(connection)?,
         recurrence_rules: select_export_recurrence_rules(connection)?,
     })
+}
+
+fn select_export_board_columns(
+    connection: &Connection,
+) -> RepositoryResult<Vec<ExportBoardColumnRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, title, sort_order, created_at, updated_at
+            FROM board_columns
+            WHERE deleted_at IS NULL
+            ORDER BY sort_order, created_at, id
+            ",
+        )
+        .map_err(|error| format!("エクスポート用かんばん状態取得を準備できません: {error}"))?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportBoardColumnRow {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                sort_order: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用かんばん状態を取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用かんばん状態を読めません")
 }
 
 fn select_export_task_lists(connection: &Connection) -> RepositoryResult<Vec<ExportTaskListRow>> {
@@ -7406,9 +7944,10 @@ fn select_export_tasks(connection: &Connection) -> RepositoryResult<Vec<ExportTa
     let mut statement = connection
         .prepare(
             "
-            SELECT id, list_id, title, status, is_favorite, planned_start_date,
-                   due_date, due_time, timer_target_seconds, memo, sort_order,
-                   completed_at, created_at, updated_at
+            SELECT id, list_id, board_column_id, title, status, lifecycle_status,
+                   is_favorite, planned_start_date, due_date, due_time,
+                   timer_target_seconds, memo, sort_order, completed_at,
+                   created_at, updated_at
             FROM tasks
             WHERE deleted_at IS NULL
             ORDER BY sort_order, created_at, id
@@ -7420,18 +7959,20 @@ fn select_export_tasks(connection: &Connection) -> RepositoryResult<Vec<ExportTa
             Ok(ExportTaskRow {
                 id: row.get(0)?,
                 list_id: row.get(1)?,
-                title: row.get(2)?,
-                status: row.get(3)?,
-                is_favorite: row.get::<_, i64>(4)? != 0,
-                planned_start_date: row.get(5)?,
-                due_date: row.get(6)?,
-                due_time: row.get(7)?,
-                timer_target_seconds: row.get(8)?,
-                memo: row.get(9)?,
-                sort_order: row.get(10)?,
-                completed_at: row.get(11)?,
-                created_at: row.get(12)?,
-                updated_at: row.get(13)?,
+                board_column_id: row.get(2)?,
+                title: row.get(3)?,
+                status: row.get(4)?,
+                lifecycle_status: row.get(5)?,
+                is_favorite: row.get::<_, i64>(6)? != 0,
+                planned_start_date: row.get(7)?,
+                due_date: row.get(8)?,
+                due_time: row.get(9)?,
+                timer_target_seconds: row.get(10)?,
+                memo: row.get(11)?,
+                sort_order: row.get(12)?,
+                completed_at: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         })
         .map_err(|error| format!("エクスポート用タスクを取得できません: {error}"))?;
@@ -8545,15 +9086,30 @@ mod tests {
 
         run_initial_migration(&connection).expect("migrate legacy database");
 
-        let (list_id, is_favorite, timer_target_seconds): (String, i64, Option<i64>) = connection
+        let (list_id, board_column_id, lifecycle_status, is_favorite, timer_target_seconds): (
+            String,
+            String,
+            String,
+            i64,
+            Option<i64>,
+        ) = connection
             .query_row(
                 "
-                SELECT list_id, is_favorite, timer_target_seconds
+                SELECT list_id, board_column_id, lifecycle_status,
+                       is_favorite, timer_target_seconds
                 FROM tasks
                 WHERE id = 'legacy-task'
                 ",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .expect("migrated task");
         let (task_list_name, task_list_color_token): (String, String) = connection
@@ -8580,6 +9136,8 @@ mod tests {
             .expect("timer recurrence tables");
 
         assert_eq!(list_id, DEFAULT_TASK_LIST_ID);
+        assert_eq!(board_column_id, DEFAULT_BOARD_COLUMN_ID);
+        assert_eq!(lifecycle_status, "active");
         assert_eq!(is_favorite, 0);
         assert_eq!(timer_target_seconds, None);
         assert_eq!(task_list_name, DEFAULT_TASK_LIST_NAME);
@@ -8660,7 +9218,14 @@ mod tests {
         let first_task_after_start = database
             .with_connection(|connection| select_task_by_id(connection, &first_task_id))
             .expect("first task after start");
+        let first_task_row = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("task rows")
+            .into_iter()
+            .find(|row| row.id == first_task_id)
+            .expect("first task row");
         assert_eq!(first_task_after_start.status, WorkStatus::InProgress);
+        assert_eq!(first_task_row.board_column_id, IN_PROGRESS_BOARD_COLUMN_ID);
 
         let result = usecases::start_timer(
             &database,
@@ -10019,6 +10584,7 @@ mod tests {
             .export_path
             .ends_with("TaskTimer-export-20260715-000000.json"));
         assert_eq!(export.manifest.format, JSON_EXPORT_FORMAT);
+        assert_eq!(export.manifest.format_version, DATA_EXPORT_FORMAT_VERSION);
         assert_eq!(export.manifest.compatibility, DATA_EXPORT_COMPATIBILITY);
         assert!(export.manifest.contains_personal_data);
 
@@ -10028,6 +10594,15 @@ mod tests {
         assert_eq!(json["manifest"]["format"], JSON_EXPORT_FORMAT);
         assert_eq!(json["manifest"]["containsPersonalData"], true);
         assert_eq!(json["tasks"][0]["title"], "=SUM(1,2)");
+        assert_eq!(json["tasks"][0]["board_column_id"], DEFAULT_BOARD_COLUMN_ID);
+        assert_eq!(json["tasks"][0]["lifecycle_status"], "active");
+        assert_eq!(
+            json["board_columns"]
+                .as_array()
+                .expect("board columns")
+                .len(),
+            2
+        );
         assert_eq!(json["tasks"][0]["memo"], "1行目,2行目\n\"引用\"");
         assert_eq!(json["tags"][0]["name"], "移行確認");
         assert_eq!(json["task_tags"][0]["task_id"], task.id);
@@ -10111,6 +10686,10 @@ mod tests {
             .join(CSV_EXPORT_MANIFEST_FILE)
             .is_file());
         assert!(export.files.iter().any(|path| path.ends_with("tasks.csv")));
+        assert!(export
+            .files
+            .iter()
+            .any(|path| path.ends_with("board_columns.csv")));
         assert!(export.files.iter().any(|path| path.ends_with("tags.csv")));
         assert!(export
             .files
@@ -10139,7 +10718,9 @@ mod tests {
         let task_tags_csv =
             fs::read_to_string(PathBuf::from(&export.export_path).join("task_tags.csv"))
                 .expect("read task tags csv");
-        assert!(tasks_csv.starts_with("id,list_id,title,status,is_favorite"));
+        assert!(tasks_csv
+            .starts_with("id,list_id,board_column_id,title,status,lifecycle_status,is_favorite"));
+        assert!(tasks_csv.contains(IN_PROGRESS_BOARD_COLUMN_ID));
         assert!(tasks_csv.contains("\"'=SUM(1,2)\""));
         assert!(tasks_csv.contains("\"カンマ, 改行\n\"\"引用符\"\"\""));
         assert!(pomodoro_settings_csv.starts_with("id,work_seconds,short_break_seconds"));
@@ -10768,6 +11349,139 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].status, WorkStatus::InProgress);
         assert_eq!(rows[0].completed_at, None);
+    }
+
+    #[test]
+    fn board_columns_support_create_rename_reorder_move_and_transactional_delete() {
+        let database = in_memory_database();
+        let create_clock = FixedClock {
+            now: "2026-07-18T00:00:00Z",
+        };
+        let update_clock = FixedClock {
+            now: "2026-07-18T00:10:00Z",
+        };
+        let task = usecases::create_task(&database, &create_clock, draft("レビュー対象"))
+            .expect("create task");
+        let review = usecases::create_board_column(
+            &database,
+            &create_clock,
+            usecases::BoardColumnDraft {
+                title: "レビュー".to_string(),
+            },
+        )
+        .expect("create review column");
+
+        let renamed = usecases::update_board_column(
+            &database,
+            &update_clock,
+            review.id.clone(),
+            usecases::BoardColumnDraft {
+                title: "確認中".to_string(),
+            },
+        )
+        .expect("rename column");
+        assert_eq!(renamed.title, "確認中");
+
+        let reordered = usecases::reorder_board_columns(
+            &database,
+            &update_clock,
+            vec![
+                review.id.clone(),
+                DEFAULT_BOARD_COLUMN_ID.to_string(),
+                IN_PROGRESS_BOARD_COLUMN_ID.to_string(),
+            ],
+        )
+        .expect("reorder columns");
+        assert_eq!(reordered[0].id, review.id);
+
+        usecases::move_task_to_board_column(
+            &database,
+            &update_clock,
+            task.id.clone(),
+            review.id.clone(),
+        )
+        .expect("move task");
+        usecases::complete_task(&database, &update_clock, task.id.clone(), true)
+            .expect("complete task");
+
+        let before_delete: (String, String, String) = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT board_column_id, lifecycle_status, completed_at FROM tasks WHERE id = ?1",
+                        params![task.id.as_str()],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )
+                    .map_err(|error| format!("task state before delete: {error}"))
+            })
+            .expect("task state before delete");
+        assert_eq!(before_delete.0, review.id);
+        assert_eq!(before_delete.1, "done");
+        assert_eq!(before_delete.2, update_clock.now);
+
+        usecases::delete_board_column(
+            &database,
+            &update_clock,
+            review.id.clone(),
+            IN_PROGRESS_BOARD_COLUMN_ID.to_string(),
+        )
+        .expect("delete column");
+
+        let after_delete: (String, String, String, String) = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT board_column_id, lifecycle_status, status, completed_at FROM tasks WHERE id = ?1",
+                        params![task.id.as_str()],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                    )
+                    .map_err(|error| format!("task state after delete: {error}"))
+            })
+            .expect("task state after delete");
+        assert_eq!(after_delete.0, IN_PROGRESS_BOARD_COLUMN_ID);
+        assert_eq!(after_delete.1, "done");
+        assert_eq!(after_delete.2, "done");
+        assert_eq!(after_delete.3, update_clock.now);
+        assert!(!usecases::list_board_columns(&database)
+            .expect("list columns")
+            .iter()
+            .any(|column| column.id == review.id));
+
+        let reopened =
+            usecases::reopen_task(&database, &update_clock, task.id).expect("reopen moved task");
+        assert_eq!(reopened.status, WorkStatus::InProgress);
+    }
+
+    #[test]
+    fn deleting_default_column_keeps_new_tasks_visible_and_last_column_is_protected() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-18T00:00:00Z",
+        };
+
+        usecases::delete_board_column(
+            &database,
+            &clock,
+            DEFAULT_BOARD_COLUMN_ID.to_string(),
+            IN_PROGRESS_BOARD_COLUMN_ID.to_string(),
+        )
+        .expect("delete default column");
+        let task = usecases::create_task(&database, &clock, draft("削除後の新規タスク"))
+            .expect("create task after deleting default column");
+        let rows = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("list rows");
+        assert_eq!(rows[0].id, task.id);
+        assert_eq!(rows[0].board_column_id, IN_PROGRESS_BOARD_COLUMN_ID);
+
+        let error = usecases::delete_board_column(
+            &database,
+            &clock,
+            IN_PROGRESS_BOARD_COLUMN_ID.to_string(),
+            "missing-column".to_string(),
+        )
+        .expect_err("last column must be protected");
+        assert!(error.contains("最後の状態"));
     }
 
     #[test]

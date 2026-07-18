@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   ActivePomodoro,
+  BoardColumn,
   NextNotificationSchedule,
   NotificationDispatchSummary,
   PomodoroSettings,
@@ -47,6 +48,7 @@ export function App() {
   const [tasks, setTasks] = useState<TaskWithSubtasks[]>([]);
   const [taskRows, setTaskRows] = useState<TaskRow[]>([]);
   const [taskLists, setTaskLists] = useState<TaskListItem[]>([]);
+  const [boardColumns, setBoardColumns] = useState<BoardColumn[]>([]);
   const [tags, setTags] = useState<TagItem[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedSubtaskId, setSelectedSubtaskId] = useState<string | null>(null);
@@ -203,6 +205,7 @@ export function App() {
         nextTasks,
         nextTaskRows,
         nextTaskLists,
+        nextBoardColumns,
         nextTags,
         nextItems,
         nextActiveTimer,
@@ -215,6 +218,7 @@ export function App() {
           tauriTaskTimerGateway.listTasks(),
           tauriTaskTimerGateway.listTaskRows(listId),
           tauriTaskTimerGateway.listTaskLists(),
+          tauriTaskTimerGateway.listBoardColumns(),
           tauriTaskTimerGateway.listTags(),
           tauriTaskTimerGateway.listCalendarItems(
             calendarRange.startDate,
@@ -230,6 +234,7 @@ export function App() {
       setTasks(nextTasks);
       setTaskRows(nextTaskRows);
       setTaskLists(nextTaskLists);
+      setBoardColumns(nextBoardColumns);
       setTags(nextTags);
       setItems(nextItems);
       setActiveTimer(nextActiveTimer);
@@ -858,33 +863,49 @@ export function App() {
     [runTaskActionMutation],
   );
 
-  const handleChangeTaskStatus = useCallback(
-    (task: TaskWithSubtasks, status: Exclude<Task["status"], "archived">) => {
-      if (task.status === status) {
-        return Promise.resolve(true);
-      }
+  const handleCreateBoardColumn = useCallback(
+    (title: string) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.createBoardColumn(title);
+      }),
+    [runMutation],
+  );
 
-      const hasIncompleteSubtasks =
-        status === "done" &&
-        task.subtasks.some((subtask) => subtask.status !== "done");
-      if (
-        hasIncompleteSubtasks &&
-        !window.confirm(
-          "未完了のサブタスクがあります。サブタスクは未完了のまま、親タスクだけ完了しますか？",
-        )
-      ) {
-        return Promise.resolve(false);
-      }
+  const handleRenameBoardColumn = useCallback(
+    (columnId: string, title: string) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.updateBoardColumn(columnId, title);
+      }),
+    [runMutation],
+  );
 
-      return runTaskActionMutation(task.id, async () => {
-        await tauriTaskTimerGateway.updateTaskStatus(
-          task.id,
-          status,
-          hasIncompleteSubtasks,
+  const handleReorderBoardColumns = useCallback(
+    (orderedColumnIds: string[]) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.reorderBoardColumns(orderedColumnIds);
+      }),
+    [runMutation],
+  );
+
+  const handleDeleteBoardColumn = useCallback(
+    (columnId: string, moveTasksToColumnId: string) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.deleteBoardColumn(
+          columnId,
+          moveTasksToColumnId,
         );
-        return task.id;
-      });
-    },
+      }),
+    [runMutation],
+  );
+
+  const handleMoveTaskToBoardColumn = useCallback(
+    (taskId: string, boardColumnId: string) =>
+      runTaskActionMutation(taskId, async () => {
+        await tauriTaskTimerGateway.moveTaskToBoardColumn(
+          taskId,
+          boardColumnId,
+        );
+      }),
     [runTaskActionMutation],
   );
 
@@ -1330,6 +1351,7 @@ export function App() {
               }`}
             >
               <KanbanBoard
+                columns={boardColumns}
                 tasks={visibleTasks}
                 taskRows={visibleTaskRows}
                 selectedTaskId={selectedTaskId}
@@ -1338,7 +1360,11 @@ export function App() {
                 pendingTaskActionIds={pendingTaskActionIds}
                 onSelectTask={handleSelectTask}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
-                onChangeTaskStatus={handleChangeTaskStatus}
+                onCreateColumn={handleCreateBoardColumn}
+                onRenameColumn={handleRenameBoardColumn}
+                onReorderColumns={handleReorderBoardColumns}
+                onDeleteColumn={handleDeleteBoardColumn}
+                onMoveTask={handleMoveTaskToBoardColumn}
               />
               {selectedTask ? (
                 <TaskDetailPane

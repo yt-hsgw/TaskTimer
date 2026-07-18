@@ -133,6 +133,36 @@ pub struct TaskStatusUpdate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoardColumnCreate {
+    pub title: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoardColumnUpdate {
+    pub title: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoardColumnReorder {
+    pub ordered_column_ids: Vec<String>,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoardColumnDelete {
+    pub move_tasks_to_column_id: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoardTaskMove {
+    pub board_column_id: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecurrenceRuleInput {
     pub frequency: RecurrenceFrequency,
     pub interval: i64,
@@ -180,6 +210,18 @@ pub struct TaskListRecord {
     pub id: String,
     pub name: String,
     pub color_token: String,
+    pub sort_order: i64,
+    pub task_count: i64,
+    pub active_task_count: i64,
+    pub completed_task_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoardColumnRecord {
+    pub id: String,
+    pub title: String,
     pub sort_order: i64,
     pub task_count: i64,
     pub active_task_count: i64,
@@ -254,6 +296,7 @@ pub struct TaskWithSubtasksRecord {
 pub struct TaskRowRecord {
     pub id: String,
     pub list_id: String,
+    pub board_column_id: String,
     pub title: String,
     pub status: WorkStatus,
     pub is_favorite: bool,
@@ -440,7 +483,7 @@ pub struct UiPreferencesUpdate {
 }
 
 pub type RepositoryResult<T> = Result<T, String>;
-pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 5;
+pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 6;
 
 pub trait CalendarRepository {
     fn list_calendar_items(
@@ -513,6 +556,35 @@ pub trait TaskReadRepository {
     ) -> RepositoryResult<Vec<TaskRowRecord>>;
 
     fn list_archived_task_rows(&self, limit: i64) -> RepositoryResult<Vec<TaskRowRecord>>;
+}
+
+pub trait BoardColumnRepository {
+    fn list_board_columns(&self) -> RepositoryResult<Vec<BoardColumnRecord>>;
+
+    fn create_board_column(&self, input: BoardColumnCreate) -> RepositoryResult<BoardColumnRecord>;
+
+    fn update_board_column(
+        &self,
+        column_id: String,
+        input: BoardColumnUpdate,
+    ) -> RepositoryResult<BoardColumnRecord>;
+
+    fn reorder_board_columns(
+        &self,
+        input: BoardColumnReorder,
+    ) -> RepositoryResult<Vec<BoardColumnRecord>>;
+
+    fn delete_board_column(
+        &self,
+        column_id: String,
+        input: BoardColumnDelete,
+    ) -> RepositoryResult<()>;
+
+    fn move_task_to_board_column(
+        &self,
+        task_id: String,
+        input: BoardTaskMove,
+    ) -> RepositoryResult<()>;
 }
 
 pub trait TaskTimerCommandRepository {

@@ -204,7 +204,7 @@ Issue #80 では、タグを横断分類として追加する。`tags` と `task
 
 Issue #81 では、かんばん画面を `TaskRowItem` Read Modelの別表示として追加する。列分けはPresentationが `status` から派生し、状態変更は `UpdateTaskStatus` Use Caseを通す。カードには一覧と同じ完了チェックを表示する。MVPではドラッグ&ドロップを採用せず、カード内のクリック操作で状態を変更する。`archived` は通常かんばんから除外し、アーカイブ操作と復元操作は既存の専用Use Caseに委ねる。
 
-GitHub #126では、業務上の進行状態と完了ライフサイクルを分離し、列を永続化するモデルへ拡張する。カード移動、列追加、名称変更、列並べ替えをApplication Use Caseのトランザクション境界に置き、Presentationは実績のあるDnDライブラリでポインター操作とキーボード操作を提供する。
+GitHub #126では、業務上の進行状態を `board_columns` / `tasks.board_column_id`、完了ライフサイクルを `tasks.lifecycle_status` へ分離する。既存 `tasks.status` は後方互換のため保持し、状態変更トランザクションで同期する。カード移動、列追加、名称変更、列並べ替え、移動先を伴う列削除をApplication Use Caseのトランザクション境界に置き、Presentationは `@dnd-kit` のPointer/Keyboard sensorで操作を提供する。
 
 Issue 050の作業画面整理はPresentation層の配置変更として扱う。詳細は中央ビューの幅を変えないオーバーレイとし、同じ親タスクを再選択した場合は永続化しない選択状態だけを解除する。設定画面から外したSQLite復元と通知失敗履歴のApplication/Repository境界は削除せず、JSON/CSVエクスポートだけを一般利用者向けUIへ公開する。
 
