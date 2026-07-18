@@ -1,7 +1,9 @@
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { Pencil, Plus, Trash2, X } from "lucide-react";
 import type {
   ActivePomodoro,
   TagItem,
+  TaskListColorToken,
   TaskWithSubtasks,
   TaskListItem,
   WorkItemDraft,
@@ -53,6 +55,13 @@ type TaskDetailPaneProps = {
   onToggleSubtaskCompletion(subtask: Subtask): Promise<boolean>;
   onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
   onDeleteSubtask(subtask: Subtask): Promise<boolean>;
+  onUpdateTaskListColor(
+    listId: string,
+    colorToken: TaskListColorToken,
+  ): Promise<boolean>;
+  onCreateTag(name: string): Promise<boolean>;
+  onRenameTag(tagId: string, name: string): Promise<boolean>;
+  onDeleteTag(tagId: string): Promise<boolean>;
   onAttachTagToTask(taskId: string, tagId: string): Promise<boolean>;
   onDetachTagFromTask(taskId: string, tagId: string): Promise<boolean>;
 };
@@ -98,6 +107,24 @@ const recurrenceLabels: Record<RecurrenceFrequency, string> = {
 
 const timerTargetPresets = ["15", "25", "30", "45", "60", "90", "120"];
 
+const taskListColorOptions: TaskListColorToken[] = [
+  "green",
+  "blue",
+  "amber",
+  "rose",
+  "violet",
+  "gray",
+];
+
+const taskListColorLabels: Record<TaskListColorToken, string> = {
+  green: "緑",
+  blue: "青",
+  amber: "黄",
+  rose: "赤",
+  violet: "紫",
+  gray: "灰",
+};
+
 export function TaskDetailPane({
   task,
   selectedSubtaskId,
@@ -131,6 +158,10 @@ export function TaskDetailPane({
   onToggleSubtaskCompletion,
   onDeleteTask,
   onDeleteSubtask,
+  onUpdateTaskListColor,
+  onCreateTag,
+  onRenameTag,
+  onDeleteTag,
   onAttachTagToTask,
   onDetachTagFromTask,
 }: TaskDetailPaneProps) {
@@ -154,8 +185,8 @@ export function TaskDetailPane({
   const hasSubtasks = task.subtasks.length > 0;
   const detailKey = `${selectedSubtask ? "subtask" : "task"}:${detailItem.id}`;
   const detailMemo = detailItem.memo.trim();
-  const taskListName =
-    taskLists.find((list) => list.id === task.listId)?.name ?? "タスク";
+  const taskList = taskLists.find((list) => list.id === task.listId) ?? null;
+  const taskListName = taskList?.name ?? "タスク";
   const [draft, setDraft] = useState(() =>
     toDetailFormDraft(detailItem, task.listId),
   );
@@ -174,6 +205,9 @@ export function TaskDetailPane({
     memo: "",
   });
   const [selectedTagId, setSelectedTagId] = useState("");
+  const [newTagName, setNewTagName] = useState("");
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [editingTagName, setEditingTagName] = useState("");
   const [nowTick, setNowTick] = useState(Date.now());
   const [openSections, setOpenSections] = useState<
     Record<DetailSectionKey, boolean>
@@ -220,6 +254,9 @@ export function TaskDetailPane({
       memo: "",
     });
     setSelectedTagId("");
+    setNewTagName("");
+    setEditingTagId(null);
+    setEditingTagName("");
   }, [task.id]);
 
   useEffect(() => {
@@ -295,6 +332,49 @@ export function TaskDetailPane({
     if (attached) {
       setSelectedTagId("");
     }
+  }
+
+  async function handleCreateTag(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = newTagName.trim();
+    if (!name) {
+      return;
+    }
+    const created = await onCreateTag(name);
+    if (created) {
+      setNewTagName("");
+    }
+  }
+
+  async function handleRenameTag(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = editingTagName.trim();
+    if (!editingTagId || !name) {
+      return;
+    }
+    const renamed = await onRenameTag(editingTagId, name);
+    if (renamed) {
+      setEditingTagId(null);
+      setEditingTagName("");
+    }
+  }
+
+  async function handleDeleteTag(tag: TagItem) {
+    const shouldDelete = window.confirm(
+      `「${tag.name}」タグを削除します。すべてのタスクから外れますが、タスクは削除されません。`,
+    );
+    if (shouldDelete) {
+      await onDeleteTag(tag.id);
+    }
+  }
+
+  async function handleTaskListChange(listId: string) {
+    if (listId === task.listId) {
+      return;
+    }
+    const nextDraft = toDetailFormDraft(task, listId);
+    setDraft(nextDraft);
+    await onUpdateTask(task.id, toWorkItemUpdateDraft(nextDraft));
   }
 
   function toggleSection(section: DetailSectionKey) {
@@ -402,7 +482,7 @@ export function TaskDetailPane({
           title="閉じる"
           onClick={onClose}
         >
-          ×
+          <X aria-hidden="true" size={17} />
         </button>
       </div>
 
@@ -440,6 +520,44 @@ export function TaskDetailPane({
           <strong>{formatRecurrenceFromItem(detailItem)}</strong>
         </div>
       </section>
+
+      {isTaskDetail ? (
+        <section className="detail-list-card" aria-label="所属リストと表示色">
+          <label>
+            <span>所属リスト</span>
+            <select
+              value={task.listId}
+              disabled={isMutating}
+              onChange={(event) => void handleTaskListChange(event.target.value)}
+            >
+              {taskLists.map((list) => (
+                <option key={list.id} value={list.id}>
+                  {list.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="detail-list-color-field">
+            <span>リストの表示色</span>
+            <div className="detail-color-picker" aria-label="リストの表示色">
+              {taskListColorOptions.map((colorToken) => (
+                <button
+                  className={`detail-color-button color-${colorToken}`}
+                  type="button"
+                  key={colorToken}
+                  aria-label={`${taskListColorLabels[colorToken]}に変更`}
+                  aria-pressed={taskList?.colorToken === colorToken}
+                  title={taskListColorLabels[colorToken]}
+                  disabled={isMutating || taskList?.colorToken === colorToken}
+                  onClick={() =>
+                    void onUpdateTaskListColor(task.listId, colorToken)
+                  }
+                />
+              ))}
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <section className="detail-tags-card" aria-label="タグ">
         <div className="detail-tags-heading">
@@ -481,7 +599,7 @@ export function TaskDetailPane({
             >
               <option value="">
                 {tags.length === 0
-                  ? "左ペインでタグを作成"
+                  ? "タグを作成してください"
                   : availableTags.length === 0
                     ? "追加できるタグはありません"
                     : "タグを選択"}
@@ -500,6 +618,99 @@ export function TaskDetailPane({
               追加
             </button>
           </form>
+        ) : null}
+        {!selectedSubtask ? (
+          <details className="detail-tag-management">
+            <summary>タグを管理</summary>
+            <form className="detail-tag-create-form" onSubmit={handleCreateTag}>
+              <input
+                value={newTagName}
+                onChange={(event) => setNewTagName(event.target.value)}
+                placeholder="新しいタグ"
+                maxLength={40}
+                disabled={isMutating}
+              />
+              <button
+                className="inline-icon-button"
+                type="submit"
+                aria-label="タグを作成"
+                title="タグを作成"
+                disabled={isMutating || !newTagName.trim()}
+              >
+                <Plus aria-hidden="true" size={16} />
+              </button>
+            </form>
+            {tags.length > 0 ? (
+              <div className="detail-tag-management-list">
+                {tags.map((tag) =>
+                  editingTagId === tag.id ? (
+                    <form
+                      className="detail-tag-edit-row"
+                      onSubmit={handleRenameTag}
+                      key={tag.id}
+                    >
+                      <input
+                        value={editingTagName}
+                        onChange={(event) => setEditingTagName(event.target.value)}
+                        maxLength={40}
+                        disabled={isMutating}
+                        autoFocus
+                      />
+                      <button
+                        className="secondary-button"
+                        type="submit"
+                        disabled={isMutating || !editingTagName.trim()}
+                      >
+                        保存
+                      </button>
+                      <button
+                        className="inline-icon-button"
+                        type="button"
+                        aria-label="タグ名の編集をキャンセル"
+                        title="キャンセル"
+                        disabled={isMutating}
+                        onClick={() => {
+                          setEditingTagId(null);
+                          setEditingTagName("");
+                        }}
+                      >
+                        <X aria-hidden="true" size={15} />
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="detail-tag-management-row" key={tag.id}>
+                      <span>{tag.name}</span>
+                      <div>
+                        <button
+                          className="inline-icon-button"
+                          type="button"
+                          aria-label={`${tag.name}の名前を変更`}
+                          title="名前を変更"
+                          disabled={isMutating}
+                          onClick={() => {
+                            setEditingTagId(tag.id);
+                            setEditingTagName(tag.name);
+                          }}
+                        >
+                          <Pencil aria-hidden="true" size={14} />
+                        </button>
+                        <button
+                          className="inline-danger-button"
+                          type="button"
+                          aria-label={`${tag.name}を削除`}
+                          title="削除"
+                          disabled={isMutating}
+                          onClick={() => void handleDeleteTag(tag)}
+                        >
+                          <Trash2 aria-hidden="true" size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ),
+                )}
+              </div>
+            ) : null}
+          </details>
         ) : null}
       </section>
 
@@ -637,28 +848,6 @@ export function TaskDetailPane({
               required
             />
           </label>
-
-          {isTaskDetail ? (
-            <label>
-              <span>所属リスト</span>
-              <select
-                value={draft.listId}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    listId: event.target.value,
-                  }))
-                }
-                disabled={isMutating}
-              >
-                {taskLists.map((list) => (
-                  <option key={list.id} value={list.id}>
-                    {list.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
 
           <label>
             <span>目標時間（分）</span>

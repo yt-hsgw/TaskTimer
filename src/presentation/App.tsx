@@ -3,7 +3,6 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type {
   ActivePomodoro,
   NextNotificationSchedule,
-  NotificationDeliveryAttempt,
   NotificationDispatchSummary,
   PomodoroSettings,
   PomodoroSettingsDraft,
@@ -71,9 +70,6 @@ export function App() {
     useState<PomodoroSettings | null>(null);
   const [notificationSummary, setNotificationSummary] =
     useState<NotificationDispatchSummary | null>(null);
-  const [notificationFailureHistory, setNotificationFailureHistory] = useState<
-    NotificationDeliveryAttempt[]
-  >([]);
   const [nextNotificationSchedule, setNextNotificationSchedule] =
     useState<NextNotificationSchedule | null>(null);
   const [calendarViewMode, setCalendarViewMode] =
@@ -251,9 +247,6 @@ export function App() {
         ),
       );
       setNextNotificationSchedule(notificationSyncResult.nextSchedule);
-      setNotificationFailureHistory(
-        await tauriTaskTimerGateway.listNotificationFailureHistory(),
-      );
     } catch (error) {
       setNextNotificationSchedule(null);
       setErrorMessage(toErrorMessage(error));
@@ -618,11 +611,9 @@ export function App() {
   const handleCreateTag = useCallback(
     (name: string) =>
       runMutation(async () => {
-        const tag = await tauriTaskTimerGateway.createTag({ name });
-        setActiveView({ kind: "tag", tagId: tag.id });
-        clearDetailSelection();
+        await tauriTaskTimerGateway.createTag({ name });
       }),
-    [clearDetailSelection, runMutation],
+    [runMutation],
   );
 
   const handleRenameTag = useCallback(
@@ -1003,64 +994,6 @@ export function App() {
     [],
   );
 
-  const handleCreateSqliteBackup = useCallback(
-    () =>
-      runDataManagementAction(async (): Promise<DataManagementActionResult> => {
-        const destinationDir = await selectDirectory(
-          "SQLiteバックアップの保存先を選択",
-        );
-        if (!destinationDir) {
-          return createCancelledResult(
-            "SQLiteバックアップの作成をキャンセルしました。",
-          );
-        }
-
-        const result =
-          await tauriTaskTimerGateway.createSqliteBackup(destinationDir);
-        return {
-          status: "success",
-          message: "SQLiteバックアップを作成しました。",
-          detail: `保存先: ${getPathBasename(result.backupDir)}`,
-        };
-      }),
-    [runDataManagementAction],
-  );
-
-  const handleRestoreSqliteBackup = useCallback(
-    () =>
-      runDataManagementAction(async (): Promise<DataManagementActionResult> => {
-        const backupDir = await selectDirectory(
-          "SQLiteバックアップフォルダを選択",
-          false,
-        );
-        if (!backupDir) {
-          return createCancelledResult(
-            "SQLiteバックアップからの復元をキャンセルしました。",
-          );
-        }
-
-        const confirmed = window.confirm(
-          "選択したSQLiteバックアップで現在のデータを置き換えます。現在のDBを退避してから実行したい場合はキャンセルしてください。復元を続行しますか？",
-        );
-        if (!confirmed) {
-          return createCancelledResult(
-            "SQLiteバックアップからの復元をキャンセルしました。",
-          );
-        }
-
-        const result =
-          await tauriTaskTimerGateway.restoreSqliteBackup(backupDir);
-        clearDetailSelection();
-        await loadSnapshot({ showLoading: false });
-        return {
-          status: "success",
-          message: "SQLiteバックアップから復元しました。",
-          detail: `復元元: ${getPathBasename(result.backupDir)}`,
-        };
-      }),
-    [clearDetailSelection, loadSnapshot, runDataManagementAction],
-  );
-
   const handleCreateJsonExport = useCallback(
     () =>
       runDataManagementAction(async (): Promise<DataManagementActionResult> => {
@@ -1117,11 +1050,18 @@ export function App() {
     [activeView, clearDetailSelection],
   );
 
-  const handleSelectTask = useCallback((taskId: string) => {
-    setSelectedTaskId(taskId);
-    setSelectedSubtaskId(null);
-    setSelectedCalendarTarget(null);
-  }, []);
+  const handleSelectTask = useCallback(
+    (taskId: string) => {
+      if (selectedTaskId === taskId && !selectedSubtaskId) {
+        clearDetailSelection();
+        return;
+      }
+      setSelectedTaskId(taskId);
+      setSelectedSubtaskId(null);
+      setSelectedCalendarTarget(null);
+    },
+    [clearDetailSelection, selectedSubtaskId, selectedTaskId],
+  );
 
   const handleSelectSubtask = useCallback((taskId: string, subtaskId: string) => {
     setSelectedTaskId(taskId);
@@ -1281,11 +1221,7 @@ export function App() {
           onSelectView={handleSelectView}
           onCreateTaskList={handleCreateTaskList}
           onRenameTaskList={handleRenameTaskList}
-          onUpdateTaskListColor={handleUpdateTaskListColor}
           onDeleteTaskList={handleDeleteTaskList}
-          onCreateTag={handleCreateTag}
-          onRenameTag={handleRenameTag}
-          onDeleteTag={handleDeleteTag}
           onToggle={() => setIsNavigationOpen((current) => !current)}
         />
 
@@ -1376,6 +1312,10 @@ export function App() {
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
+                  onUpdateTaskListColor={handleUpdateTaskListColor}
+                  onCreateTag={handleCreateTag}
+                  onRenameTag={handleRenameTag}
+                  onDeleteTag={handleDeleteTag}
                   onAttachTagToTask={handleAttachTagToTask}
                   onDetachTagFromTask={handleDetachTagFromTask}
                 />
@@ -1397,6 +1337,7 @@ export function App() {
                 isMutating={isMutating}
                 pendingTaskActionIds={pendingTaskActionIds}
                 onSelectTask={handleSelectTask}
+                onToggleTaskCompletion={handleToggleTaskCompletion}
                 onChangeTaskStatus={handleChangeTaskStatus}
               />
               {selectedTask ? (
@@ -1441,6 +1382,10 @@ export function App() {
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
+                  onUpdateTaskListColor={handleUpdateTaskListColor}
+                  onCreateTag={handleCreateTag}
+                  onRenameTag={handleRenameTag}
+                  onDeleteTag={handleDeleteTag}
                   onAttachTagToTask={handleAttachTagToTask}
                   onDetachTagFromTask={handleDetachTagFromTask}
                 />
@@ -1514,6 +1459,10 @@ export function App() {
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
+                  onUpdateTaskListColor={handleUpdateTaskListColor}
+                  onCreateTag={handleCreateTag}
+                  onRenameTag={handleRenameTag}
+                  onDeleteTag={handleDeleteTag}
                   onAttachTagToTask={handleAttachTagToTask}
                   onDetachTagFromTask={handleDetachTagFromTask}
                 />
@@ -1528,13 +1477,10 @@ export function App() {
               pomodoroSettings={pomodoroSettings}
               isMutating={isMutating}
               notificationSummary={notificationSummary}
-              notificationFailureHistory={notificationFailureHistory}
               onUpdateDisplayMode={handleUpdateNotificationDisplayMode}
               onUpdateNotificationsEnabled={handleUpdateNotificationsEnabled}
               onUpdatePomodoroSettings={handleUpdatePomodoroSettings}
               onRetryNotifications={handleRetryNotifications}
-              onCreateSqliteBackup={handleCreateSqliteBackup}
-              onRestoreSqliteBackup={handleRestoreSqliteBackup}
               onCreateJsonExport={handleCreateJsonExport}
               onCreateCsvExport={handleCreateCsvExport}
             />

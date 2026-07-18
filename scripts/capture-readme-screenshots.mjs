@@ -76,6 +76,132 @@ try {
   await waitForExpression(
     client,
     sessionId,
+    `(() => {
+      const workspace = document.querySelector(".task-workspace");
+      const panel = document.querySelector(".task-panel");
+      return Boolean(
+        workspace &&
+        panel &&
+        document.querySelector(".detail-list-card") &&
+        document.querySelector(".detail-tag-management") &&
+        Math.abs(workspace.getBoundingClientRect().width - panel.getBoundingClientRect().width) < 2
+      );
+    })()`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".task-row-content")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `!document.querySelector(".task-detail-pane")`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector('button.nav-item[aria-label="カレンダー"]')?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector(".calendar-panel") &&
+      document.querySelector(".calendar-time-cell") &&
+      !document.querySelector(".calendar-add-task-button") &&
+      !document.querySelector(".calendar-cell-add-button")
+    )`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".calendar-time-cell")?.dispatchEvent(
+        new MouseEvent("dblclick", { bubbles: true })
+      )`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(".calendar-create-form"))`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".calendar-create-form-heading .inline-icon-button")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector('button.nav-item[aria-label="設定"]')?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector(".settings-panel") &&
+      document.querySelector(".notification-mode-cards") &&
+      document.querySelector("#export-title") &&
+      !document.querySelector(".notification-history")
+    )`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector('button.nav-item[aria-label="かんばん"]')?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(".kanban-card .task-check-button"))`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector('button.nav-item[aria-label="タスク"]')?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(".task-row-content"))`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".task-row-content")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(".task-detail-pane"))`,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
     `(async () => {
       if (document.fonts?.ready) {
         await document.fonts.ready;
@@ -395,6 +521,7 @@ function buildTauriInvokeMockSource() {
       isFavorite: true,
       plannedStartDate: "2026-07-06",
       dueDate: "2026-07-10",
+      dueTime: "16:00",
       timerTargetSeconds: 5400,
       recurrenceRule: { frequency: "weekly", interval: 1 },
       memo: "レビュー観点を整理し、会議前に共有する。",
@@ -403,6 +530,7 @@ function buildTauriInvokeMockSource() {
       deletedAt: null,
       createdAt: now,
       updatedAt: now,
+      tags: [{ id: "tag-priority", name: "重要" }],
       subtasks: [
         {
           id: "subtask-collect",
@@ -411,6 +539,7 @@ function buildTauriInvokeMockSource() {
           status: "done",
           plannedStartDate: "2026-07-06",
           dueDate: "2026-07-07",
+          dueTime: null,
           timerTargetSeconds: 1800,
           recurrenceRule: null,
           memo: "",
@@ -427,6 +556,7 @@ function buildTauriInvokeMockSource() {
           status: "in_progress",
           plannedStartDate: "2026-07-08",
           dueDate: "2026-07-09",
+          dueTime: "11:00",
           timerTargetSeconds: 2400,
           recurrenceRule: null,
           memo: "",
@@ -446,6 +576,7 @@ function buildTauriInvokeMockSource() {
       isFavorite: false,
       plannedStartDate: "2026-07-09",
       dueDate: "2026-07-10",
+      dueTime: null,
       timerTargetSeconds: 3600,
       recurrenceRule: null,
       memo: "macOSとWindowsでインストール確認を行う。",
@@ -454,6 +585,7 @@ function buildTauriInvokeMockSource() {
       deletedAt: null,
       createdAt: now,
       updatedAt: now,
+      tags: [],
       subtasks: []
     }
   ];
@@ -471,10 +603,29 @@ function buildTauriInvokeMockSource() {
     {
       id: "default",
       name: "タスク",
+      colorToken: "green",
       sortOrder: 0,
       taskCount: 2,
       activeTaskCount: 2,
       completedTaskCount: 0,
+      createdAt: now,
+      updatedAt: now
+    }
+  ];
+  const tags = [
+    {
+      id: "tag-priority",
+      name: "重要",
+      sortOrder: 0,
+      taskCount: 1,
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "tag-review",
+      name: "レビュー",
+      sortOrder: 10,
+      taskCount: 0,
       createdAt: now,
       updatedAt: now
     }
@@ -488,6 +639,7 @@ function buildTauriInvokeMockSource() {
       isFavorite: true,
       plannedStartDate: "2026-07-06",
       dueDate: "2026-07-10",
+      dueTime: "16:00",
       timerTargetSeconds: 5400,
       sortOrder: 10,
       completedAt: null,
@@ -496,7 +648,8 @@ function buildTauriInvokeMockSource() {
       subtaskTotalCount: 2,
       completedSubtaskCount: 1,
       activeTimerTarget: { type: "subtask", id: "subtask-summary" },
-      isTimerActive: true
+      isTimerActive: true,
+      tags: [{ id: "tag-priority", name: "重要" }]
     },
     {
       id: "task-release-check",
@@ -506,6 +659,7 @@ function buildTauriInvokeMockSource() {
       isFavorite: false,
       plannedStartDate: "2026-07-09",
       dueDate: "2026-07-10",
+      dueTime: null,
       timerTargetSeconds: 3600,
       sortOrder: 20,
       completedAt: null,
@@ -514,7 +668,8 @@ function buildTauriInvokeMockSource() {
       subtaskTotalCount: 0,
       completedSubtaskCount: 0,
       activeTimerTarget: null,
-      isTimerActive: false
+      isTimerActive: false,
+      tags: []
     }
   ];
 
@@ -545,7 +700,8 @@ function buildTauriInvokeMockSource() {
           date: addDays(rangeStart, 0),
           time: null,
           marker: "planned_start",
-          status: "in_progress"
+          status: "in_progress",
+          colorToken: "green"
         },
         {
           id: "cal-summary-active",
@@ -555,7 +711,8 @@ function buildTauriInvokeMockSource() {
           date: addDays(rangeStart, 2),
           time: "10:15",
           marker: "active_timer",
-          status: "in_progress"
+          status: "in_progress",
+          colorToken: "green"
         },
         {
           id: "cal-release-due",
@@ -565,19 +722,71 @@ function buildTauriInvokeMockSource() {
           date: addDays(rangeStart, 4),
           time: null,
           marker: "due",
-          status: "todo"
+          status: "todo",
+          colorToken: "green"
         }
       ];
       const commands = {
         health_check: () => "tauri-ready",
         list_tasks: () => clone(tasks),
         list_task_lists: () => clone(taskLists),
+        list_tags: () => clone(tags),
         list_task_rows: () => clone(taskRows),
         list_calendar_items: () => clone(calendarItems),
         list_week_calendar_items: () => clone(calendarItems),
         get_active_timer: () => clone(activeTimer),
+        get_active_pomodoro: () => null,
+        sync_expired_pomodoro: () => ({
+          expiredPomodoro: null,
+          activePomodoro: null,
+          notificationSummary: {
+            attempted: 0,
+            succeeded: 0,
+            failed: 0,
+            lastError: null
+          }
+        }),
+        get_pomodoro_settings: () => ({
+          id: "default",
+          workSeconds: 1500,
+          shortBreakSeconds: 300,
+          longBreakSeconds: 900,
+          cyclesUntilLongBreak: 4,
+          autoStartBreak: false,
+          autoStartNextWork: false,
+          updatedAt: now
+        }),
         get_notification_display_mode: () => "title_only",
         get_notifications_enabled: () => true,
+        get_ui_preferences: () => ({
+          leftPaneOpen: true,
+          lastView: "list",
+          lastTaskListId: "default",
+          calendarViewMode: "week"
+        }),
+        update_ui_preferences: () => ({
+          leftPaneOpen: true,
+          lastView: "list",
+          lastTaskListId: "default",
+          calendarViewMode: "week"
+        }),
+        sync_notifications: () => ({
+          dispatchSummary: {
+            attempted: 0,
+            succeeded: 0,
+            failed: 0,
+            lastError: null
+          },
+          nextSchedule: null
+        }),
+        process_notification_os_registrations: () => ({
+          attempted: 0,
+          registered: 0,
+          cancelled: 0,
+          skipped: 0,
+          failed: 0,
+          lastError: null
+        }),
         dispatch_due_notifications: () => ({
           attempted: 1,
           succeeded: 1,

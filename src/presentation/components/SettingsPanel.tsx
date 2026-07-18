@@ -1,7 +1,6 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import type { NotificationDisplayMode } from "../../domain/notification/types";
 import type {
-  NotificationDeliveryAttempt,
   NotificationDispatchSummary,
   PomodoroSettings,
   PomodoroSettingsDraft,
@@ -13,11 +12,7 @@ export type DataManagementActionResult = {
   detail?: string;
 };
 
-type DataManagementOperation =
-  | "sqlite-backup"
-  | "sqlite-restore"
-  | "json-export"
-  | "csv-export";
+type DataManagementOperation = "json-export" | "csv-export";
 
 type SettingsPanelProps = {
   displayMode: NotificationDisplayMode;
@@ -25,13 +20,10 @@ type SettingsPanelProps = {
   pomodoroSettings: PomodoroSettings | null;
   isMutating: boolean;
   notificationSummary: NotificationDispatchSummary | null;
-  notificationFailureHistory: NotificationDeliveryAttempt[];
   onUpdateDisplayMode(displayMode: NotificationDisplayMode): Promise<boolean>;
   onUpdateNotificationsEnabled(enabled: boolean): Promise<boolean>;
   onUpdatePomodoroSettings(input: PomodoroSettingsDraft): Promise<boolean>;
   onRetryNotifications(): Promise<boolean>;
-  onCreateSqliteBackup(): Promise<DataManagementActionResult>;
-  onRestoreSqliteBackup(): Promise<DataManagementActionResult>;
   onCreateJsonExport(): Promise<DataManagementActionResult>;
   onCreateCsvExport(): Promise<DataManagementActionResult>;
 };
@@ -42,13 +34,10 @@ export function SettingsPanel({
   pomodoroSettings,
   isMutating,
   notificationSummary,
-  notificationFailureHistory,
   onUpdateDisplayMode,
   onUpdateNotificationsEnabled,
   onUpdatePomodoroSettings,
   onRetryNotifications,
-  onCreateSqliteBackup,
-  onRestoreSqliteBackup,
   onCreateJsonExport,
   onCreateCsvExport,
 }: SettingsPanelProps) {
@@ -86,8 +75,8 @@ export function SettingsPanel({
     } catch {
       setDataManagementResult({
         status: "failed",
-        message: "データ管理操作に失敗しました。",
-        detail: "保存先の権限、空き容量、バックアップ形式を確認してください。",
+        message: "エクスポートに失敗しました。",
+        detail: "保存先の権限と空き容量を確認してください。",
       });
     } finally {
       setActiveDataOperation(null);
@@ -154,22 +143,47 @@ export function SettingsPanel({
             </span>
           </label>
 
-          <div className="field-group">
-            <label htmlFor="notification-mode">表示タイプ</label>
-            <select
-              id="notification-mode"
-              value={displayMode}
-              disabled={isMutating}
-              onChange={(event) =>
-                void onUpdateDisplayMode(
-                  event.target.value as NotificationDisplayMode,
-                )
-              }
-            >
-              <option value="title_only">タイトルのみ</option>
-              <option value="generic">汎用メッセージ</option>
-            </select>
-          </div>
+          <fieldset className="notification-mode-group">
+            <legend>表示タイプ</legend>
+            <div className="notification-mode-cards">
+              <label
+                className={`notification-mode-card ${
+                  displayMode === "title_only" ? "is-selected" : ""
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="notification-mode"
+                  value="title_only"
+                  checked={displayMode === "title_only"}
+                  disabled={isMutating}
+                  onChange={() => void onUpdateDisplayMode("title_only")}
+                />
+                <span>
+                  <strong>タイトルのみ</strong>
+                  <small>通知にタスク名を表示します。</small>
+                </span>
+              </label>
+              <label
+                className={`notification-mode-card ${
+                  displayMode === "generic" ? "is-selected" : ""
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="notification-mode"
+                  value="generic"
+                  checked={displayMode === "generic"}
+                  disabled={isMutating}
+                  onChange={() => void onUpdateDisplayMode("generic")}
+                />
+                <span>
+                  <strong>汎用メッセージ</strong>
+                  <small>タスク名を通知に表示しません。</small>
+                </span>
+              </label>
+            </div>
+          </fieldset>
 
           <div className="notification-status">
             <strong>期限到来通知</strong>
@@ -190,60 +204,6 @@ export function SettingsPanel({
           >
             通知を再試行
           </button>
-
-          <div
-            className="notification-history"
-            aria-labelledby="notification-history-title"
-          >
-            <div className="notification-history-heading">
-              <div>
-                <strong id="notification-history-title">通知失敗履歴</strong>
-                <span>失敗が絡む通知の最新20件</span>
-              </div>
-            </div>
-
-            {notificationFailureHistory.length > 0 ? (
-              <ol className="notification-history-list">
-                {notificationFailureHistory.map((attempt) => (
-                  <li
-                    className={`notification-history-item is-${attempt.result}`}
-                    key={attempt.id}
-                  >
-                    <div className="notification-history-item-header">
-                      <span>{formatResult(attempt.result)}</span>
-                      <strong>
-                        {formatTarget(attempt.target.type)} /{" "}
-                        {formatKind(attempt.kind)}
-                      </strong>
-                    </div>
-                    <dl>
-                      <div>
-                        <dt>予定</dt>
-                        <dd>{formatDateTime(attempt.notifyAt)}</dd>
-                      </div>
-                      <div>
-                        <dt>試行</dt>
-                        <dd>
-                          {formatDateTime(attempt.attemptedAt)} /{" "}
-                          {attempt.attemptCount}回目
-                        </dd>
-                      </div>
-                      {attempt.errorMessage ? (
-                        <div>
-                          <dt>理由</dt>
-                          <dd>{attempt.errorMessage}</dd>
-                        </div>
-                      ) : null}
-                    </dl>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="notification-history-empty">
-                現在確認が必要な通知失敗履歴はありません。
-              </p>
-            )}
-          </div>
         </section>
 
         <section
@@ -397,51 +357,21 @@ export function SettingsPanel({
 
         <section
           className="settings-section data-management-section"
-          aria-labelledby="data-management-title"
+          aria-labelledby="export-title"
           aria-busy={isDataManagementBusy}
         >
           <div className="settings-section-heading">
             <div>
-              <h3 id="data-management-title">データ管理</h3>
-              <span>バックアップ、復元、エクスポート</span>
+              <h3 id="export-title">エクスポート</h3>
+              <span>JSONまたはCSVで保存</span>
             </div>
           </div>
 
           <p className="settings-warning">
-            バックアップとエクスポートにはタスク名、メモ、タイマー履歴が含まれる可能性があります。公開IssueやPRへ添付しないでください。
+            エクスポートにはタスク名、メモ、タイマー履歴が含まれる可能性があります。公開IssueやPRへ添付しないでください。
           </p>
 
           <div className="data-action-grid">
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={isDataManagementBusy}
-              onClick={() =>
-                void runDataManagementAction(
-                  "sqlite-backup",
-                  onCreateSqliteBackup,
-                )
-              }
-            >
-              {activeDataOperation === "sqlite-backup"
-                ? "作成中"
-                : "SQLiteバックアップを作成"}
-            </button>
-            <button
-              className="danger-button"
-              type="button"
-              disabled={isDataManagementBusy}
-              onClick={() =>
-                void runDataManagementAction(
-                  "sqlite-restore",
-                  onRestoreSqliteBackup,
-                )
-              }
-            >
-              {activeDataOperation === "sqlite-restore"
-                ? "復元中"
-                : "SQLiteバックアップから復元"}
-            </button>
             <button
               className="secondary-button"
               type="button"
@@ -576,29 +506,4 @@ function formatSummary(
     return "処理対象なし";
   }
   return `処理 ${summary.attempted}件 / 成功 ${summary.succeeded}件 / 失敗 ${summary.failed}件`;
-}
-
-function formatTarget(targetType: NotificationDeliveryAttempt["target"]["type"]) {
-  return targetType === "subtask" ? "サブタスク" : "タスク";
-}
-
-function formatKind(kind: NotificationDeliveryAttempt["kind"]) {
-  return kind === "planned_start" ? "開始予定" : "期限";
-}
-
-function formatResult(result: NotificationDeliveryAttempt["result"]) {
-  return result === "success" ? "成功" : "失敗";
-}
-
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat("ja-JP", {
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
 }
