@@ -9,6 +9,10 @@ on:
       - "src-tauri/src/bin/seed_large_dataset.rs"
       - "src-tauri/src/bin/measure_large_dataset.rs"
       - "src-tauri/migrations/0001_initial.sql"
+      - "src/presentation/**"
+      - "src/application/usecases/contracts.ts"
+      - "scripts/measure-large-ui.mjs"
+      - "scripts/lib/headless-chrome.mjs"
       - "package.json"
       - "package-lock.json"
   workflow_dispatch:
@@ -132,11 +136,48 @@ jobs:
             throw "perf:measure failed with exit code $exitCode."
           }
 
+      - name: Presentation描画を計測
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ([string]::IsNullOrWhiteSpace($env:PERF_PROFILE)) {
+            $env:PERF_PROFILE = "smoke"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:FAIL_ON_WARNING)) {
+            $env:FAIL_ON_WARNING = "true"
+          }
+
+          $uiArgs = @("--profile", $env:PERF_PROFILE)
+          if ($env:FAIL_ON_WARNING -eq "true") {
+            $uiArgs += "--fail-on-warning"
+          }
+
+          $output = & npm run perf:ui -- @uiArgs 2>&1
+          $exitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath "tmp/perf/perf-ui-output.txt"
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Presentation描画計測"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- OS: Windows runner / headless Chrome"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- profile: $env:PERF_PROFILE"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- fail_on_warning: $env:FAIL_ON_WARNING"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```text'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ($output -join [Environment]::NewLine)
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
+
+          if ($exitCode -ne 0) {
+            throw "perf:ui failed with exit code $exitCode."
+          }
+
       - name: 計測ログを保存
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-read-model-measurement
-          path: tmp/perf/perf-measure-output.txt
+          name: windows-large-dataset-measurement
+          path: |
+            tmp/perf/perf-measure-output.txt
+            tmp/perf/perf-ui-output.txt
           if-no-files-found: ignore
           retention-days: 14

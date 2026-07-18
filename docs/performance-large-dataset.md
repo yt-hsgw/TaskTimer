@@ -125,6 +125,32 @@ workflowの制約:
 
 この計測はDB読み取り時間だけを確認する。React描画、Tauri IPC、OS通知権限、実機GPU/ディスク差はWindows実機の手動計測で確認する。
 
+## Presentation描画計測
+
+ヘッドレスChromeへ合成Tauri応答を注入し、実際のReactコンポーネントで主要ビューの操作時間を計測する。
+
+```bash
+npm run perf:ui -- --profile standard --fail-on-warning
+```
+
+| プロファイル | 一覧集計件数 | 描画タスク | サブタスク/タスク | リスト |
+| --- | ---: | ---: | ---: | ---: |
+| `smoke` | 50 | 50 | 4 | 4 |
+| `standard` | 5,000 | 200 | 4 | 12 |
+
+計測対象と既定閾値:
+
+| 対象 | 閾値 |
+| --- | ---: |
+| 初期タスク一覧 | 5,000ms |
+| 今日、お気に入り、右詳細 | 1,000ms |
+| かんばん、週/日カレンダー | 1,500ms |
+| 月カレンダー | 2,000ms |
+
+UIプロファイルを200件までとする理由は、現行Tauri commandの取得上限と一致させるためである。DBに存在する201件目以降へ到達できない問題は #131 でRepository/Applicationページングとして解消する。
+
+この計測はPresentationのDOM構築とビュー切替を確認する。SQLite、Tauri IPC、WebView2、OSウィンドウ、GPU/実機ディスクは含まない。Windows workflowでは、5,000件のRead Model計測と同じジョブで実行し、層ごとの結果を1つのsummaryへ記録する。
+
 ## アプリへの配置
 
 既存DBを必ずバックアップしてから検証DBへ差し替える。実業務データをIssue、PR、Release artifactへ添付しない。
@@ -206,6 +232,7 @@ Read Model計測結果:
 
 | 日時 | OS/端末 | TaskTimer commit | データ規模 | コマンド | WARN件数 | メモ |
 | --- | --- | --- | --- | --- | ---: | --- |
+| 2026-07-18 | Darwin 25.5.0 arm64 / Apple M1 | `5f26529` + #72差分 | standard 5k/20k/50k + active pomodoro 1 | `npm run perf:measure -- --fail-on-warning` | 0 | 最大68ms。`task_rows_all_lists` が最大。 |
 | 2026-07-17 | Darwin 25.5.0 arm64 / Apple M1 | `ac59e7d` + PR差分 | smoke 50/200/500 + active pomodoro 1 | `npm run perf:measure -- --db tmp/perf/tasktimer-smoke.sqlite3 --threshold-ms 100 --fail-on-warning` | 0 | 最大0ms。`active_pomodoro_lookup` は1件/0ms。 |
 | 2026-07-17 | Darwin 25.5.0 arm64 / Apple M1 | `ac59e7d` + PR差分 | standard 5k/20k/50k + active pomodoro 1 | `npm run perf:measure -- --fail-on-warning` | 0 | 最大60ms。`active_pomodoro_lookup` は1件/0ms。Windows GUI描画は未計測。 |
 | 2026-07-16 | Darwin 25.5.0 arm64 / Apple M1 | `dc1114f` + PR差分 | smoke 50/200/500 | `npm run perf:measure -- --db tmp/perf/tasktimer-smoke.sqlite3 --threshold-ms 100 --fail-on-warning` | 0 | 最大0ms。 |
@@ -214,6 +241,13 @@ Read Model計測結果:
 | 2026-07-16 | Darwin 25.5.0 arm64 / Apple M1 | `a3580d9` + PR差分 | standard 5k/20k/50k | `npm run perf:measure -- --fail-on-warning` | 0 | 最大56ms。Windows GUI描画は未計測。 |
 | 2026-07-16 | GitHub-hosted Windows runner / Windows Server 2025 | PR #104 | smoke 50/200/500 | `大量データ性能検証` PR trigger | 0 | 最大1ms。 |
 | 2026-07-16 | GitHub-hosted Windows runner / Windows Server 2025 | `321caed` | standard 5k/20k/50k | `大量データ性能検証` workflow / run `29511423778` / `profile=standard` / `fail_on_warning=true` | 0 | 最大67ms。`calendar_week_2026-07-13` が最大。Windows GUI描画は未計測。 |
+
+Presentation描画計測結果:
+
+| 日時 | OS/ブラウザ | TaskTimer commit | プロファイル | コマンド | WARN件数 | メモ |
+| --- | --- | --- | --- | --- | ---: | --- |
+| 2026-07-18 | Darwin 25.5.0 arm64 / headless Chrome | `5f26529` + #72差分 | 一覧集計5,000件 / 描画200タスク / 800サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 複数回の保守的な記録で最大1,411ms。`initial_task_list` が最大。かんばん974ms、週カレンダー434ms。 |
+| 2026-07-18 | Darwin 25.5.0 arm64 / headless Chrome | `5f26529` + #72差分 | 一覧集計・描画50タスク / 200サブタスク / 4リスト | `npm run perf:ui -- --profile smoke --fail-on-warning` | 0 | 複数回の保守的な記録で最大1,007ms。`initial_task_list` が最大。 |
 
 ## SQL確認
 
@@ -247,6 +281,7 @@ WHERE deleted_at IS NULL
 - 検証データは本番スキーマへ直接投入するが、通常Use Caseのトランザクション境界は変更しない。
 - Read Model計測は検証用binで実行し、Application Use CaseやRepository実装の状態変更境界は変更しない。
 - `perf:seed` は初期マイグレーションSQLを直接使ったあと、UI Read Model用インデックスを検証DBへ作成する。
+- `perf:ui` は合成データだけを使い、実DB、タスク名、メモ、タイマー履歴をブラウザへ渡さない。
 - 生成データは合成文字列のみとし、個人のタスク名、メモ本文、SQLite DBを公開場所へ添付しない。
 - アプリ実行時の外部通信、分析SDK、新しいTauri権限は追加しない。
 - 右詳細ペインのタイマー履歴は、今後表示件数を増やす場合でも上限またはページングを前提にする。
@@ -257,3 +292,5 @@ WHERE deleted_at IS NULL
 - 月カレンダーが表示範囲外の予定まで取得し、月移動のたびに大量描画する。
 - タスク詳細がタイマー履歴を無制限に読み込み、履歴の多いタスクで開けなくなる。
 - 大量DBを実業務DBへ戻し忘れ、検証データで通常運用してしまう。
+- ヘッドレスChromeの結果だけで、Tauri IPCやWindows WebView2の実機性能まで保証したと誤認する。
+- 200件描画が成功したことを、201件目以降へ到達できることと誤認する。

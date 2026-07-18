@@ -21,6 +21,7 @@
     "check:release-target": "node scripts/check-release-target.mjs",
     "perf:measure": "cargo run --manifest-path src-tauri/Cargo.toml --bin measure_large_dataset --",
     "perf:seed": "cargo run --manifest-path src-tauri/Cargo.toml --bin seed_large_dataset --",
+    "perf:ui": "node scripts/measure-large-ui.mjs",
     "preview": "vite preview",
     "screenshots:readme": "node scripts/capture-readme-screenshots.mjs",
     "tauri": "tauri",

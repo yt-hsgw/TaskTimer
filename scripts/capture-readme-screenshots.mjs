@@ -1,9 +1,20 @@
-import { spawn } from "node:child_process";
-import { access, mkdir, rm, writeFile } from "node:fs/promises";
-import net from "node:net";
-import os from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  createCdpClient,
+  getFreePort,
+  makeTempDir,
+  resolveChromePath,
+  rmWithRetry,
+  sleep,
+  startChrome,
+  startVite,
+  waitForChromeWebSocket,
+  waitForExpression,
+  waitForHttp,
+  waitForProcessExit,
+} from "./lib/headless-chrome.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const outputDir = path.join(repoRoot, "docs", "assets", "readme");
@@ -19,10 +30,10 @@ let chromeProcess;
 
 try {
   await mkdir(outputDir, { recursive: true });
-  viteProcess = startVite(vitePort);
+  viteProcess = startVite(repoRoot, vitePort);
   await waitForHttp(`http://127.0.0.1:${vitePort}/`);
 
-  chromeProcess = startChrome(debugPort, userDataDir);
+  chromeProcess = startChrome(chromePath, debugPort, userDataDir);
   const browserWsUrl = await waitForChromeWebSocket(debugPort);
   const client = await createCdpClient(browserWsUrl);
   const { targetId } = await client.send("Target.createTarget", {
@@ -348,274 +359,6 @@ try {
     await waitForProcessExit(viteProcess, 3000);
   }
   await rmWithRetry(userDataDir);
-}
-
-function startVite(port) {
-  const child = spawn(
-    process.execPath,
-    [
-      "node_modules/vite/bin/vite.js",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(port),
-      "--strictPort",
-    ],
-    {
-      cwd: repoRoot,
-      env: { ...process.env, BROWSER: "none" },
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  child.stdout.on("data", (chunk) => process.stdout.write(chunk));
-  child.stderr.on("data", (chunk) => process.stderr.write(chunk));
-  return child;
-}
-
-function startChrome(debugPort, dataDir) {
-  const child = spawn(
-    chromePath,
-    [
-      "--headless=new",
-      "--disable-gpu",
-      "--disable-dev-shm-usage",
-      "--hide-scrollbars",
-      "--no-first-run",
-      "--no-default-browser-check",
-      `--remote-debugging-port=${debugPort}`,
-      `--user-data-dir=${dataDir}`,
-      "about:blank",
-    ],
-    {
-      stdio: ["ignore", "ignore", "pipe"],
-    },
-  );
-  child.stderr.on("data", (chunk) => process.stderr.write(chunk));
-  return child;
-}
-
-async function createCdpClient(wsUrl) {
-  const socket = new WebSocket(wsUrl);
-  const callbacks = new Map();
-  let nextId = 1;
-
-  await new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", reject, { once: true });
-  });
-
-  socket.addEventListener("message", (event) => {
-    const message = JSON.parse(String(event.data));
-    if (!message.id) {
-      return;
-    }
-    const callback = callbacks.get(message.id);
-    if (!callback) {
-      return;
-    }
-    callbacks.delete(message.id);
-    if (message.error) {
-      callback.reject(new Error(message.error.message));
-      return;
-    }
-    callback.resolve(message.result ?? {});
-  });
-
-  return {
-    send(method, params = {}, sessionId) {
-      const id = nextId++;
-      const message = { id, method, params };
-      if (sessionId) {
-        message.sessionId = sessionId;
-      }
-      socket.send(JSON.stringify(message));
-      return new Promise((resolve, reject) => {
-        callbacks.set(id, { resolve, reject });
-      });
-    },
-    close() {
-      socket.close();
-    },
-  };
-}
-
-async function waitForExpression(client, sessionId, expression, timeoutMs = 10000) {
-  const deadline = Date.now() + timeoutMs;
-  let lastError;
-  while (Date.now() < deadline) {
-    try {
-      const result = await client.send(
-        "Runtime.evaluate",
-        {
-          expression,
-          awaitPromise: true,
-          returnByValue: true,
-        },
-        sessionId,
-      );
-      if (result.result?.value) {
-        return;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-    await sleep(250);
-  }
-  throw new Error(`Timed out waiting for page expression. ${lastError ?? ""}`);
-}
-
-async function waitForChromeWebSocket(port) {
-  const endpoint = `http://127.0.0.1:${port}/json/version`;
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(endpoint);
-      if (response.ok) {
-        const version = await response.json();
-        return version.webSocketDebuggerUrl;
-      }
-    } catch {
-      // Keep polling until Chrome exposes the debugging endpoint.
-    }
-    await sleep(200);
-  }
-  throw new Error("Chrome DevTools endpoint did not become available.");
-}
-
-async function waitForHttp(url) {
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) {
-        return;
-      }
-    } catch {
-      // Keep polling until Vite is ready.
-    }
-    await sleep(200);
-  }
-  throw new Error(`Vite server did not become available: ${url}`);
-}
-
-function getFreePort() {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : null;
-      server.close(() => {
-        if (port) {
-          resolve(port);
-          return;
-        }
-        reject(new Error("Could not allocate a free port."));
-      });
-    });
-    server.on("error", reject);
-  });
-}
-
-async function makeTempDir(prefix) {
-  return fsMkTemp(path.join(os.tmpdir(), prefix));
-}
-
-async function fsMkTemp(prefix) {
-  const { mkdtemp } = await import("node:fs/promises");
-  return mkdtemp(prefix);
-}
-
-async function resolveChromePath() {
-  if (process.env.CHROME_PATH) {
-    return process.env.CHROME_PATH;
-  }
-
-  const candidates = [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-  ];
-
-  for (const candidate of candidates) {
-    if (await fileExists(candidate)) {
-      return candidate;
-    }
-  }
-
-  const pathCandidate = await findExecutableOnPath([
-    "google-chrome",
-    "chrome",
-    "chromium",
-    "chromium-browser",
-  ]);
-  if (pathCandidate) {
-    return pathCandidate;
-  }
-
-  throw new Error(
-    "Chrome executable was not found. Set CHROME_PATH to generate README screenshots.",
-  );
-}
-
-async function findExecutableOnPath(names) {
-  const pathDirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
-  const extensions =
-    process.platform === "win32"
-      ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";")
-      : [""];
-
-  for (const dir of pathDirs) {
-    for (const name of names) {
-      for (const extension of extensions) {
-        const candidate = path.join(dir, `${name}${extension}`);
-        if (await fileExists(candidate)) {
-          return candidate;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-async function fileExists(candidate) {
-  try {
-    await access(candidate);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function waitForProcessExit(child, timeoutMs) {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return Promise.resolve();
-  }
-
-  return new Promise((resolve) => {
-    const timeout = setTimeout(resolve, timeoutMs);
-    child.once("exit", () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-  });
-}
-
-async function rmWithRetry(targetPath, attempts = 5) {
-  let lastError;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      await rm(targetPath, { recursive: true, force: true });
-      return;
-    } catch (error) {
-      lastError = error;
-      await sleep(200 * attempt);
-    }
-  }
-  throw lastError;
 }
 
 function buildTauriInvokeMockSource() {
