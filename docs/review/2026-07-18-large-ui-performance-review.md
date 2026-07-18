@@ -11,12 +11,12 @@
 
 ## 判断
 
-フォローアップ付き承認。
+完了承認。
 
 - Windows runnerのSQLite 5,000件計測に、Presentation 200件描画計測を追加する。
 - UI計測は初期表示、今日、お気に入り、かんばん、週/日/月カレンダー、右詳細を対象とする。
 - 200件上限によるデータ欠落は #131 に分離し、本Issueで上限だけを引き上げない。
-- Windows実機のTauri/WebView2確認は、引き続きリリース前の手動ゲートとして残す。
+- Windows実機のTauri/WebView2確認は、性能Issueの完了条件から分離し、リリース前の手動ゲートとして残す。
 
 ## データ境界
 
@@ -59,6 +59,8 @@
 - Presentation smoke: 50タスク、200サブタスク、4リストでWARN 0。複数回の保守的な記録で最大1,007ms。
 - Presentation standard: 一覧集計5,000件、描画200タスク、800サブタスク、12リストでWARN 0。複数回の保守的な記録で最大1,411ms。
 - Windows runner Presentation smoke: WARN 0。最大3,078msで、Chrome起動、PowerShell引数、summary、artifact保存まで成功。
+- Windows runner Presentation standard: 一覧集計5,000件、描画200タスク、800サブタスク、12リストでWARN 0。最大1,893ms。
+- Windows runner SQLite standard: 5,000タスク、20,000サブタスク、50,001タイマーセッションでWARN 0。最大78ms。
 - SQLite standard: 5,000タスク、20,000サブタスク、50,000停止済み履歴でWARN 0。最大68ms。
 - Rust: 全92テスト成功。Clippyは全ターゲット・全機能を警告エラー扱いで成功。
 - Frontend: TypeScript型検査、Vite本番ビルド、READMEスクリーンショット生成に成功。
@@ -66,8 +68,7 @@
 
 ## 残余リスク
 
-- Windows runnerのChrome計測は確認済みだが、標準5,000件集計・200件描画プロファイルは手動workflowで継続確認する。
-- Windows実機のTauri IPC、WebView2、OSウィンドウ操作は未計測であり、#72の手動ゲートとして残る。
+- Windows実機のTauri IPC、WebView2、OSウィンドウを含む標準データ結合計測は未実施であり、端末固有の性能差は残る。通常規模のWindows実機確認は完了済みで、結合計測はリリース前の手動確認で扱う。
 - 201件目以降への到達性は未解消であり、#131を完了するまで大量DBの全タスクをUIから操作できない。
 
 ## 代替案
