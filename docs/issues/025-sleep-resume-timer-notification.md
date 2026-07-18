@@ -133,6 +133,7 @@ Windows実機またはVMで次を確認する。
 
 - `paused_timer_survives_database_reopen_and_excludes_wall_clock_gap` を追加し、一時停止後の長時間経過とDB再接続を経ても、停止前の120秒だけが作業時間として確定することを固定した。
 - `Windows復帰回帰検証` workflowを追加し、Windows向け依存を含むRustテスト全体をPull Requestと手動実行で確認できるようにした。
+- 初回Windows実行で、テスト終了時にSQLite接続を保持したまま一時DBを削除する既存テスト10件がWindowsのファイルロックで失敗した。接続を明示解放してから削除するテスト後処理へ修正した。
 - ローカルではRustテスト95件、Clippy、TypeScript/Vite build、npm監査、実行時プライバシー監査が成功した。
 - 実電源スリープとOS通知表示は自動確認済みと扱わず、Release前手動確認を維持する。
 

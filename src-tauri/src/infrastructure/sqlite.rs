@@ -10808,6 +10808,7 @@ mod tests {
         assert_eq!(stopped.elapsed_seconds, Some(37_800));
         assert!(reopened.get_active_timer().expect("active timer").is_none());
 
+        drop(reopened);
         fs::remove_dir_all(data_dir).expect("cleanup");
     }
 
@@ -10869,6 +10870,7 @@ mod tests {
         assert_eq!(resumed_at, "2026-07-06T10:00:00Z");
         assert!(reopened.get_active_timer().expect("active timer").is_none());
 
+        drop(reopened);
         fs::remove_dir_all(data_dir).expect("cleanup");
     }
 
@@ -11027,6 +11029,7 @@ mod tests {
         assert_eq!(tasks[0].subtasks.len(), 1);
         assert_eq!(tasks[0].subtasks[0].title, "画面に表示");
 
+        drop(reopened);
         fs::remove_dir_all(data_dir).expect("cleanup");
     }
 
@@ -11073,6 +11076,8 @@ mod tests {
             .expect("backup task");
         assert_eq!(copied_title, "バックアップ対象");
 
+        drop(copied);
+        drop(database);
         fs::remove_dir_all(data_dir).expect("cleanup data");
         fs::remove_dir_all(backup_root).expect("cleanup backup");
     }
@@ -11117,6 +11122,7 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].task.title, "復元で残る");
 
+        drop(database);
         fs::remove_dir_all(data_dir).expect("cleanup data");
         fs::remove_dir_all(backup_root).expect("cleanup backup");
     }
@@ -11165,6 +11171,7 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].task.title, "既存DB");
 
+        drop(database);
         fs::remove_dir_all(data_dir).expect("cleanup data");
         fs::remove_dir_all(backup_root).expect("cleanup backup");
     }
@@ -11212,6 +11219,7 @@ mod tests {
             .expect("list current tasks");
         assert_eq!(tasks.len(), 2);
 
+        drop(database);
         fs::remove_dir_all(data_dir).expect("cleanup data");
         fs::remove_dir_all(backup_root).expect("cleanup backup");
     }
@@ -11266,6 +11274,9 @@ mod tests {
             .expect("collect titles");
         assert_eq!(titles, vec!["コミット済み".to_string()]);
 
+        drop(copied);
+        drop(external);
+        drop(database);
         fs::remove_dir_all(data_dir).expect("cleanup data");
         fs::remove_dir_all(backup_root).expect("cleanup backup");
     }
@@ -11365,6 +11376,7 @@ mod tests {
             0
         );
 
+        drop(database);
         fs::remove_dir_all(data_dir).expect("cleanup data");
         fs::remove_dir_all(export_root).expect("cleanup export");
     }
@@ -11473,6 +11485,7 @@ mod tests {
         assert!(task_tags_csv.contains(&task.id));
         assert!(task_tags_csv.contains(&tag.id));
 
+        drop(database);
         fs::remove_dir_all(data_dir).expect("cleanup data");
         fs::remove_dir_all(export_root).expect("cleanup export");
     }
