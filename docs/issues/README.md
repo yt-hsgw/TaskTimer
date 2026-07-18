@@ -21,7 +21,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [013 タイマー一時停止/再開と繰り返し設定を設計・実装する](013-timer-recurrence-detail-extensions.md) / GitHub #30
 - [014 macOS署名と公証を設定する](014-release-macos-signing-notarization.md) / GitHub #24
 - [015 v0.1.0公開判定資料を整える](015-release-v010-readiness.md) / GitHub #20
-- [016 glib advisory監視を自動化する](016-glib-advisory-watch.md) / GitHub #22
+- [016 glib advisory監視を自動化する](016-glib-advisory-watch.md) / GitHub #22（完了）
 - [017 v0.1.0のRelease target検証を追加する](017-release-target-guard.md) / GitHub #20
 - [018 macOS署名・公証preflightを追加する](018-macos-signing-preflight.md) / GitHub #24
 - [019 次の作業リストを現状に合わせて更新する](019-next-actions-refresh.md) / GitHub #20

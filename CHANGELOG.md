@@ -16,6 +16,7 @@
 - 今日ビュー、期限表示、メモプレビュー、ペイン内スクロールを現行READMEと設計資料へ反映。
 - 左ペインでカスタムリストの作成、名称変更、削除ができるようにし、選択中リストでタスクを分類できるように変更。
 - Issue整理として、通知全体ON/OFFの #55 を完了扱いにし、大量データ性能検証 #72 とローカルデータ退避方針 #73 を追加。
+- Linux限定の`glib` advisoryについて、Windows/macOS配布物への非到達を確認し、Release対象ガード、週次監視、ADR 0007を追加。
 
 ## 0.1.0
 
@@ -33,4 +34,4 @@
 - v0.1.0はWindows先行の通常Releaseとして公開済みです。詳細は [Release notes](docs/releases/v0.1.0.md) と [GitHub Release](https://github.com/yt-hsgw/TaskTimer/releases/tag/app-v0.1.0) を確認してください。
 - macOS版はApple署名・公証Secrets登録とGatekeeper確認後に提供します。
 - Windowsコード署名、ストア配布、Linux配布、自動更新はv0.1.0の対象外です。
-- Tauri経由のglib advisoryはIssue #22で追跡し、Linux artifactは配布しません。
+- Tauri経由のglib advisoryはLinux限定依存としてADR 0007でリスク受容し、Linux artifactは配布しません。

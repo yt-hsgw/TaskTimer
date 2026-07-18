@@ -35,6 +35,8 @@ MVPで禁止すること:
 | Integrity failure | データベースマイグレーションはバージョン管理し、テストする。 |
 | SSRF/network misuse | アプリ実行時のネットワークアクセスを設計に含めない。 |
 
+Tauri経由の`glib` advisoryはLinux限定依存であり、Windows/macOSの配布artifactには含まれない。Dependabot alertのリスク受容、Linux非配布、ターゲット別依存検査、再審査条件は [ADR 0007](adr/0007-glib-linux-target-risk-acceptance.md) に従う。
+
 ## バックアップ/エクスポートプライバシー
 
 - SQLiteバックアップ、JSONエクスポート、CSVエクスポートは個人データとして扱う。

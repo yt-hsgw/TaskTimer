@@ -8,7 +8,14 @@ import { fileURLToPath } from "node:url";
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const manifestPath = join(rootDir, "src-tauri", "Cargo.toml");
 const lockPath = join(rootDir, "src-tauri", "Cargo.lock");
+const releasePolicyScript = join(rootDir, "scripts", "check-release-platform-policy.mjs");
 const lockBackupPath = join(tmpdir(), `tasktimer-Cargo.lock.${process.pid}.bak`);
+const targetPolicies = [
+  { target: "x86_64-pc-windows-msvc", shouldContainGlib: false },
+  { target: "aarch64-apple-darwin", shouldContainGlib: false },
+  { target: "x86_64-apple-darwin", shouldContainGlib: false },
+  { target: "x86_64-unknown-linux-gnu", shouldContainGlib: true },
+];
 
 function runCargo(args, options = {}) {
   const result = spawnSync("cargo", args, {
@@ -70,6 +77,14 @@ function main() {
   copyFileSync(lockPath, lockBackupPath);
 
   try {
+    const releasePolicyResult = spawnSync(process.execPath, [releasePolicyScript], {
+      cwd: rootDir,
+      stdio: "inherit",
+    });
+    if (releasePolicyResult.status !== 0) {
+      return releasePolicyResult.status ?? 1;
+    }
+
     console.log("Cargo.lockを一時更新し、Tauri/GTK系の最新resolverでglib advisoryを再評価します。");
     const updateResult = runCargo(["update", "--manifest-path", manifestPath], { stdio: "inherit" });
     if (updateResult.status !== 0) {
@@ -94,6 +109,35 @@ function main() {
     const metadata = JSON.parse(metadataResult.stdout);
     const glibPackages = metadata.packages.filter((pkg) => pkg.name === "glib");
     const vulnerableGlibPackages = glibPackages.filter((pkg) => isVulnerableGlib(pkg.version));
+
+    for (const policy of targetPolicies) {
+      const treeResult = runCargo([
+        "tree",
+        "--manifest-path",
+        manifestPath,
+        "--target",
+        policy.target,
+        "-i",
+        "glib",
+      ]);
+      if (treeResult.status !== 0) {
+        console.error(
+          `::error title=cargo tree failed::${policy.target}の依存グラフを確認できませんでした`,
+        );
+        console.error(treeResult.outputText);
+        return treeResult.status ?? 1;
+      }
+      const containsGlib = /^glib v/m.test(treeResult.stdout ?? "");
+      if (containsGlib !== policy.shouldContainGlib) {
+        console.error(
+          `::error title=unexpected glib target boundary::${policy.target}のglib依存状態がポリシーと一致しません`,
+        );
+        return 1;
+      }
+      console.log(
+        `${policy.target}: glib ${containsGlib ? "あり（Linux限定・未解消）" : "なし"}`,
+      );
+    }
 
     if (glibPackages.length === 0) {
       console.error(
@@ -145,7 +189,7 @@ function main() {
     for (const pkg of vulnerableGlibPackages) {
       console.log(`検出した脆弱対象glib: ${pkg.version}`);
     }
-    console.log("Issue #22を継続追跡し、Linux artifactは配布対象に含めないでください。");
+    console.log("Linuxでは未解消です。Windows/macOS限定配布と週次監視を継続してください。");
     return 0;
   } finally {
     restoreLockfile();

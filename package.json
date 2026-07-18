@@ -17,6 +17,7 @@
     "build": "tsc --noEmit && vite build",
     "audit:runtime-privacy": "node scripts/audit-runtime-privacy.mjs",
     "check:glib-advisory": "node scripts/check-glib-advisory.mjs",
+    "check:release-platform-policy": "node scripts/check-release-platform-policy.mjs",
     "check:macos-signing": "node scripts/check-macos-signing-preflight.mjs",
     "check:release-target": "node scripts/check-release-target.mjs",
     "perf:measure": "cargo run --manifest-path src-tauri/Cargo.toml --bin measure_large_dataset --",

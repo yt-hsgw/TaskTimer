@@ -4,7 +4,7 @@ GitHub Issue: #22
 
 ## 目的
 
-Tauri経由で入っている `glib` advisoryについて、上流依存が修正可能になった時点で見落とさず依存更新PRへ進められる状態にする。
+Tauri経由で入っているLinux限定の `glib` advisoryについて、配布対象OSへの非到達を自動検証し、上流依存が修正可能になった時点で見落とさず依存更新PRへ進められる状態にする。
 
 ## 背景
 
@@ -22,7 +22,10 @@ tauri 2.11.5 -> gtk 0.18.2 -> glib 0.18.5
 
 - `glib` advisoryがまだ上流制約でブロックされているかを確認するスクリプトを追加する。
 - 週次および手動実行のGitHub Actionsで再評価できるようにする。
-- 修正可能になった場合はworkflowを失敗させ、Issue #22の依存更新PR作成を促す。
+- 修正可能になった場合はworkflowを失敗させ、依存更新PRの作成を促す。
+- Windows/macOSの依存グラフへ`glib`が入っていないことを検証する。
+- Release workflowへLinuxまたは未知のartifactターゲットが追加された場合に失敗させる。
+- Dependabot alert #1を配布対象では未使用としてdismissし、判断をADRへ残す。
 - 監視は開発・運用時の通信として扱い、アプリ実行時の外部通信は追加しない。
 
 ## スコープ外
@@ -30,7 +33,7 @@ tauri 2.11.5 -> gtk 0.18.2 -> glib 0.18.5
 - `glib` 0.20.0以上への強制更新。
 - Tauri、GTK、WebKit系依存の互換性を無視したCargo patch。
 - Linux artifactの配布追加。
-- Dependabot alert #1のクローズ。
+- Linux版の安全性保証。
 
 ## 実装方針
 
@@ -39,6 +42,8 @@ tauri 2.11.5 -> gtk 0.18.2 -> glib 0.18.5
 - 脆弱対象の `glib` が残り、かつ `gtk 0.18.2` / `glib ^0.18` による既知ブロックであれば成功扱いにする。
 - 脆弱対象の `glib` が消えた場合、または `glib 0.20.0` 指定が解決できる場合は失敗扱いにする。
 - 失敗は「壊れた」ではなく「依存更新PRへ進める合図」として扱う。
+- `cargo tree --target`でWindows/macOSに`glib`がなく、Linuxだけに存在することを検査する。
+- Release workflow内のJSON matrixを構造として読み、Windows/macOS以外を拒否する。
 
 ## 設計レビュー
 
@@ -54,10 +59,11 @@ tauri 2.11.5 -> gtk 0.18.2 -> glib 0.18.5
 
 ### セキュリティ
 
-- Advisoryを隠さず、Release notesとIssueで影響範囲を追跡する。
+- Advisoryのdismiss理由をADRとRelease notesへ残し、Linuxでは未解消であることを明示する。
 - 監視workflowの権限は `contents: read` のみとする。
 - アプリ実行時の外部通信やTauri権限は追加しない。
-- Linux artifactを追加する場合は、このIssueを解消するまでRelease対象に含めない。
+- Linux artifactを追加する場合はADR 0007を再審査し、`glib` 0.20.0以上へ更新できるまでRelease対象に含めない。
+- リスク受容の詳細は [ADR 0007](../adr/0007-glib-linux-target-risk-acceptance.md) を正とする。
 
 ### スケール
 
@@ -81,11 +87,11 @@ Dependabot alertだけを見て運用する。
 
 不採用理由:
 
-- 現在は既知の未解消alertがあるため、通常のPRチェックを常時失敗させやすい。Issue #22の再評価には、今回の専用監視の方が意図を明確にできる。
+- 現在は既知の未解消alertがあるため、通常のPRチェックを常時失敗させやすい。上流依存の再評価には、今回の専用監視の方が意図を明確にできる。
 
 ## 破綻シナリオ
 
-- 上流依存が修正可能になってもIssue #22が放置される。
+- 上流依存が修正可能になっても依存更新が放置される。
 - 監視workflowの失敗を通常のビルド失敗と誤解し、依存更新PRへ進まない。
 - Linux artifactを追加したのに、glib advisoryをRelease notesへ記載しない。
 - 強制patchでCargo resolverを壊し、TauriのLinux依存が不整合になる。
@@ -96,4 +102,13 @@ Dependabot alertだけを見て運用する。
 - GitHub Actionsから手動または週次でglib advisoryを再評価できる。
 - workflow権限が `contents: read` に限定されている。
 - `Cargo.lock` を変更せずに監視できる。
-- Issue #22は、上流依存が修正可能になるまで継続追跡として残る。
+- Windows/macOSのターゲット別依存グラフに`glib`がない。
+- Release workflowがWindows/macOS以外のartifactを拒否する。
+- Dependabot alert #1のdismiss理由と再審査条件がADRに記録されている。
+- 上流依存の週次監視はIssue完了後も継続する。
+
+## 実装結果
+
+- GitHub #22は配布対象OSの境界とリスク受容を確定して完了する。
+- Dependabot alert #1はWindows/macOS配布物で未使用のため`not_used`としてdismissする。
+- Linuxでのadvisoryは未解消であり、Linux artifact追加時はADR再審査を必須とする。

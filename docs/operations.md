@@ -45,8 +45,8 @@ GitHubをアプリ実行時データの保存先には使わない。
 - Dependabotでnpm、Cargo、GitHub Actionsの更新を追跡する。
 - DependabotやActionsの通信は開発・運用時の通信であり、アプリ実行時の外部通信ではない。
 - 依存更新PRでは、Tauri権限、外部通信、ログ出力、通知プライバシーへの影響を確認する。
-- Tauri経由の `glib` advisoryは、`依存関係アラート監視` ワークフローで週次再評価する。
-- 監視ワークフローが失敗した場合は、上流依存が更新可能になった合図としてIssue #22から依存更新PRへ進む。
+- Tauri経由のLinux限定 `glib` advisoryは [ADR 0007](adr/0007-glib-linux-target-risk-acceptance.md) に従い、Windows/macOS配布物では未使用としてリスク受容する。
+- `依存関係アラート監視` ワークフローで週次再評価し、失敗した場合は上流依存が更新可能になったか、配布対象OSの境界が変わった合図として依存更新または設計再審査へ進む。
 
 ## GitHub Actions
 
@@ -81,6 +81,7 @@ Dependency advisory workflowの制約:
 - アプリ実行時の通信やTauri権限は追加しない。
 - Issueコメントの自動投稿は行わない。
 - 修正可能になった場合はworkflowを失敗させ、依存更新PR作成を促す。
+- Windows/macOSの依存グラフへ`glib`が入った場合、またはRelease matrixへLinux・未知ターゲットが追加された場合は失敗させる。
 
 ## ローカルデータ保護
 
