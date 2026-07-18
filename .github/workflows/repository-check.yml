@@ -63,6 +63,12 @@ jobs:
       - name: Release artifact対象を検証
         run: npm run check:release-platform-policy
 
+      - name: macOS署名・公証設定を検証
+        run: npm run check:macos-signing-config
+
+      - name: Release検証スクリプトをテスト
+        run: npm run test:release-scripts
+
       - name: 必須設計ファイルを確認
         run: |
           test -f README.md
@@ -87,6 +93,7 @@ jobs:
           test -f docs/public-readiness.md
           test -f docs/release-checklist.md
           test -f docs/review/checklist.md
+          test -f docs/review/2026-07-19-macos-release-verification-review.md
           test -f docs/review/2026-07-19-windows-resume-regression-review.md
           test -f docs/adr/0004-public-distribution-license.md
           test -f docs/adr/0007-glib-linux-target-risk-acceptance.md

@@ -80,6 +80,14 @@ npm run check:macos-signing
 
 このコマンドはSecrets値を読み取らず、登録済みSecret名とTauri設定、Entitlements、macOS検証ツールの存在だけを確認する。失敗した場合はmacOS artifactを配布しない。
 
+通常CIではSecretsを必要としない設定検査を実行する。
+
+```bash
+npm run check:macos-signing-config
+```
+
+このコマンドはTauri設定、空のEntitlements、Release workflowの署名・公証経路だけを確認する。Secretsの登録状態と実値の妥当性、成果物の署名状態は保証しない。
+
 ## 自動チェック
 
 GitHub Actionsで以下が成功していることを確認する。
@@ -94,6 +102,8 @@ GitHub Actionsで以下が成功していることを確認する。
 - TypeScript/Vite build。
 - 公開済みReleaseまたはpre-releaseに対するWindows runnerでのインストーラー最低限検証。
 - macOS artifactを含める場合のmacOS署名・公証Secrets検証。
+- Secretsに依存しないmacOS署名・公証設定検査。
+- macOS artifactを含める場合の `.app` と `.dmg` の署名・公証成果物検証。
 - `.env` と `.env.*` の誤コミット検出。
 - DB、鍵、証明書、ログ、個人環境パス、メールアドレスの誤コミット検出。
 - `git diff --check`。
@@ -109,6 +119,8 @@ cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 npm run build
 npm run audit:runtime-privacy
+npm run check:macos-signing-config
+npm run test:release-scripts
 git diff --check
 ```
 
@@ -173,11 +185,12 @@ macOS artifactを配布する場合だけ確認する。
 7. `Windowsインストーラー検証` workflowを対象tagで手動実行し、Windows runner上のサイレントインストール/アンインストールが成功することを確認する。
 8. macOS artifactを配布する場合は、手動実行で `include_macos` を有効にし、`npm run check:macos-signing` と `preflight-macos` が成功することを確認する。
 9. macOS artifactを配布する場合は、macOSジョブで署名・公証が成功していることを確認する。
-10. Windowsでは生成された `nsis` artifactを手動でインストール確認する。macOS artifactを配布する場合は生成された `dmg` も手動確認する。
-11. `docs/releases/<version>.md` の草案をもとに、Release notesへ変更点、既知制限、手動確認結果、外部通信なしの方針を記載する。
-12. Windowsコード署名未設定によるSmartScreenまたは組織ポリシーの警告可能性を既知制限に記載する。
-13. 未解決またはdismiss済みのDependabot alertにリスク受容がある場合は、影響範囲、配布対象、ADRを既知制限に記載する。
-14. 通常Releaseとして扱える確認が完了したら、pre-releaseを解除して公開する。
+10. macOS artifactを配布する場合は、Apple SiliconとIntelの両jobで `macOS署名・公証成果物を検証` が成功していることを確認する。
+11. Windowsでは生成された `nsis` artifactを手動でインストール確認する。macOS artifactを配布する場合は生成された `dmg` も手動確認する。
+12. `docs/releases/<version>.md` の草案をもとに、Release notesへ変更点、既知制限、手動確認結果、外部通信なしの方針を記載する。
+13. Windowsコード署名未設定によるSmartScreenまたは組織ポリシーの警告可能性を既知制限に記載する。
+14. 未解決またはdismiss済みのDependabot alertにリスク受容がある場合は、影響範囲、配布対象、ADRを既知制限に記載する。
+15. 通常Releaseとして扱える確認が完了したら、pre-releaseを解除して公開する。
 
 ローカルでartifactを作る場合:
 
@@ -199,6 +212,7 @@ npm run tauri:build
 - Windows runnerのインストール検証成功を、通知やGUIを含む実機確認完了と誤認する。
 - macOS artifactを含める時に、macOS署名・公証Secretsが未設定でRelease workflowが失敗する。
 - macOS署名・公証preflightの失敗を無視してmacOS artifactを公開する。
+- macOS成果物検証stepの失敗を無視してDraft Releaseを公開する。
 - 公証が失敗したDMGを公開してしまい、Gatekeeper警告により業務利用者へ配布できない。
 - Windows未署名artifactがOSセキュリティ警告により業務利用者へ配布しにくい。
 - 署名済みartifactならSmartScreen警告が必ず消えると誤説明する。

@@ -19,15 +19,18 @@
     "check:glib-advisory": "node scripts/check-glib-advisory.mjs",
     "check:release-platform-policy": "node scripts/check-release-platform-policy.mjs",
     "check:macos-signing": "node scripts/check-macos-signing-preflight.mjs",
+    "check:macos-signing-config": "node scripts/check-macos-signing-preflight.mjs --configuration-only",
     "check:release-target": "node scripts/check-release-target.mjs",
     "perf:measure": "cargo run --manifest-path src-tauri/Cargo.toml --bin measure_large_dataset --",
     "perf:seed": "cargo run --manifest-path src-tauri/Cargo.toml --bin seed_large_dataset --",
     "perf:ui": "node scripts/measure-large-ui.mjs",
     "preview": "vite preview",
     "screenshots:readme": "node scripts/capture-readme-screenshots.mjs",
+    "test:release-scripts": "node --test scripts/verify-macos-release-artifacts.test.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "verify:macos-release-artifacts": "node scripts/verify-macos-release-artifacts.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
