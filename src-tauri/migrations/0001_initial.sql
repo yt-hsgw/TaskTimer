@@ -376,6 +376,15 @@ CREATE INDEX IF NOT EXISTS tasks_calendar_idx
 ON tasks (planned_start_date, due_date)
 WHERE deleted_at IS NULL;
 
+CREATE INDEX IF NOT EXISTS tasks_page_order_idx
+ON tasks (
+  CASE WHEN status = 'done' THEN 1 ELSE 0 END,
+  sort_order,
+  created_at,
+  id
+)
+WHERE deleted_at IS NULL AND status <> 'archived';
+
 CREATE INDEX IF NOT EXISTS subtasks_calendar_idx
 ON subtasks (planned_start_date, due_date)
 WHERE deleted_at IS NULL;

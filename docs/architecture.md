@@ -155,6 +155,7 @@ flowchart LR
 | AttachTagToTask | タスク存在確認、タグ存在確認後に `task_tags` 関連を作成または復活する。 |
 | DetachTagFromTask | タスク存在確認、タグ存在確認後に `task_tags` 関連をソフト削除する。 |
 | ListTasksByView | 選択中リスト、お気に入り、完了セクション、サブタスク進捗を含む一覧Read Modelを取得する。読み取り専用。 |
+| ListTaskPage | リスト、今日、お気に入り、タグ、かんばんのDBスコープをカーソルで取得する。タスクツリー、一覧行、DB総件数、次カーソルを同じページ境界で返す。読み取り専用。 |
 | ToggleTaskFavorite | タスク1件のお気に入り状態を更新する。 |
 | UpdateTaskStatus | かんばん画面から `todo`、`in_progress`、`done` のいずれかへ状態を変更する。`done` へ移動する場合は未完了サブタスク確認を維持し、`todo` / `in_progress` へ戻す場合は `completed_at` を解除する。 |
 | UpdateTaskSchedule | タスクの開始予定日、期限、通知ルールを同一トランザクションで更新する。 |
@@ -210,6 +211,8 @@ GitHub #126では、業務上の進行状態を `board_columns` / `tasks.board_c
 
 Issue 050の作業画面整理はPresentation層の配置変更として扱う。詳細は中央ビューの幅を変えないオーバーレイとし、同じ親タスクを再選択した場合は永続化しない選択状態だけを解除する。設定画面から外したSQLite復元と通知失敗履歴のApplication/Repository境界は削除せず、JSON/CSVエクスポートだけを一般利用者向けUIへ公開する。
 
+GitHub #131では、`ListTaskPage` をタスク一覧読み取りの正とする。スコープは `list`、`today`、`favorites`、`tag`、`board` に限定し、Infrastructureが対象外タスクを除外してからページ化する。カーソルは完了区分、`sort_order`、`created_at`、`id` の昇順で比較し、Application DTOが全構成要素と1〜200件の上限を検証する。Repositoryは同じID集合からタスクツリーと `TaskRowItem` を作り、DB総件数と次カーソルを返す。Presentationの追加読み込みは既存配列へ追記し、更新後の再同期は現在の読み込み件数まで先頭から取り直す。状態変更Use Caseと本番テーブル列は変更せず、カーソル順専用の部分インデックスだけを追加する。
+
 ## Read Model
 
 UI/UX改修では、タスク一覧と詳細で必要な情報量が増えるため、Presentationが全データを走査しないように読み取り専用DTOを分ける。
@@ -219,6 +222,7 @@ UI/UX改修では、タスク一覧と詳細で必要な情報量が増えるた
 | `TaskListNavigationItem` | 左ペイン | リストID、名前、未完了件数、選択状態。 |
 | `TagNavigationItem` | 左ペイン | タグID、名前、対象タスク件数、選択状態。 |
 | `TaskRowItem` | 中央タスク一覧 | タスクID、タイトル、状態、お気に入り、期限有無、期限状態、タグ、サブタスク完了数、サブタスク総数、アクティブタイマー有無。 |
+| `TaskPage` | 中央一覧・かんばんのページ境界 | 同一ID集合のタスクツリーと`TaskRowItem`、DB総件数、次カーソル、今日・お気に入り集計。 |
 | `TaskDetailView` | 詳細オーバーレイ | タスク詳細、タグ、サブタスク、通知設定、繰り返し、タイマー目標、アクティブタイマー状態。 |
 | `WeekCalendarItem` | カレンダー | 対象ID、対象種別、タイトル、親タスク名、日付、表示用時刻、マーカー、状態。 |
 

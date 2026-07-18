@@ -284,9 +284,42 @@ export type TaskRow = {
   tags: TaskTag[];
 };
 
+export type TaskPageScope =
+  | { type: "list"; listId: string }
+  | { type: "today" }
+  | { type: "favorites" }
+  | { type: "tag"; tagId: string }
+  | { type: "board" };
+
+export type TaskPageCursor = {
+  completionBucket: number;
+  sortOrder: number;
+  createdAt: string;
+  id: string;
+};
+
+export type TaskPageRequest = {
+  scope: TaskPageScope;
+  todayDate: string;
+  cursor: TaskPageCursor | null;
+  limit: number;
+};
+
+export type TaskPage = {
+  tasks: TaskWithSubtasks[];
+  rows: TaskRow[];
+  totalCount: number;
+  nextCursor: TaskPageCursor | null;
+  navigationCounts: {
+    todayCount: number;
+    favoriteCount: number;
+  };
+};
+
 export type TaskTimerGateway = {
   healthCheck(): Promise<string>;
   listTasks(): Promise<TaskWithSubtasks[]>;
+  listTaskPage(request: TaskPageRequest): Promise<TaskPage>;
   listTaskLists(): Promise<TaskListItem[]>;
   listBoardColumns(): Promise<BoardColumn[]>;
   listTags(): Promise<TagItem[]>;

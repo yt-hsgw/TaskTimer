@@ -12,13 +12,14 @@ use super::{
         NotificationDeliveryAttemptRecord, NotificationDispatchSummary, NotificationSyncResult,
         PomodoroSettingsRecord, RecurrenceRuleRecord, SqliteBackupManifestRecord,
         SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord, TagRecord, TaskListRecord,
-        TaskRecord, TaskRowRecord, TaskTagRecord, TaskWithSubtasksRecord, UiPreferencesRecord,
-        WeekCalendarItem,
+        TaskNavigationCountsRecord, TaskPageCursor, TaskPageRecord, TaskRecord, TaskRowRecord,
+        TaskTagRecord, TaskWithSubtasksRecord, UiPreferencesRecord, WeekCalendarItem,
     },
     usecases::{
         BoardColumnDraft, DataExportCreateDraft, PomodoroSettingsDraft, RecurrenceRuleDraft,
         SqliteBackupCreateDraft, SqliteBackupRestoreDraft, TagDraft, TaskListDraft,
-        UiPreferencesDraft, WorkItemDraft, WorkItemUpdateDraft, WorkScheduleDraft,
+        TaskPageCursorDraft, TaskPageDraft, TaskPageScopeDraft, UiPreferencesDraft, WorkItemDraft,
+        WorkItemUpdateDraft, WorkScheduleDraft,
     },
 };
 
@@ -510,6 +511,57 @@ pub struct TaskListDto {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum TaskPageScopeRequestDto {
+    List {
+        #[serde(rename = "listId")]
+        list_id: String,
+    },
+    Today,
+    Favorites,
+    Tag {
+        #[serde(rename = "tagId")]
+        tag_id: String,
+    },
+    Board,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskPageCursorDto {
+    pub completion_bucket: i64,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListTaskPageRequestDto {
+    pub scope: TaskPageScopeRequestDto,
+    pub today_date: String,
+    pub cursor: Option<TaskPageCursorDto>,
+    pub limit: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskNavigationCountsDto {
+    pub today_count: i64,
+    pub favorite_count: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskPageDto {
+    pub tasks: Vec<TaskWithSubtasksDto>,
+    pub rows: Vec<TaskRowDto>,
+    pub total_count: i64,
+    pub next_cursor: Option<TaskPageCursorDto>,
+    pub navigation_counts: TaskNavigationCountsDto,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskRowDto {
@@ -653,6 +705,29 @@ pub struct BoardColumnDto {
     pub completed_task_count: i64,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl From<ListTaskPageRequestDto> for TaskPageDraft {
+    fn from(value: ListTaskPageRequestDto) -> Self {
+        let scope = match value.scope {
+            TaskPageScopeRequestDto::List { list_id } => TaskPageScopeDraft::List { list_id },
+            TaskPageScopeRequestDto::Today => TaskPageScopeDraft::Today,
+            TaskPageScopeRequestDto::Favorites => TaskPageScopeDraft::Favorites,
+            TaskPageScopeRequestDto::Tag { tag_id } => TaskPageScopeDraft::Tag { tag_id },
+            TaskPageScopeRequestDto::Board => TaskPageScopeDraft::Board,
+        };
+        Self {
+            scope,
+            today_date: value.today_date,
+            cursor: value.cursor.map(|cursor| TaskPageCursorDraft {
+                completion_bucket: cursor.completion_bucket,
+                sort_order: cursor.sort_order,
+                created_at: cursor.created_at,
+                id: cursor.id,
+            }),
+            limit: value.limit,
+        }
+    }
 }
 
 impl TryFrom<UpdateNotificationDisplayModeRequestDto> for NotificationDisplayMode {
@@ -1016,6 +1091,38 @@ impl From<TaskListRecord> for TaskListDto {
             completed_task_count: value.completed_task_count,
             created_at: value.created_at,
             updated_at: value.updated_at,
+        }
+    }
+}
+
+impl From<TaskPageCursor> for TaskPageCursorDto {
+    fn from(value: TaskPageCursor) -> Self {
+        Self {
+            completion_bucket: value.completion_bucket,
+            sort_order: value.sort_order,
+            created_at: value.created_at,
+            id: value.id,
+        }
+    }
+}
+
+impl From<TaskNavigationCountsRecord> for TaskNavigationCountsDto {
+    fn from(value: TaskNavigationCountsRecord) -> Self {
+        Self {
+            today_count: value.today_count,
+            favorite_count: value.favorite_count,
+        }
+    }
+}
+
+impl From<TaskPageRecord> for TaskPageDto {
+    fn from(value: TaskPageRecord) -> Self {
+        Self {
+            tasks: value.tasks.into_iter().map(Into::into).collect(),
+            rows: value.rows.into_iter().map(Into::into).collect(),
+            total_count: value.total_count,
+            next_cursor: value.next_cursor.map(Into::into),
+            navigation_counts: value.navigation_counts.into(),
         }
     }
 }

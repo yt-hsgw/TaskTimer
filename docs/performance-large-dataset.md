@@ -114,8 +114,8 @@ workflowの制約:
 | `task_lists_with_counts` | 左ペインのリスト件数集計。 |
 | `board_columns_with_lifecycle_counts` | かんばん列ごとの進行中/完了件数集計。 |
 | `initial_task_tree_200` | 起動時に詳細選択へ使う上限付きタスクツリー取得。 |
+| `task_page_traverse_all` | 200件カーソルを反復し、全タスクへ重複・欠落なく到達できることを確認する。 |
 | `task_rows_default_list` | 標準リストの中央一覧Read Model。 |
-| `task_rows_all_lists` | 今日/お気に入りなど横断ビューへ影響する一覧Read Model。 |
 | `calendar_week_2026-07-13` | 週カレンダー範囲取得。 |
 | `calendar_month_2026-07` | 月カレンダー範囲取得。 |
 | `active_timer_lookup` | 単一アクティブタイマー復元。 |
@@ -133,21 +133,22 @@ workflowの制約:
 npm run perf:ui -- --profile standard --fail-on-warning
 ```
 
-| プロファイル | 一覧集計件数 | 描画タスク | サブタスク/タスク | リスト |
+| プロファイル | ページ対象タスク | 初期描画 | サブタスク/タスク | リスト |
 | --- | ---: | ---: | ---: | ---: |
 | `smoke` | 50 | 50 | 4 | 4 |
-| `standard` | 5,000 | 200 | 4 | 12 |
+| `standard` | 401 | 200 | 4 | 12 |
 
 計測対象と既定閾値:
 
 | 対象 | 閾値 |
 | --- | ---: |
 | 初期タスク一覧 | 5,000ms |
+| 追加200件の読み込み | 1,500ms |
 | 今日、お気に入り、右詳細 | 1,000ms |
 | かんばん、週/日カレンダー | 1,500ms |
 | 月カレンダー | 2,000ms |
 
-UIプロファイルを200件までとする理由は、現行Tauri commandの取得上限と一致させるためである。DBに存在する201件目以降へ到達できない問題は #131 でRepository/Applicationページングとして解消する。
+標準UIプロファイルは401件を用意し、初期200件と追加200件を分けて描画する。追加読み込み後も選択中タスク、サブタスク展開、詳細表示が維持されることを完了条件に含める。SQLite側は別計測で5,000件を最後までカーソル巡回し、UI側はDOM負荷を1回200件に制限する。
 
 この計測はPresentationのDOM構築とビュー切替を確認する。SQLite、Tauri IPC、WebView2、OSウィンドウ、GPU/実機ディスクは含まない。Windows workflowでは、5,000件のRead Model計測と同じジョブで実行し、層ごとの結果を1つのsummaryへ記録する。
 
@@ -214,6 +215,7 @@ flowchart TD
 | 月カレンダー | 月表示へ切替、前後月へ移動 | 2秒以内に操作可能 |
 | 右詳細ペイン | タスク、サブタスクを選択する | 1秒以内に詳細が表示される |
 | サブタスク展開 | サブタスクありタスクを展開/折りたたみ | 1秒以内に反応する |
+| 追加読み込み | 201件目以降を読み込む | 1.5秒以内、選択・展開・詳細表示を維持 |
 
 DB読み取りの期待値:
 
@@ -232,6 +234,7 @@ Read Model計測結果:
 
 | 日時 | OS/端末 | TaskTimer commit | データ規模 | コマンド | WARN件数 | メモ |
 | --- | --- | --- | --- | --- | ---: | --- |
+| 2026-07-18 | Darwin 25.5.0 arm64 / Apple M1 | #131作業ブランチ | standard 5k/20k/50k + active timer 1 + active pomodoro 1 | `npm run perf:measure -- --fail-on-warning` | 0 | 最大207ms。`task_page_traverse_all` は5,000件/107ms、重複・欠落なし。 |
 | 2026-07-18 | GitHub-hosted Windows runner / Windows Server 2025 | `7def678` | standard 5k/20k/50k + active timer 1 + active pomodoro 1 | `大量データ性能検証` workflow / run `29647070007` / `profile=standard` / `fail_on_warning=true` | 0 | 最大78ms。`calendar_week_2026-07-13` が最大。 |
 | 2026-07-18 | Darwin 25.5.0 arm64 / Apple M1 | `5f26529` + #72差分 | standard 5k/20k/50k + active pomodoro 1 | `npm run perf:measure -- --fail-on-warning` | 0 | 最大68ms。`task_rows_all_lists` が最大。 |
 | 2026-07-17 | Darwin 25.5.0 arm64 / Apple M1 | `ac59e7d` + PR差分 | smoke 50/200/500 + active pomodoro 1 | `npm run perf:measure -- --db tmp/perf/tasktimer-smoke.sqlite3 --threshold-ms 100 --fail-on-warning` | 0 | 最大0ms。`active_pomodoro_lookup` は1件/0ms。 |
@@ -247,6 +250,7 @@ Presentation描画計測結果:
 
 | 日時 | OS/ブラウザ | TaskTimer commit | プロファイル | コマンド | WARN件数 | メモ |
 | --- | --- | --- | --- | --- | ---: | --- |
+| 2026-07-18 | Darwin 25.5.0 arm64 / headless Chrome | #131作業ブランチ | ページ対象401タスク / 初期200 + 追加200 / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 最大1,337ms。追加読み込み971ms、選択・展開・詳細・スクロール位置を維持。 |
 | 2026-07-18 | GitHub-hosted Windows runner / headless Chrome | `7def678` | 一覧集計5,000件 / 描画200タスク / 800サブタスク / 12リスト | `大量データ性能検証` workflow / run `29647070007` / `profile=standard` / `fail_on_warning=true` | 0 | 最大1,893ms。初期一覧1,893ms、かんばん284ms、週カレンダー233ms、右詳細353ms。 |
 | 2026-07-18 | GitHub-hosted Windows runner / headless Chrome | PR #132 | 一覧集計・描画50タスク / 200サブタスク / 4リスト | `大量データ性能検証` PR trigger | 0 | 最大3,078ms。`initial_task_list` が最大。かんばん192ms、週カレンダー142ms、右詳細200ms。 |
 | 2026-07-18 | Darwin 25.5.0 arm64 / headless Chrome | `5f26529` + #72差分 | 一覧集計5,000件 / 描画200タスク / 800サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 複数回の保守的な記録で最大1,411ms。`initial_task_list` が最大。かんばん974ms、週カレンダー434ms。 |

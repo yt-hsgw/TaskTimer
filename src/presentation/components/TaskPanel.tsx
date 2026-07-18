@@ -18,12 +18,16 @@ type TaskPanelProps = {
   isLoading: boolean;
   isMutating: boolean;
   isCreatingTaskPending: boolean;
+  isLoadingMore: boolean;
+  totalTaskCount: number;
+  hasMoreTasks: boolean;
   pendingTaskActionIds: ReadonlySet<string>;
   onSelectTask(taskId: string): void;
   onSelectSubtask(taskId: string, subtaskId: string): void;
   onCreateTask(input: WorkItemDraft): Promise<boolean>;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
+  onLoadMoreTasks(): Promise<void>;
 };
 
 const statusLabels: Record<Task["status"], string> = {
@@ -45,12 +49,16 @@ export function TaskPanel({
   isLoading,
   isMutating,
   isCreatingTaskPending,
+  isLoadingMore,
+  totalTaskCount,
+  hasMoreTasks,
   pendingTaskActionIds,
   onSelectTask,
   onSelectSubtask,
   onCreateTask,
   onToggleTaskCompletion,
   onToggleTaskFavorite,
+  onLoadMoreTasks,
 }: TaskPanelProps) {
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [isCompletedOpen, setIsCompletedOpen] = useState(true);
@@ -136,7 +144,13 @@ export function TaskPanel({
           <h2 id="task-panel-title">{title}</h2>
         </div>
         <div className="panel-heading-actions">
-          <span className="task-count-badge">{taskRows.length}</span>
+          <span
+            className="task-count-badge"
+            aria-label={`タスク総件数 ${totalTaskCount}件`}
+            title={`読み込み済み ${taskRows.length}件`}
+          >
+            {totalTaskCount}
+          </span>
           {showTaskForm ? (
             <button
               className="task-add-button"
@@ -296,6 +310,20 @@ export function TaskPanel({
               </div>
             ) : null}
           </section>
+        ) : null}
+
+        {hasMoreTasks ? (
+          <button
+            className="secondary-button task-load-more"
+            type="button"
+            disabled={isMutating || isLoadingMore}
+            onClick={() => void onLoadMoreTasks()}
+          >
+            {isLoadingMore ? "読み込み中..." : "さらに読み込む"}
+            <span>
+              {taskRows.length} / {totalTaskCount}
+            </span>
+          </button>
         ) : null}
       </div>
     </section>

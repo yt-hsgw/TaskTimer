@@ -20,6 +20,8 @@ import type {
   TaskTag,
   TaskTimerGateway,
   TaskListItem,
+  TaskPage,
+  TaskPageRequest,
   TaskRow,
   TaskWithSubtasks,
   TaskListDraft,
@@ -37,6 +39,8 @@ import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
 export const tauriTaskTimerGateway: TaskTimerGateway = {
   healthCheck: () => invoke<string>("health_check"),
   listTasks: () => invoke<TaskWithSubtasks[]>("list_tasks"),
+  listTaskPage: (request: TaskPageRequest) =>
+    invoke<TaskPage>("list_task_page", { request }),
   listTaskLists: () => invoke<TaskListItem[]>("list_task_lists"),
   listBoardColumns: () => invoke<BoardColumn[]>("list_board_columns"),
   listTags: () => invoke<TagItem[]>("list_tags"),

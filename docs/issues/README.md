@@ -58,7 +58,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [050 作業画面の操作配置と表示密度を整理する](050-ui-workspace-polish.md)
 - [051 かんばんをドラッグ操作とカスタム状態へ拡張する](051-kanban-custom-workflow.md) / GitHub #126
 - [052 カレンダー項目を期間表示し端のドラッグで調整する](052-calendar-duration-resize.md) / GitHub #127
-- [053 タスク一覧の200件上限をページングで解消する](053-task-list-pagination.md) / GitHub #131
+- [053 タスク一覧の200件上限をページングで解消する](053-task-list-pagination.md) / GitHub #131（完了）
 
 ## 運用
 

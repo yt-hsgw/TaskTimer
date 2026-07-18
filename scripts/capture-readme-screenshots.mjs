@@ -606,6 +606,55 @@ function buildTauriInvokeMockSource() {
     ].join("-");
   }
 
+  function taskPage(request = {}) {
+    const scope = request.scope ?? { type: "board" };
+    const scopedTasks = tasks.filter((task) => {
+      if (scope.type === "list") {
+        return task.listId === scope.listId;
+      }
+      if (scope.type === "today") {
+        return task.dueDate === request.todayDate ||
+          task.subtasks.some((subtask) => subtask.dueDate === request.todayDate);
+      }
+      if (scope.type === "favorites") {
+        return task.isFavorite;
+      }
+      if (scope.type === "tag") {
+        return task.tags.some((tag) => tag.id === scope.tagId);
+      }
+      return true;
+    });
+    const cursorIndex = request.cursor
+      ? scopedTasks.findIndex((task) => task.id === request.cursor.id)
+      : -1;
+    const startIndex = cursorIndex >= 0 ? cursorIndex + 1 : 0;
+    const limit = Math.max(1, Math.min(Number(request.limit ?? 200), 200));
+    const pageTasks = scopedTasks.slice(startIndex, startIndex + limit);
+    const pageTaskIds = new Set(pageTasks.map((task) => task.id));
+    const pageRows = taskRows.filter((row) => pageTaskIds.has(row.id));
+    const hasMore = startIndex + pageTasks.length < scopedTasks.length;
+    const lastTask = pageTasks.at(-1);
+    return {
+      tasks: clone(pageTasks),
+      rows: clone(pageRows),
+      totalCount: scopedTasks.length,
+      nextCursor: hasMore && lastTask ? {
+        completionBucket: lastTask.status === "done" ? 1 : 0,
+        sortOrder: lastTask.sortOrder,
+        createdAt: lastTask.createdAt,
+        id: lastTask.id
+      } : null,
+      navigationCounts: {
+        todayCount: tasks.filter((task) =>
+          task.status !== "done" &&
+          (task.dueDate === request.todayDate ||
+            task.subtasks.some((subtask) => subtask.dueDate === request.todayDate))
+        ).length,
+        favoriteCount: tasks.filter((task) => task.isFavorite).length
+      }
+    };
+  }
+
   window.__TAURI_INTERNALS__ = {
     invoke(command, args = {}) {
       const rangeStart = args.startDate ?? args.weekStartDate ?? "2026-07-06";
@@ -670,6 +719,7 @@ function buildTauriInvokeMockSource() {
       const commands = {
         health_check: () => "tauri-ready",
         list_tasks: () => clone(tasks),
+        list_task_page: () => taskPage(args.request),
         list_task_lists: () => clone(taskLists),
         list_board_columns: () => clone(boardColumns),
         list_tags: () => clone(tags),

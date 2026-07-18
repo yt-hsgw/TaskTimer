@@ -15,6 +15,7 @@ use crate::domain::{
     },
     timer::WorkTargetRef,
 };
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 use super::{
     clock::Clock,
@@ -34,7 +35,8 @@ use super::{
         PomodoroSettingsRecord, PomodoroSettingsUpdate, RecurrenceRuleInput, RepositoryResult,
         SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore,
         SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord, TagRepository, TagUpdate,
-        TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskRecord,
+        TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskPageCursor,
+        TaskPageQuery, TaskPageRecord, TaskPageScope, TaskReadRepository, TaskRecord,
         TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository,
         UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate,
         WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
@@ -50,6 +52,7 @@ const OS_REGISTRATION_ID_MAX_CHARS: usize = 256;
 const TIMER_TARGET_MAX_SECONDS: i64 = 60 * 60 * 24 * 30;
 const RECURRENCE_INTERVAL_MAX: i64 = 365;
 const LOCAL_PATH_MAX_CHARS: usize = 4096;
+const TASK_PAGE_MAX_LIMIT: i64 = 200;
 
 const UI_VIEW_LIST: &str = "list";
 const UI_VIEW_TODAY: &str = "today";
@@ -90,6 +93,31 @@ pub struct WorkScheduleDraft {
     pub end_date: String,
     pub end_time: Option<String>,
     pub is_all_day: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskPageScopeDraft {
+    List { list_id: String },
+    Today,
+    Favorites,
+    Tag { tag_id: String },
+    Board,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskPageCursorDraft {
+    pub completion_bucket: i64,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskPageDraft {
+    pub scope: TaskPageScopeDraft,
+    pub today_date: String,
+    pub cursor: Option<TaskPageCursorDraft>,
+    pub limit: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +188,39 @@ pub fn create_task(
     draft: WorkItemDraft,
 ) -> RepositoryResult<TaskRecord> {
     repository.create_task(validate_work_item_draft(draft, clock.now_utc_iso8601())?)
+}
+
+pub fn list_task_page(
+    repository: &impl TaskReadRepository,
+    draft: TaskPageDraft,
+) -> RepositoryResult<TaskPageRecord> {
+    if !(1..=TASK_PAGE_MAX_LIMIT).contains(&draft.limit) {
+        return Err(format!(
+            "ページ件数は1以上{TASK_PAGE_MAX_LIMIT}以下で指定してください"
+        ));
+    }
+
+    let today_date = validate_optional_date(Some(&draft.today_date), "今日の日付")?
+        .ok_or_else(|| "今日の日付は必須です".to_string())?;
+    let scope = match draft.scope {
+        TaskPageScopeDraft::List { list_id } => {
+            TaskPageScope::List(validate_identifier(&list_id, "リストID")?)
+        }
+        TaskPageScopeDraft::Today => TaskPageScope::Today,
+        TaskPageScopeDraft::Favorites => TaskPageScope::Favorites,
+        TaskPageScopeDraft::Tag { tag_id } => {
+            TaskPageScope::Tag(validate_identifier(&tag_id, "タグID")?)
+        }
+        TaskPageScopeDraft::Board => TaskPageScope::Board,
+    };
+    let cursor = draft.cursor.map(validate_task_page_cursor).transpose()?;
+
+    repository.list_task_page(TaskPageQuery {
+        scope,
+        today_date,
+        cursor,
+        limit: draft.limit,
+    })
 }
 
 pub fn create_scheduled_task(
@@ -1196,6 +1257,25 @@ fn validate_identifier(value: &str, field_label: &str) -> RepositoryResult<Strin
         return Err(format!("{field_label}は128文字以内で入力してください"));
     }
     Ok(trimmed.to_string())
+}
+
+fn validate_task_page_cursor(draft: TaskPageCursorDraft) -> RepositoryResult<TaskPageCursor> {
+    if !matches!(draft.completion_bucket, 0 | 1) {
+        return Err("カーソルの完了区分が不正です".to_string());
+    }
+    let created_at = draft.created_at.trim();
+    if created_at.is_empty() || created_at.chars().count() > 64 {
+        return Err("カーソルの作成日時が不正です".to_string());
+    }
+    OffsetDateTime::parse(created_at, &Rfc3339)
+        .map_err(|_| "カーソルの作成日時がRFC 3339形式ではありません".to_string())?;
+
+    Ok(TaskPageCursor {
+        completion_bucket: draft.completion_bucket,
+        sort_order: draft.sort_order,
+        created_at: created_at.to_string(),
+        id: validate_identifier(&draft.id, "カーソルのタスクID")?,
+    })
 }
 
 fn validate_work_target_ref(target: WorkTargetRef) -> RepositoryResult<WorkTargetRef> {
