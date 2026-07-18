@@ -32,6 +32,9 @@ type KanbanBoardProps = {
   selectedTaskId: string | null;
   isLoading: boolean;
   isMutating: boolean;
+  isLoadingMore: boolean;
+  totalTaskCount: number;
+  hasMoreTasks: boolean;
   pendingTaskActionIds: ReadonlySet<string>;
   onSelectTask(taskId: string): void;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
@@ -40,6 +43,7 @@ type KanbanBoardProps = {
   onReorderColumns(orderedColumnIds: string[]): Promise<boolean>;
   onDeleteColumn(columnId: string, moveTasksToColumnId: string): Promise<boolean>;
   onMoveTask(taskId: string, boardColumnId: string): Promise<boolean>;
+  onLoadMoreTasks(): Promise<void>;
 };
 
 const columnDragId = (columnId: string) => `column:${columnId}`;
@@ -53,6 +57,9 @@ export function KanbanBoard({
   selectedTaskId,
   isLoading,
   isMutating,
+  isLoadingMore,
+  totalTaskCount,
+  hasMoreTasks,
   pendingTaskActionIds,
   onSelectTask,
   onToggleTaskCompletion,
@@ -61,6 +68,7 @@ export function KanbanBoard({
   onReorderColumns,
   onDeleteColumn,
   onMoveTask,
+  onLoadMoreTasks,
 }: KanbanBoardProps) {
   const [isCreatingColumn, setIsCreatingColumn] = useState(false);
   const [newColumnTitle, setNewColumnTitle] = useState("");
@@ -173,7 +181,13 @@ export function KanbanBoard({
           <h2 id="kanban-title">状態別ビュー</h2>
         </div>
         <div className="kanban-heading-actions">
-          <span className="task-count-badge">{taskRows.length}</span>
+          <span
+            className="task-count-badge"
+            aria-label={`タスク総件数 ${totalTaskCount}件`}
+            title={`読み込み済み ${taskRows.length}件`}
+          >
+            {totalTaskCount}
+          </span>
           <button
             className="icon-button"
             type="button"
@@ -254,6 +268,22 @@ export function KanbanBoard({
           </div>
         </SortableContext>
       </DndContext>
+
+      {hasMoreTasks ? (
+        <div className="kanban-load-more">
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={isMutating || isLoadingMore}
+            onClick={() => void onLoadMoreTasks()}
+          >
+            {isLoadingMore ? "読み込み中..." : "さらに読み込む"}
+            <span>
+              {taskRows.length} / {totalTaskCount}
+            </span>
+          </button>
+        </div>
+      ) : null}
 
       {pendingDeleteColumn ? (
         <div className="kanban-dialog-backdrop">
@@ -416,7 +446,12 @@ function SortableKanbanColumn({
             <Pencil aria-hidden="true" size={13} />
           </button>
         )}
-        <span className="kanban-column-count">{activeRows.length}</span>
+        <span
+          className="kanban-column-count"
+          title={`読み込み済み ${activeRows.length}件`}
+        >
+          {column.activeTaskCount}
+        </span>
         <button
           className="kanban-column-delete"
           type="button"
@@ -454,13 +489,20 @@ function SortableKanbanColumn({
             ))}
           </div>
 
-          {completedRows.length > 0 ? (
+          {column.completedTaskCount > 0 ? (
             <details className="kanban-completed-section">
               <summary>
                 <span>完了</span>
-                <span>{completedRows.length}</span>
+                <span title={`読み込み済み ${completedRows.length}件`}>
+                  {column.completedTaskCount}
+                </span>
               </summary>
               <div className="kanban-completed-list">
+                {completedRows.length === 0 ? (
+                  <p className="kanban-empty">
+                    完了タスクを表示するには、続きを読み込んでください。
+                  </p>
+                ) : null}
                 {completedRows.map((row) => (
                   <SortableKanbanCard
                     key={row.id}

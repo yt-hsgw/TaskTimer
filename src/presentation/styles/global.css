@@ -673,6 +673,21 @@ button {
   padding-bottom: 14px;
 }
 
+.task-load-more {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+  justify-self: center;
+  margin-top: 6px;
+}
+
+.task-load-more span,
+.kanban-load-more span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .task-row-group {
   display: grid;
   gap: 4px;
@@ -687,6 +702,19 @@ button {
   overflow-x: auto;
   overflow-y: hidden;
   padding-bottom: 4px;
+}
+
+.kanban-load-more {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  padding-top: 8px;
+}
+
+.kanban-load-more button {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
 }
 
 .kanban-heading-actions,

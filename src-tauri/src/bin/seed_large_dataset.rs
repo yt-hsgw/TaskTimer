@@ -415,6 +415,15 @@ fn create_performance_indexes(connection: &Connection) -> Result<(), Box<dyn Err
         ON tasks (is_favorite, sort_order, created_at)
         WHERE deleted_at IS NULL AND is_favorite = 1;
 
+        CREATE INDEX IF NOT EXISTS tasks_page_order_idx
+        ON tasks (
+          CASE WHEN status = 'done' THEN 1 ELSE 0 END,
+          sort_order,
+          created_at,
+          id
+        )
+        WHERE deleted_at IS NULL AND status <> 'archived';
+
         CREATE INDEX IF NOT EXISTS tasks_due_time_idx
         ON tasks (due_date, due_time)
         WHERE deleted_at IS NULL;

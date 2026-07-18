@@ -12,6 +12,9 @@ import type {
   TagItem,
   TaskListColorToken,
   TaskListItem,
+  TaskPage,
+  TaskPageCursor,
+  TaskPageScope,
   TaskRow,
   TaskWithSubtasks,
   UiPreferences,
@@ -43,12 +46,30 @@ type LoadSnapshotOptions = {
   showLoading?: boolean;
 };
 
+type TaskPageViewState = {
+  scopeKey: string;
+  loadedCount: number;
+  totalCount: number;
+  nextCursor: TaskPageCursor | null;
+};
+
 const NOTIFICATION_SCHEDULER_MAX_TIMEOUT_MS = 60_000;
 const NOTIFICATION_SCHEDULER_DUE_DELAY_MS = 500;
+const TASK_PAGE_SIZE = 200;
 
 export function App() {
   const [tasks, setTasks] = useState<TaskWithSubtasks[]>([]);
   const [taskRows, setTaskRows] = useState<TaskRow[]>([]);
+  const [taskPageState, setTaskPageState] = useState<TaskPageViewState>({
+    scopeKey: "",
+    loadedCount: 0,
+    totalCount: 0,
+    nextCursor: null,
+  });
+  const [taskNavigationCounts, setTaskNavigationCounts] = useState({
+    todayCount: 0,
+    favoriteCount: 0,
+  });
   const [taskLists, setTaskLists] = useState<TaskListItem[]>([]);
   const [boardColumns, setBoardColumns] = useState<BoardColumn[]>([]);
   const [tags, setTags] = useState<TagItem[]>([]);
@@ -86,6 +107,7 @@ export function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isMutating, setIsMutating] = useState(false);
   const [isCreatingTaskPending, setIsCreatingTaskPending] = useState(false);
+  const [isLoadingMoreTasks, setIsLoadingMoreTasks] = useState(false);
   const [pendingTaskActionIds, setPendingTaskActionIds] = useState<
     ReadonlySet<string>
   >(new Set());
@@ -95,27 +117,21 @@ export function App() {
     lastSyncedAt: Date.now(),
   });
   const lastPersistedUiPreferencesRef = useRef<string | null>(null);
+  const taskPageStateRef = useRef(taskPageState);
+  const snapshotRequestIdRef = useRef(0);
+  const snapshotInFlightRef = useRef(false);
+  const loadMoreRequestIdRef = useRef(0);
 
-  const favoriteCount = useMemo(
-    () => tasks.filter((task) => task.isFavorite).length,
-    [tasks],
-  );
+  const favoriteCount = taskNavigationCounts.favoriteCount;
   const todayDate = getTodayDateInputValue();
-  const todayTaskIds = useMemo(
-    () =>
-      new Set(
-        tasks
-          .filter((task) => isTaskDueOnDate(task, todayDate))
-          .map((task) => task.id),
-      ),
-    [tasks, todayDate],
+  const todayCount = taskNavigationCounts.todayCount;
+  const taskPageScope = useMemo(
+    () => taskPageScopeFromView(activeView),
+    [activeView],
   );
-  const todayCount = useMemo(
-    () =>
-      tasks.filter(
-        (task) => todayTaskIds.has(task.id) && task.status !== "done",
-      ).length,
-    [tasks, todayTaskIds],
+  const taskPageScopeKey = useMemo(
+    () => serializeTaskPageScope(taskPageScope, todayDate),
+    [taskPageScope, todayDate],
   );
 
   const activeTaskList = useMemo(() => {
@@ -137,41 +153,8 @@ export function App() {
     [calendarAnchorDate, calendarViewMode],
   );
 
-  const visibleTasks = useMemo(() => {
-    if (activeView.kind === "today") {
-      return tasks.filter((task) => todayTaskIds.has(task.id));
-    }
-    if (activeView.kind === "favorites") {
-      return tasks.filter((task) => task.isFavorite);
-    }
-    if (activeView.kind === "tag") {
-      return tasks.filter((task) =>
-        task.tags.some((tag) => tag.id === activeView.tagId),
-      );
-    }
-    if (activeView.kind === "list") {
-      return tasks.filter((task) => task.listId === activeView.listId);
-    }
-    return tasks;
-  }, [activeView, tasks, todayTaskIds]);
-
-  const visibleTaskRows = useMemo(() => {
-    if (activeView.kind === "today") {
-      return taskRows.filter((task) => todayTaskIds.has(task.id));
-    }
-    if (activeView.kind === "favorites") {
-      return taskRows.filter((task) => task.isFavorite);
-    }
-    if (activeView.kind === "tag") {
-      return taskRows.filter((task) =>
-        task.tags.some((tag) => tag.id === activeView.tagId),
-      );
-    }
-    if (activeView.kind === "list") {
-      return taskRows.filter((task) => task.listId === activeView.listId);
-    }
-    return taskRows;
-  }, [activeView, taskRows, todayTaskIds]);
+  const visibleTasks = tasks;
+  const visibleTaskRows = taskRows;
 
   const selectedTask = useMemo(() => {
     if (!selectedTaskId) {
@@ -190,35 +173,40 @@ export function App() {
     );
   }, [selectedSubtaskId, selectedTask]);
 
-  const loadSnapshot = useCallback(async (options?: LoadSnapshotOptions) => {
-    const showLoading = options?.showLoading ?? true;
-    if (showLoading) {
-      setIsLoading(true);
-    }
-    setErrorMessage(null);
+  const loadSnapshot = useCallback(
+    async (options?: LoadSnapshotOptions) => {
+      const showLoading = options?.showLoading ?? true;
+      const requestId = ++snapshotRequestIdRef.current;
+      snapshotInFlightRef.current = true;
+      loadMoreRequestIdRef.current += 1;
+      const currentPageState = taskPageStateRef.current;
+      const targetTaskCount =
+        currentPageState.scopeKey === taskPageScopeKey
+          ? Math.max(currentPageState.loadedCount, TASK_PAGE_SIZE)
+          : TASK_PAGE_SIZE;
+      if (showLoading) {
+        setIsLoading(true);
+      }
+      setIsLoadingMoreTasks(false);
+      setErrorMessage(null);
 
-    try {
-      await tauriTaskTimerGateway.healthCheck();
-      const pomodoroSyncResult =
-        await tauriTaskTimerGateway.syncExpiredPomodoro();
-      const listId =
-        activeView.kind === "list" ? activeView.listId : undefined;
-      const [
-        nextTasks,
-        nextTaskRows,
-        nextTaskLists,
-        nextBoardColumns,
-        nextTags,
-        nextItems,
-        nextActiveTimer,
-        nextActivePomodoro,
-        nextPomodoroSettings,
-        nextDisplayMode,
-        nextNotificationsEnabled,
-      ] =
-        await Promise.all([
-          tauriTaskTimerGateway.listTasks(),
-          tauriTaskTimerGateway.listTaskRows(listId),
+      try {
+        await tauriTaskTimerGateway.healthCheck();
+        const pomodoroSyncResult =
+          await tauriTaskTimerGateway.syncExpiredPomodoro();
+        const [
+          nextTaskPage,
+          nextTaskLists,
+          nextBoardColumns,
+          nextTags,
+          nextItems,
+          nextActiveTimer,
+          nextActivePomodoro,
+          nextPomodoroSettings,
+          nextDisplayMode,
+          nextNotificationsEnabled,
+        ] = await Promise.all([
+          loadTaskPageWindow(taskPageScope, todayDate, targetTaskCount),
           tauriTaskTimerGateway.listTaskLists(),
           tauriTaskTimerGateway.listBoardColumns(),
           tauriTaskTimerGateway.listTags(),
@@ -233,36 +221,62 @@ export function App() {
           tauriTaskTimerGateway.getNotificationsEnabled(),
         ]);
 
-      setTasks(nextTasks);
-      setTaskRows(nextTaskRows);
-      setTaskLists(nextTaskLists);
-      setBoardColumns(nextBoardColumns);
-      setTags(nextTags);
-      setItems(nextItems);
-      setActiveTimer(nextActiveTimer);
-      setActivePomodoro(nextActivePomodoro);
-      setPomodoroSettings(nextPomodoroSettings);
-      setDisplayMode(nextDisplayMode);
-      setNotificationsEnabled(nextNotificationsEnabled);
-      const notificationSyncResult =
-        await tauriTaskTimerGateway.syncNotifications();
-      await tauriTaskTimerGateway.processNativeNotificationRegistrations();
-      setNotificationSummary(
-        combineNotificationSummaries(
-          pomodoroSyncResult.notificationSummary,
-          notificationSyncResult.dispatchSummary,
-        ),
-      );
-      setNextNotificationSchedule(notificationSyncResult.nextSchedule);
-    } catch (error) {
-      setNextNotificationSchedule(null);
-      setErrorMessage(toErrorMessage(error));
-    } finally {
-      if (showLoading) {
-        setIsLoading(false);
+        if (requestId !== snapshotRequestIdRef.current) {
+          return;
+        }
+        const nextPageState = createTaskPageViewState(
+          taskPageScopeKey,
+          nextTaskPage,
+        );
+        taskPageStateRef.current = nextPageState;
+        setTasks(nextTaskPage.tasks);
+        setTaskRows(nextTaskPage.rows);
+        setTaskPageState(nextPageState);
+        setTaskNavigationCounts(nextTaskPage.navigationCounts);
+        setTaskLists(nextTaskLists);
+        setBoardColumns(nextBoardColumns);
+        setTags(nextTags);
+        setItems(nextItems);
+        setActiveTimer(nextActiveTimer);
+        setActivePomodoro(nextActivePomodoro);
+        setPomodoroSettings(nextPomodoroSettings);
+        setDisplayMode(nextDisplayMode);
+        setNotificationsEnabled(nextNotificationsEnabled);
+        const notificationSyncResult =
+          await tauriTaskTimerGateway.syncNotifications();
+        await tauriTaskTimerGateway.processNativeNotificationRegistrations();
+        if (requestId !== snapshotRequestIdRef.current) {
+          return;
+        }
+        setNotificationSummary(
+          combineNotificationSummaries(
+            pomodoroSyncResult.notificationSummary,
+            notificationSyncResult.dispatchSummary,
+          ),
+        );
+        setNextNotificationSchedule(notificationSyncResult.nextSchedule);
+      } catch (error) {
+        if (requestId === snapshotRequestIdRef.current) {
+          setNextNotificationSchedule(null);
+          setErrorMessage(toErrorMessage(error));
+        }
+      } finally {
+        if (requestId === snapshotRequestIdRef.current) {
+          snapshotInFlightRef.current = false;
+          if (showLoading) {
+            setIsLoading(false);
+          }
+        }
       }
-    }
-  }, [activeView, calendarRange.endDate, calendarRange.startDate]);
+    },
+    [
+      calendarRange.endDate,
+      calendarRange.startDate,
+      taskPageScope,
+      taskPageScopeKey,
+      todayDate,
+    ],
+  );
 
   useEffect(() => {
     let isCancelled = false;
@@ -485,6 +499,59 @@ export function App() {
     setSelectedSubtaskId(null);
     setSelectedCalendarTarget(null);
   }, []);
+
+  const handleLoadMoreTasks = useCallback(async () => {
+    const currentPageState = taskPageStateRef.current;
+    if (
+      isLoadingMoreTasks ||
+      snapshotInFlightRef.current ||
+      currentPageState.scopeKey !== taskPageScopeKey ||
+      !currentPageState.nextCursor
+    ) {
+      return;
+    }
+
+    const requestId = ++loadMoreRequestIdRef.current;
+    setIsLoadingMoreTasks(true);
+    setErrorMessage(null);
+    try {
+      const nextPage = await tauriTaskTimerGateway.listTaskPage({
+        scope: taskPageScope,
+        todayDate,
+        cursor: currentPageState.nextCursor,
+        limit: TASK_PAGE_SIZE,
+      });
+      if (
+        requestId !== loadMoreRequestIdRef.current ||
+        taskPageStateRef.current.scopeKey !== taskPageScopeKey
+      ) {
+        return;
+      }
+
+      setTasks((current) => appendUniqueById(current, nextPage.tasks));
+      setTaskRows((current) => appendUniqueById(current, nextPage.rows));
+      const nextPageState: TaskPageViewState = {
+        scopeKey: taskPageScopeKey,
+        loadedCount: Math.min(
+          currentPageState.loadedCount + nextPage.rows.length,
+          nextPage.totalCount,
+        ),
+        totalCount: nextPage.totalCount,
+        nextCursor: nextPage.nextCursor,
+      };
+      taskPageStateRef.current = nextPageState;
+      setTaskPageState(nextPageState);
+      setTaskNavigationCounts(nextPage.navigationCounts);
+    } catch (error) {
+      if (requestId === loadMoreRequestIdRef.current) {
+        setErrorMessage(toErrorMessage(error));
+      }
+    } finally {
+      if (requestId === loadMoreRequestIdRef.current) {
+        setIsLoadingMoreTasks(false);
+      }
+    }
+  }, [isLoadingMoreTasks, taskPageScope, taskPageScopeKey, todayDate]);
 
   const runMutation = useCallback(
     async (operation: () => Promise<string | void>) => {
@@ -1310,6 +1377,9 @@ export function App() {
                 isLoading={isLoading}
                 isMutating={isMutating}
                 isCreatingTaskPending={isCreatingTaskPending}
+                isLoadingMore={isLoadingMoreTasks}
+                totalTaskCount={taskPageState.totalCount}
+                hasMoreTasks={taskPageState.nextCursor !== null}
                 pendingTaskActionIds={pendingTaskActionIds}
                 selectedSubtaskId={selectedSubtaskId}
                 onSelectTask={handleSelectTask}
@@ -1317,6 +1387,7 @@ export function App() {
                 onCreateTask={handleCreateTask}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
                 onToggleTaskFavorite={handleToggleTaskFavorite}
+                onLoadMoreTasks={handleLoadMoreTasks}
               />
               {selectedTask ? (
                 <TaskDetailPane
@@ -1384,6 +1455,9 @@ export function App() {
                 selectedTaskId={selectedTaskId}
                 isLoading={isLoading}
                 isMutating={isMutating}
+                isLoadingMore={isLoadingMoreTasks}
+                totalTaskCount={taskPageState.totalCount}
+                hasMoreTasks={taskPageState.nextCursor !== null}
                 pendingTaskActionIds={pendingTaskActionIds}
                 onSelectTask={handleSelectTask}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
@@ -1392,6 +1466,7 @@ export function App() {
                 onReorderColumns={handleReorderBoardColumns}
                 onDeleteColumn={handleDeleteBoardColumn}
                 onMoveTask={handleMoveTaskToBoardColumn}
+                onLoadMoreTasks={handleLoadMoreTasks}
               />
               {selectedTask ? (
                 <TaskDetailPane
@@ -1605,11 +1680,82 @@ function normalizeTaskListId(value: string) {
   return trimmed ? trimmed : DEFAULT_TASK_LIST_ID;
 }
 
-function isTaskDueOnDate(task: TaskWithSubtasks, date: string) {
-  return (
-    task.dueDate === date ||
-    task.subtasks.some((subtask) => subtask.dueDate === date)
-  );
+function taskPageScopeFromView(view: AppView): TaskPageScope {
+  if (view.kind === "list") {
+    return { type: "list", listId: view.listId };
+  }
+  if (view.kind === "today") {
+    return { type: "today" };
+  }
+  if (view.kind === "favorites") {
+    return { type: "favorites" };
+  }
+  if (view.kind === "tag") {
+    return { type: "tag", tagId: view.tagId };
+  }
+  return { type: "board" };
+}
+
+function serializeTaskPageScope(scope: TaskPageScope, todayDate: string) {
+  return JSON.stringify({ scope, todayDate });
+}
+
+async function loadTaskPageWindow(
+  scope: TaskPageScope,
+  todayDate: string,
+  targetTaskCount: number,
+): Promise<TaskPage> {
+  let tasks: TaskWithSubtasks[] = [];
+  let rows: TaskRow[] = [];
+  let cursor: TaskPageCursor | null = null;
+  let lastPage: TaskPage | null = null;
+
+  do {
+    const remainingCount = Math.max(1, targetTaskCount - rows.length);
+    const page = await tauriTaskTimerGateway.listTaskPage({
+      scope,
+      todayDate,
+      cursor,
+      limit: Math.min(TASK_PAGE_SIZE, remainingCount),
+    });
+    tasks = appendUniqueById(tasks, page.tasks);
+    rows = appendUniqueById(rows, page.rows);
+    cursor = page.nextCursor;
+    lastPage = page;
+  } while (rows.length < targetTaskCount && cursor);
+
+  if (!lastPage) {
+    throw new Error("タスクページを取得できませんでした。");
+  }
+  return {
+    ...lastPage,
+    tasks,
+    rows,
+    nextCursor: cursor,
+  };
+}
+
+function createTaskPageViewState(
+  scopeKey: string,
+  page: TaskPage,
+): TaskPageViewState {
+  return {
+    scopeKey,
+    loadedCount: page.rows.length,
+    totalCount: page.totalCount,
+    nextCursor: page.nextCursor,
+  };
+}
+
+function appendUniqueById<T extends { id: string }>(
+  current: T[],
+  incoming: T[],
+) {
+  const existingIds = new Set(current.map((item) => item.id));
+  return [
+    ...current,
+    ...incoming.filter((item) => !existingIds.has(item.id)),
+  ];
 }
 
 function toRecurrenceRuleDraft(

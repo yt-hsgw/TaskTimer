@@ -32,8 +32,9 @@ use crate::{
         SqliteBackupCreate, SqliteBackupManifestRecord, SqliteBackupRecord, SqliteBackupRepository,
         SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord,
         TagRepository, TagUpdate, TaskListCommandRepository, TaskListCreate, TaskListRecord,
-        TaskListUpdate, TaskReadRepository, TaskRecord, TaskRowRecord, TaskStatusUpdate,
-        TaskTagRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
+        TaskListUpdate, TaskNavigationCountsRecord, TaskPageCursor, TaskPageQuery, TaskPageRecord,
+        TaskReadRepository, TaskRecord, TaskRowRecord, TaskStatusUpdate, TaskTagRecord,
+        TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
         UiPreferenceRepository, UiPreferencesRecord, UiPreferencesUpdate, WeekCalendarItem,
         WorkItemCreate, WorkItemUpdate, WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
@@ -1028,6 +1029,14 @@ impl PomodoroRepository for SqliteDatabase {
 }
 
 impl TaskReadRepository for SqliteDatabase {
+    fn list_task_page(&self, query: TaskPageQuery) -> RepositoryResult<TaskPageRecord> {
+        if !(1..=200).contains(&query.limit) {
+            return Err("ページ件数は1以上200以下で指定してください".to_string());
+        }
+
+        self.with_connection(|connection| select_task_page(connection, &query))
+    }
+
     fn list_tasks_with_subtasks(
         &self,
         limit: i64,
@@ -4195,6 +4204,383 @@ fn normalize_calendar_view_mode(value: Option<&String>) -> String {
     }
 }
 
+fn select_task_page(
+    connection: &Connection,
+    query: &TaskPageQuery,
+) -> RepositoryResult<TaskPageRecord> {
+    let mut tasks = select_task_page_tasks(connection, query)?;
+    let has_more = tasks.len() > query.limit as usize;
+    if has_more {
+        tasks.truncate(query.limit as usize);
+    }
+    let next_cursor = has_more.then(|| {
+        let task = tasks.last().expect("ページ上限は1以上");
+        TaskPageCursor {
+            completion_bucket: i64::from(task.status == WorkStatus::Done),
+            sort_order: task.sort_order,
+            created_at: task.created_at.clone(),
+            id: task.id.clone(),
+        }
+    });
+    let task_ids = tasks.iter().map(|task| task.id.clone()).collect::<Vec<_>>();
+    let subtasks = select_subtasks_for_task_ids(connection, &task_ids)?;
+    let rows = select_task_rows_by_ids(connection, &task_ids)?;
+
+    Ok(TaskPageRecord {
+        tasks: build_task_tree(tasks, subtasks),
+        rows,
+        total_count: select_task_page_count(connection, query)?,
+        next_cursor,
+        navigation_counts: select_task_navigation_counts(connection, &query.today_date)?,
+    })
+}
+
+fn select_task_page_tasks(
+    connection: &Connection,
+    query: &TaskPageQuery,
+) -> RepositoryResult<Vec<TaskRecord>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT tasks.id,
+                   tasks.list_id,
+                   tasks.title,
+                   tasks.status,
+                   tasks.is_favorite,
+                   tasks.planned_start_date,
+                   tasks.due_date,
+                   tasks.due_time,
+                   tasks.timer_target_seconds,
+                   tasks.memo,
+                   tasks.sort_order,
+                   tasks.completed_at,
+                   tasks.deleted_at,
+                   tasks.created_at,
+                   tasks.updated_at,
+                   recurrence_rules.id AS recurrence_rule_id,
+                   recurrence_rules.target_type AS recurrence_target_type,
+                   recurrence_rules.target_id AS recurrence_target_id,
+                   recurrence_rules.frequency AS recurrence_frequency,
+                   recurrence_rules.interval AS recurrence_interval,
+                   recurrence_rules.deleted_at AS recurrence_deleted_at,
+                   recurrence_rules.created_at AS recurrence_created_at,
+                   recurrence_rules.updated_at AS recurrence_updated_at
+            FROM tasks
+            LEFT JOIN recurrence_rules
+              ON recurrence_rules.target_type = 'task'
+             AND recurrence_rules.target_id = tasks.id
+             AND recurrence_rules.deleted_at IS NULL
+            WHERE tasks.deleted_at IS NULL
+              AND tasks.status <> 'archived'
+              AND (
+                (?1 = 'list' AND tasks.list_id = ?2)
+                OR (?1 = 'today' AND (
+                  tasks.due_date = ?4
+                  OR EXISTS (
+                    SELECT 1
+                    FROM subtasks
+                    WHERE subtasks.task_id = tasks.id
+                      AND subtasks.deleted_at IS NULL
+                      AND subtasks.due_date = ?4
+                  )
+                ))
+                OR (?1 = 'favorites' AND tasks.is_favorite = 1)
+                OR (?1 = 'tag' AND EXISTS (
+                  SELECT 1
+                  FROM task_tags
+                  INNER JOIN tags
+                    ON tags.id = task_tags.tag_id
+                   AND tags.deleted_at IS NULL
+                  WHERE task_tags.task_id = tasks.id
+                    AND task_tags.tag_id = ?3
+                    AND task_tags.deleted_at IS NULL
+                ))
+                OR ?1 = 'board'
+              )
+              AND (
+                ?5 IS NULL
+                OR CASE WHEN tasks.status = 'done' THEN 1 ELSE 0 END > ?5
+                OR (
+                  CASE WHEN tasks.status = 'done' THEN 1 ELSE 0 END = ?5
+                  AND tasks.sort_order > ?6
+                )
+                OR (
+                  CASE WHEN tasks.status = 'done' THEN 1 ELSE 0 END = ?5
+                  AND tasks.sort_order = ?6
+                  AND tasks.created_at > ?7
+                )
+                OR (
+                  CASE WHEN tasks.status = 'done' THEN 1 ELSE 0 END = ?5
+                  AND tasks.sort_order = ?6
+                  AND tasks.created_at = ?7
+                  AND tasks.id > ?8
+                )
+              )
+            ORDER BY CASE WHEN tasks.status = 'done' THEN 1 ELSE 0 END ASC,
+                     tasks.sort_order ASC,
+                     tasks.created_at ASC,
+                     tasks.id ASC
+            LIMIT ?9
+            ",
+        )
+        .map_err(|error| format!("タスクページクエリを準備できません: {error}"))?;
+
+    let cursor_completion = query.cursor.as_ref().map(|cursor| cursor.completion_bucket);
+    let cursor_sort_order = query.cursor.as_ref().map(|cursor| cursor.sort_order);
+    let cursor_created_at = query
+        .cursor
+        .as_ref()
+        .map(|cursor| cursor.created_at.as_str());
+    let cursor_id = query.cursor.as_ref().map(|cursor| cursor.id.as_str());
+    let rows = statement
+        .query_map(
+            params![
+                query.scope.as_str(),
+                query.scope.list_id(),
+                query.scope.tag_id(),
+                query.today_date,
+                cursor_completion,
+                cursor_sort_order,
+                cursor_created_at,
+                cursor_id,
+                query.limit + 1,
+            ],
+            map_task_row,
+        )
+        .map_err(|error| format!("タスクページを取得できません: {error}"))?;
+
+    let mut tasks = rows
+        .map(|row| row.map_err(|error| format!("タスクページ行を読めません: {error}")))
+        .collect::<RepositoryResult<Vec<_>>>()?;
+    attach_tags_to_tasks(connection, &mut tasks)?;
+    Ok(tasks)
+}
+
+fn select_task_page_count(connection: &Connection, query: &TaskPageQuery) -> RepositoryResult<i64> {
+    connection
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM tasks
+            WHERE tasks.deleted_at IS NULL
+              AND tasks.status <> 'archived'
+              AND (
+                (?1 = 'list' AND tasks.list_id = ?2)
+                OR (?1 = 'today' AND (
+                  tasks.due_date = ?4
+                  OR EXISTS (
+                    SELECT 1
+                    FROM subtasks
+                    WHERE subtasks.task_id = tasks.id
+                      AND subtasks.deleted_at IS NULL
+                      AND subtasks.due_date = ?4
+                  )
+                ))
+                OR (?1 = 'favorites' AND tasks.is_favorite = 1)
+                OR (?1 = 'tag' AND EXISTS (
+                  SELECT 1
+                  FROM task_tags
+                  INNER JOIN tags
+                    ON tags.id = task_tags.tag_id
+                   AND tags.deleted_at IS NULL
+                  WHERE task_tags.task_id = tasks.id
+                    AND task_tags.tag_id = ?3
+                    AND task_tags.deleted_at IS NULL
+                ))
+                OR ?1 = 'board'
+              )
+            ",
+            params![
+                query.scope.as_str(),
+                query.scope.list_id(),
+                query.scope.tag_id(),
+                query.today_date,
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("タスクページ総件数を取得できません: {error}"))
+}
+
+fn select_task_navigation_counts(
+    connection: &Connection,
+    today_date: &str,
+) -> RepositoryResult<TaskNavigationCountsRecord> {
+    connection
+        .query_row(
+            "
+            SELECT COALESCE(SUM(CASE
+                     WHEN tasks.status <> 'done'
+                      AND (
+                        tasks.due_date = ?1
+                        OR EXISTS (
+                          SELECT 1
+                          FROM subtasks
+                          WHERE subtasks.task_id = tasks.id
+                            AND subtasks.deleted_at IS NULL
+                            AND subtasks.due_date = ?1
+                        )
+                      )
+                     THEN 1 ELSE 0 END), 0) AS today_count,
+                   COALESCE(SUM(CASE WHEN tasks.is_favorite = 1 THEN 1 ELSE 0 END), 0)
+                     AS favorite_count
+            FROM tasks
+            WHERE tasks.deleted_at IS NULL
+              AND tasks.status <> 'archived'
+            ",
+            params![today_date],
+            |row| {
+                Ok(TaskNavigationCountsRecord {
+                    today_count: row.get(0)?,
+                    favorite_count: row.get(1)?,
+                })
+            },
+        )
+        .map_err(|error| format!("タスクナビゲーション件数を取得できません: {error}"))
+}
+
+fn select_task_rows_by_ids(
+    connection: &Connection,
+    task_ids: &[String],
+) -> RepositoryResult<Vec<TaskRowRecord>> {
+    if task_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = (1..=task_ids.len())
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "
+        WITH active_timer AS (
+          SELECT timer_sessions.target_type,
+                 timer_sessions.target_id,
+                 subtasks.task_id AS parent_task_id
+          FROM timer_sessions
+          LEFT JOIN subtasks
+            ON timer_sessions.target_type = 'subtask'
+           AND timer_sessions.target_id = subtasks.id
+           AND subtasks.deleted_at IS NULL
+          WHERE timer_sessions.stopped_at IS NULL
+            AND timer_sessions.deleted_at IS NULL
+          LIMIT 1
+        )
+        SELECT tasks.id,
+               tasks.list_id,
+               COALESCE(tasks.board_column_id, 'board-todo') AS board_column_id,
+               tasks.title,
+               tasks.status,
+               tasks.is_favorite,
+               tasks.planned_start_date,
+               tasks.due_date,
+               tasks.due_time,
+               tasks.timer_target_seconds,
+               tasks.sort_order,
+               tasks.completed_at,
+               tasks.created_at,
+               tasks.updated_at,
+               COUNT(subtasks.id) AS subtask_total_count,
+               COALESCE(SUM(CASE WHEN subtasks.status = 'done' THEN 1 ELSE 0 END), 0)
+                 AS completed_subtask_count,
+               active_timer.target_type AS active_target_type,
+               active_timer.target_id AS active_target_id
+        FROM tasks
+        LEFT JOIN subtasks
+          ON subtasks.task_id = tasks.id
+         AND subtasks.deleted_at IS NULL
+        LEFT JOIN active_timer
+          ON (
+            active_timer.target_type = 'task'
+            AND active_timer.target_id = tasks.id
+          )
+          OR (
+            active_timer.target_type = 'subtask'
+            AND active_timer.parent_task_id = tasks.id
+          )
+        WHERE tasks.id IN ({placeholders})
+        GROUP BY tasks.id,
+                 tasks.list_id,
+                 tasks.board_column_id,
+                 tasks.title,
+                 tasks.status,
+                 tasks.is_favorite,
+                 tasks.planned_start_date,
+                 tasks.due_date,
+                 tasks.due_time,
+                 tasks.timer_target_seconds,
+                 tasks.sort_order,
+                 tasks.completed_at,
+                 tasks.created_at,
+                 tasks.updated_at,
+                 active_timer.target_type,
+                 active_timer.target_id
+        ORDER BY CASE WHEN tasks.status = 'done' THEN 1 ELSE 0 END ASC,
+                 tasks.sort_order ASC,
+                 tasks.created_at ASC,
+                 tasks.id ASC
+        "
+    );
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| format!("タスクページ行クエリを準備できません: {error}"))?;
+    let rows = statement
+        .query_map(params_from_iter(task_ids.iter()), map_task_read_model_row)
+        .map_err(|error| format!("タスクページ行を取得できません: {error}"))?;
+    let mut task_rows = rows
+        .map(|row| row.map_err(|error| format!("タスクページ行を読めません: {error}")))
+        .collect::<RepositoryResult<Vec<_>>>()?;
+    attach_tags_to_task_rows(connection, &mut task_rows)?;
+    Ok(task_rows)
+}
+
+fn select_subtasks_for_task_ids(
+    connection: &Connection,
+    task_ids: &[String],
+) -> RepositoryResult<Vec<SubtaskRecord>> {
+    if task_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = (1..=task_ids.len())
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "
+        SELECT subtasks.id, subtasks.task_id, subtasks.title, subtasks.status,
+               subtasks.planned_start_date, subtasks.due_date,
+               subtasks.due_time, subtasks.timer_target_seconds, subtasks.memo,
+               subtasks.sort_order, subtasks.completed_at, subtasks.deleted_at,
+               subtasks.created_at, subtasks.updated_at,
+               recurrence_rules.id AS recurrence_rule_id,
+               recurrence_rules.target_type AS recurrence_target_type,
+               recurrence_rules.target_id AS recurrence_target_id,
+               recurrence_rules.frequency AS recurrence_frequency,
+               recurrence_rules.interval AS recurrence_interval,
+               recurrence_rules.deleted_at AS recurrence_deleted_at,
+               recurrence_rules.created_at AS recurrence_created_at,
+               recurrence_rules.updated_at AS recurrence_updated_at
+        FROM subtasks
+        LEFT JOIN recurrence_rules
+          ON recurrence_rules.target_type = 'subtask'
+         AND recurrence_rules.target_id = subtasks.id
+         AND recurrence_rules.deleted_at IS NULL
+        WHERE subtasks.deleted_at IS NULL
+          AND subtasks.task_id IN ({placeholders})
+        ORDER BY subtasks.task_id ASC,
+                 subtasks.sort_order ASC,
+                 subtasks.created_at ASC,
+                 subtasks.id ASC
+        "
+    );
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| format!("ページ対象サブタスククエリを準備できません: {error}"))?;
+    let rows = statement
+        .query_map(params_from_iter(task_ids.iter()), map_subtask_row)
+        .map_err(|error| format!("ページ対象サブタスクを取得できません: {error}"))?;
+    rows.map(|row| row.map_err(|error| format!("ページ対象サブタスク行を読めません: {error}")))
+        .collect()
+}
+
 fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec<TaskRecord>> {
     let mut statement = connection
         .prepare(
@@ -7140,6 +7526,15 @@ fn run_ui_read_model_migration(connection: &Connection) -> RepositoryResult<()> 
             CREATE INDEX IF NOT EXISTS tasks_favorite_idx
             ON tasks (is_favorite, sort_order, created_at)
             WHERE deleted_at IS NULL AND is_favorite = 1;
+
+            CREATE INDEX IF NOT EXISTS tasks_page_order_idx
+            ON tasks (
+              CASE WHEN status = 'done' THEN 1 ELSE 0 END,
+              sort_order,
+              created_at,
+              id
+            )
+            WHERE deleted_at IS NULL AND status <> 'archived';
 
             CREATE INDEX IF NOT EXISTS subtasks_task_status_idx
             ON subtasks (task_id, status)
@@ -11167,6 +11562,271 @@ mod tests {
         assert_eq!(custom_rows[0].id, custom_task.id);
         assert_eq!(default_rows.len(), 1);
         assert_eq!(all_rows.len(), 2);
+    }
+
+    #[test]
+    fn task_page_cursor_is_stable_across_ties_and_completion_bucket() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-18T00:00:00Z",
+        };
+        let mut task_ids = Vec::new();
+        for title in ["A", "B", "C", "D", "E"] {
+            task_ids.push(
+                usecases::create_task(&database, &clock, draft(title))
+                    .expect("create paged task")
+                    .id,
+            );
+        }
+        database
+            .with_connection(|connection| {
+                connection
+                    .execute(
+                        "UPDATE tasks SET sort_order = 0, created_at = '2026-07-18T00:00:00Z'",
+                        [],
+                    )
+                    .map_err(|error| format!("normalize task order: {error}"))?;
+                Ok(())
+            })
+            .expect("normalize task order");
+        usecases::complete_task(&database, &clock, task_ids[2].clone(), true)
+            .expect("complete task");
+
+        let mut cursor = None;
+        let mut loaded_ids = Vec::new();
+        loop {
+            let page = usecases::list_task_page(
+                &database,
+                usecases::TaskPageDraft {
+                    scope: usecases::TaskPageScopeDraft::Board,
+                    today_date: "2026-07-18".to_string(),
+                    cursor,
+                    limit: 2,
+                },
+            )
+            .expect("list task page");
+            assert_eq!(page.total_count, 5);
+            assert_eq!(page.tasks.len(), page.rows.len());
+            assert_eq!(
+                page.tasks
+                    .iter()
+                    .map(|task| task.task.id.as_str())
+                    .collect::<Vec<_>>(),
+                page.rows
+                    .iter()
+                    .map(|row| row.id.as_str())
+                    .collect::<Vec<_>>()
+            );
+            loaded_ids.extend(page.rows.iter().map(|row| row.id.clone()));
+            cursor = page
+                .next_cursor
+                .map(|cursor| usecases::TaskPageCursorDraft {
+                    completion_bucket: cursor.completion_bucket,
+                    sort_order: cursor.sort_order,
+                    created_at: cursor.created_at,
+                    id: cursor.id,
+                });
+            if cursor.is_none() {
+                break;
+            }
+        }
+
+        assert_eq!(loaded_ids.len(), 5);
+        assert_eq!(loaded_ids.iter().collect::<HashSet<_>>().len(), 5);
+        assert_eq!(loaded_ids.last(), Some(&task_ids[2]));
+        let mut expected_active_ids = task_ids
+            .into_iter()
+            .filter(|id| id != loaded_ids.last().expect("completed task id"))
+            .collect::<Vec<_>>();
+        expected_active_ids.sort();
+        assert_eq!(&loaded_ids[..4], expected_active_ids.as_slice());
+    }
+
+    #[test]
+    fn task_page_filters_scopes_and_validates_application_input() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-18T00:00:00Z",
+        };
+        let due_task = usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "今日が期限".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-18".to_string()),
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create due task");
+        let subtask_due_task = usecases::create_task(&database, &clock, draft("サブタスクが期限"))
+            .expect("create subtask parent");
+        usecases::create_subtask(
+            &database,
+            &clock,
+            subtask_due_task.id.clone(),
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "今日のサブタスク".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-18".to_string()),
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create due subtask");
+        let favorite_task = usecases::create_task(&database, &clock, draft("お気に入り"))
+            .expect("create favorite task");
+        usecases::toggle_task_favorite(&database, &clock, favorite_task.id.clone(), true)
+            .expect("favorite task");
+        let tagged_task = usecases::create_task(&database, &clock, draft("タグ対象"))
+            .expect("create tagged task");
+        let tag = usecases::create_tag(
+            &database,
+            &clock,
+            usecases::TagDraft {
+                name: "ページ対象".to_string(),
+            },
+        )
+        .expect("create tag");
+        usecases::attach_tag_to_task(&database, &clock, tagged_task.id.clone(), tag.id.clone())
+            .expect("attach tag");
+        let custom_list = usecases::create_task_list(
+            &database,
+            &clock,
+            usecases::TaskListDraft {
+                name: "ページ対象リスト".to_string(),
+                color_token: Some("blue".to_string()),
+            },
+        )
+        .expect("create custom list");
+        let custom_list_task = usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: Some(custom_list.id.clone()),
+                title: "リスト対象".to_string(),
+                planned_start_date: None,
+                due_date: None,
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create custom list task");
+
+        let list_page = usecases::list_task_page(
+            &database,
+            usecases::TaskPageDraft {
+                scope: usecases::TaskPageScopeDraft::List {
+                    list_id: custom_list.id,
+                },
+                today_date: "2026-07-18".to_string(),
+                cursor: None,
+                limit: 200,
+            },
+        )
+        .expect("list scope page");
+        assert_eq!(list_page.total_count, 1);
+        assert_eq!(list_page.rows[0].id, custom_list_task.id);
+
+        let today_page = usecases::list_task_page(
+            &database,
+            usecases::TaskPageDraft {
+                scope: usecases::TaskPageScopeDraft::Today,
+                today_date: "2026-07-18".to_string(),
+                cursor: None,
+                limit: 200,
+            },
+        )
+        .expect("today page");
+        assert_eq!(today_page.total_count, 2);
+        assert_eq!(today_page.navigation_counts.today_count, 2);
+        assert_eq!(
+            today_page
+                .rows
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<HashSet<_>>(),
+            HashSet::from([due_task.id.as_str(), subtask_due_task.id.as_str()])
+        );
+
+        let favorite_page = usecases::list_task_page(
+            &database,
+            usecases::TaskPageDraft {
+                scope: usecases::TaskPageScopeDraft::Favorites,
+                today_date: "2026-07-18".to_string(),
+                cursor: None,
+                limit: 200,
+            },
+        )
+        .expect("favorite page");
+        assert_eq!(favorite_page.total_count, 1);
+        assert_eq!(favorite_page.rows[0].id, favorite_task.id);
+        assert_eq!(favorite_page.navigation_counts.favorite_count, 1);
+
+        let tag_page = usecases::list_task_page(
+            &database,
+            usecases::TaskPageDraft {
+                scope: usecases::TaskPageScopeDraft::Tag { tag_id: tag.id },
+                today_date: "2026-07-18".to_string(),
+                cursor: None,
+                limit: 200,
+            },
+        )
+        .expect("tag page");
+        assert_eq!(tag_page.total_count, 1);
+        assert_eq!(tag_page.rows[0].id, tagged_task.id);
+
+        let invalid_limit = usecases::list_task_page(
+            &database,
+            usecases::TaskPageDraft {
+                scope: usecases::TaskPageScopeDraft::Board,
+                today_date: "2026-07-18".to_string(),
+                cursor: None,
+                limit: 201,
+            },
+        );
+        assert!(invalid_limit
+            .expect_err("invalid page limit")
+            .contains("200以下"));
+
+        let invalid_cursor = usecases::list_task_page(
+            &database,
+            usecases::TaskPageDraft {
+                scope: usecases::TaskPageScopeDraft::Board,
+                today_date: "2026-07-18".to_string(),
+                cursor: Some(usecases::TaskPageCursorDraft {
+                    completion_bucket: 2,
+                    sort_order: 0,
+                    created_at: "invalid".to_string(),
+                    id: "task".to_string(),
+                }),
+                limit: 200,
+            },
+        );
+        assert!(invalid_cursor
+            .expect_err("invalid page cursor")
+            .contains("完了区分"));
+
+        let invalid_cursor_date = usecases::list_task_page(
+            &database,
+            usecases::TaskPageDraft {
+                scope: usecases::TaskPageScopeDraft::Board,
+                today_date: "2026-07-18".to_string(),
+                cursor: Some(usecases::TaskPageCursorDraft {
+                    completion_bucket: 0,
+                    sort_order: 0,
+                    created_at: "invalid".to_string(),
+                    id: "task".to_string(),
+                }),
+                limit: 200,
+            },
+        );
+        assert!(invalid_cursor_date
+            .expect_err("invalid cursor date")
+            .contains("RFC 3339"));
     }
 
     #[test]

@@ -326,6 +326,72 @@ pub struct TaskRowRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskPageScope {
+    List(String),
+    Today,
+    Favorites,
+    Tag(String),
+    Board,
+}
+
+impl TaskPageScope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::List(_) => "list",
+            Self::Today => "today",
+            Self::Favorites => "favorites",
+            Self::Tag(_) => "tag",
+            Self::Board => "board",
+        }
+    }
+
+    pub fn list_id(&self) -> Option<&str> {
+        match self {
+            Self::List(list_id) => Some(list_id),
+            _ => None,
+        }
+    }
+
+    pub fn tag_id(&self) -> Option<&str> {
+        match self {
+            Self::Tag(tag_id) => Some(tag_id),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskPageCursor {
+    pub completion_bucket: i64,
+    pub sort_order: i64,
+    pub created_at: String,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskPageQuery {
+    pub scope: TaskPageScope,
+    pub today_date: String,
+    pub cursor: Option<TaskPageCursor>,
+    pub limit: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskNavigationCountsRecord {
+    pub today_count: i64,
+    pub favorite_count: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskPageRecord {
+    pub tasks: Vec<TaskWithSubtasksRecord>,
+    pub rows: Vec<TaskRowRecord>,
+    pub total_count: i64,
+    pub next_cursor: Option<TaskPageCursor>,
+    pub navigation_counts: TaskNavigationCountsRecord,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationJob {
     pub id: String,
     pub target: WorkTargetRef,
@@ -555,6 +621,8 @@ pub trait PomodoroRepository {
 }
 
 pub trait TaskReadRepository {
+    fn list_task_page(&self, query: TaskPageQuery) -> RepositoryResult<TaskPageRecord>;
+
     fn list_tasks_with_subtasks(&self, limit: i64)
         -> RepositoryResult<Vec<TaskWithSubtasksRecord>>;
 

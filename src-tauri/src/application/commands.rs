@@ -51,6 +51,14 @@ pub fn list_tasks(
 }
 
 #[tauri::command]
+pub fn list_task_page(
+    database: DatabaseState<'_>,
+    request: super::dto::ListTaskPageRequestDto,
+) -> Result<super::dto::TaskPageDto, String> {
+    super::usecases::list_task_page(database.inner(), request.into()).map(Into::into)
+}
+
+#[tauri::command]
 pub fn list_task_lists(
     database: DatabaseState<'_>,
 ) -> Result<Vec<super::dto::TaskListDto>, String> {

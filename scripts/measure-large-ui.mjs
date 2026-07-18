@@ -17,8 +17,8 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const options = parseOptions(process.argv.slice(2));
 const profile = options.profile === "standard"
   ? {
-      totalTaskCount: 5000,
-      taskCount: 200,
+      totalTaskCount: 401,
+      taskCount: 401,
       subtasksPerTask: 4,
       listCount: 12,
     }
@@ -30,6 +30,7 @@ const profile = options.profile === "standard"
     };
 const thresholds = {
   initial_task_list: 5000,
+  task_list_load_more: 1500,
   today: 1000,
   favorites: 1000,
   kanban: 1500,
@@ -38,6 +39,8 @@ const thresholds = {
   calendar_month: 2000,
   task_detail: 1000,
 };
+const taskPageSize = 200;
+const initialTaskPageCount = Math.min(profile.taskCount, taskPageSize);
 const chromePath = await resolveChromePath();
 const vitePort = await getFreePort();
 const debugPort = await getFreePort();
@@ -88,7 +91,7 @@ try {
   await waitForPaintedExpression(
     client,
     sessionId,
-    `document.querySelectorAll(".task-row").length === ${profile.taskCount} &&
+    `document.querySelectorAll(".task-row").length === ${initialTaskPageCount} &&
       document.querySelector('#task-panel-title')?.textContent === "タスク" &&
       !document.querySelector(".app-alert")`,
   );
@@ -100,6 +103,41 @@ try {
     ),
   );
 
+  if (profile.taskCount > taskPageSize) {
+    measurements.push(
+      await measureView({
+        client,
+        sessionId,
+        name: "task_list_load_more",
+        thresholdMs: thresholds.task_list_load_more,
+        action: `(async () => {
+          document.querySelector(".subtask-expand-button")?.click();
+          document.querySelector(".task-row-content")?.click();
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+          const board = document.querySelector(".task-board");
+          if (board) {
+            board.scrollTop = 120;
+            window.__taskTimerPageScrollTop = board.scrollTop;
+          }
+          document.querySelector(".task-load-more")?.click();
+        })()`,
+        ready: `document.querySelectorAll(".task-row").length === ${Math.min(
+          profile.taskCount,
+          taskPageSize * 2,
+        )} &&
+          document.querySelector(".task-row.is-selected") &&
+          document.querySelector('.subtask-expand-button[aria-expanded="true"]') &&
+          document.querySelector(".task-row-subtasks") &&
+          document.querySelector(".task-detail-pane") &&
+          document.querySelector(".task-board")?.scrollTop === window.__taskTimerPageScrollTop &&
+          document.querySelector(".task-load-more")?.textContent?.includes("${Math.min(
+            profile.taskCount,
+            taskPageSize * 2,
+          )} / ${profile.taskCount}")`,
+      }),
+    );
+  }
+
   measurements.push(
     await measureView({
       client,
@@ -109,7 +147,10 @@ try {
       action: clickNavigation("今日"),
       ready: `document.querySelector('button.nav-item[aria-label="今日"][aria-current="page"]') &&
         document.querySelector('#task-panel-title')?.textContent === "今日" &&
-        document.querySelectorAll(".task-row").length === ${Math.ceil(profile.taskCount / 2)}`,
+        document.querySelectorAll(".task-row").length === ${Math.min(
+          taskPageSize,
+          Math.ceil(profile.taskCount / 2),
+        )}`,
     }),
   );
   measurements.push(
@@ -121,7 +162,10 @@ try {
       action: clickNavigation("お気に入り"),
       ready: `document.querySelector('button.nav-item[aria-label="お気に入り"][aria-current="page"]') &&
         document.querySelector('#task-panel-title')?.textContent === "お気に入り" &&
-        document.querySelectorAll(".task-row").length === ${Math.ceil(profile.taskCount / 3)}`,
+        document.querySelectorAll(".task-row").length === ${Math.min(
+          taskPageSize,
+          Math.ceil(profile.taskCount / 3),
+        )}`,
     }),
   );
   measurements.push(
@@ -132,7 +176,7 @@ try {
       thresholdMs: thresholds.kanban,
       action: clickNavigation("かんばん"),
       ready: `document.querySelector('button.nav-item[aria-label="かんばん"][aria-current="page"]') &&
-        document.querySelectorAll(".kanban-card").length === ${profile.taskCount}`,
+        document.querySelectorAll(".kanban-card").length === ${initialTaskPageCount}`,
     }),
   );
   measurements.push(
@@ -184,7 +228,7 @@ try {
     client,
     sessionId,
     `document.querySelector('#task-panel-title')?.textContent === "タスク" &&
-      document.querySelectorAll(".task-row").length === ${profile.taskCount}`,
+      document.querySelectorAll(".task-row").length === ${initialTaskPageCount}`,
   );
   measurements.push(
     await measureView({
@@ -457,6 +501,54 @@ function buildTauriInvokeMockSource(profile) {
     createdAt: now,
     updatedAt: now
   }];
+  const taskPage = (request = {}) => {
+    const scope = request.scope ?? { type: "board" };
+    const scopedTasks = tasks.filter((task) => {
+      if (scope.type === "list") {
+        return task.listId === scope.listId;
+      }
+      if (scope.type === "today") {
+        return task.dueDate === request.todayDate ||
+          task.subtasks.some((subtask) => subtask.dueDate === request.todayDate);
+      }
+      if (scope.type === "favorites") {
+        return task.isFavorite;
+      }
+      if (scope.type === "tag") {
+        return task.tags.some((tag) => tag.id === scope.tagId);
+      }
+      return true;
+    });
+    const cursorIndex = request.cursor
+      ? scopedTasks.findIndex((task) => task.id === request.cursor.id)
+      : -1;
+    const startIndex = cursorIndex >= 0 ? cursorIndex + 1 : 0;
+    const limit = Math.max(1, Math.min(Number(request.limit ?? 200), 200));
+    const pageTasks = scopedTasks.slice(startIndex, startIndex + limit);
+    const pageTaskIds = new Set(pageTasks.map((task) => task.id));
+    const pageRows = taskRows.filter((row) => pageTaskIds.has(row.id));
+    const hasMore = startIndex + pageTasks.length < scopedTasks.length;
+    const lastTask = pageTasks.at(-1);
+    return {
+      tasks: clone(pageTasks),
+      rows: clone(pageRows),
+      totalCount: scopedTasks.length,
+      nextCursor: hasMore && lastTask ? {
+        completionBucket: lastTask.status === "done" ? 1 : 0,
+        sortOrder: lastTask.sortOrder,
+        createdAt: lastTask.createdAt,
+        id: lastTask.id
+      } : null,
+      navigationCounts: {
+        todayCount: tasks.filter((task) =>
+          task.status !== "done" &&
+          (task.dueDate === request.todayDate ||
+            task.subtasks.some((subtask) => subtask.dueDate === request.todayDate))
+        ).length,
+        favoriteCount: tasks.filter((task) => task.isFavorite).length
+      }
+    };
+  };
 
   window.__TAURI_INTERNALS__ = {
     invoke(command, args = {}) {
@@ -480,6 +572,7 @@ function buildTauriInvokeMockSource(profile) {
       const commands = {
         health_check: () => "tauri-ready",
         list_tasks: () => clone(tasks),
+        list_task_page: () => taskPage(args.request),
         list_task_lists: () => clone(taskLists),
         list_board_columns: () => clone(boardColumns),
         list_tags: () => clone(tags),

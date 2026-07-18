@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     env,
     error::Error,
     path::PathBuf,
@@ -76,13 +77,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         measure_task_lists(&connection, config.threshold)?,
         measure_board_columns(&connection, config.threshold)?,
         measure_initial_task_tree(&connection, config.threshold)?,
+        measure_task_page_traversal(&connection, config.threshold)?,
         measure_task_rows(
             &connection,
             "task_rows_default_list",
             Some("default"),
             config.threshold,
         )?,
-        measure_task_rows(&connection, "task_rows_all_lists", None, config.threshold)?,
         measure_calendar_items(
             &connection,
             "calendar_week_2026-07-13",
@@ -359,6 +360,114 @@ fn measure_initial_task_tree(
             |row| row.get(0),
         )?;
         Ok(task_count + subtask_count)
+    })
+}
+
+fn measure_task_page_traversal(
+    connection: &Connection,
+    threshold: Duration,
+) -> Result<Measurement, Box<dyn Error>> {
+    measure_step("task_page_traverse_all", threshold, || {
+        let mut cursor: Option<(i64, i64, String, String)> = None;
+        let mut loaded_ids = HashSet::new();
+
+        loop {
+            let mut statement = connection.prepare(
+                "
+                SELECT CASE WHEN status = 'done' THEN 1 ELSE 0 END AS completion_bucket,
+                       sort_order,
+                       created_at,
+                       id
+                FROM tasks
+                WHERE deleted_at IS NULL
+                  AND status <> 'archived'
+                  AND (
+                    ?1 IS NULL
+                    OR CASE WHEN status = 'done' THEN 1 ELSE 0 END > ?1
+                    OR (
+                      CASE WHEN status = 'done' THEN 1 ELSE 0 END = ?1
+                      AND sort_order > ?2
+                    )
+                    OR (
+                      CASE WHEN status = 'done' THEN 1 ELSE 0 END = ?1
+                      AND sort_order = ?2
+                      AND created_at > ?3
+                    )
+                    OR (
+                      CASE WHEN status = 'done' THEN 1 ELSE 0 END = ?1
+                      AND sort_order = ?2
+                      AND created_at = ?3
+                      AND id > ?4
+                    )
+                  )
+                ORDER BY CASE WHEN status = 'done' THEN 1 ELSE 0 END,
+                         sort_order,
+                         created_at,
+                         id
+                LIMIT 201
+                ",
+            )?;
+            let cursor_completion = cursor.as_ref().map(|value| value.0);
+            let cursor_sort_order = cursor.as_ref().map(|value| value.1);
+            let cursor_created_at = cursor.as_ref().map(|value| value.2.as_str());
+            let cursor_id = cursor.as_ref().map(|value| value.3.as_str());
+            let rows = statement.query_map(
+                params![
+                    cursor_completion,
+                    cursor_sort_order,
+                    cursor_created_at,
+                    cursor_id,
+                ],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )?;
+            let mut page = rows.collect::<Result<Vec<_>, _>>()?;
+            let has_more = page.len() > 200;
+            if has_more {
+                page.truncate(200);
+            }
+            if page.is_empty() {
+                break;
+            }
+            for (_, _, _, task_id) in &page {
+                if !loaded_ids.insert(task_id.clone()) {
+                    return Err(format!(
+                        "タスクページ巡回で重複IDを検出しました（読み込み済み{}件）",
+                        loaded_ids.len()
+                    )
+                    .into());
+                }
+            }
+            cursor = page.last().cloned();
+            if !has_more {
+                break;
+            }
+        }
+
+        let expected_count: i64 = connection.query_row(
+            "
+            SELECT COUNT(*)
+            FROM tasks
+            WHERE deleted_at IS NULL
+              AND status <> 'archived'
+            ",
+            [],
+            |row| row.get(0),
+        )?;
+        let loaded_count = i64::try_from(loaded_ids.len())?;
+        if loaded_count != expected_count {
+            return Err(format!(
+                "タスクページ巡回で欠落を検出しました: expected={expected_count}, loaded={loaded_count}"
+            )
+            .into());
+        }
+        Ok(loaded_count)
     })
 }
 
