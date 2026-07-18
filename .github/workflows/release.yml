@@ -23,6 +23,12 @@ jobs:
       build_matrix: ${{ steps.matrix.outputs.build_matrix }}
       include_macos: ${{ steps.matrix.outputs.include_macos }}
     steps:
+      - name: チェックアウト
+        uses: actions/checkout@v5
+
+      - name: Release artifact対象を検証
+        run: npm run check:release-platform-policy
+
       - name: ビルド対象matrixを決定
         id: matrix
         shell: bash

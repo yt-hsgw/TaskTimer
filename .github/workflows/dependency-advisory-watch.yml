@@ -21,5 +21,8 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+      - name: Release artifact対象を検証
+        run: npm run check:release-platform-policy
+
       - name: glib advisoryを再評価
         run: npm run check:glib-advisory

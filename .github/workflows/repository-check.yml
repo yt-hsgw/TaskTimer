@@ -60,6 +60,9 @@ jobs:
       - name: npm脆弱性監査を実行
         run: npm audit --audit-level=moderate
 
+      - name: Release artifact対象を検証
+        run: npm run check:release-platform-policy
+
       - name: 必須設計ファイルを確認
         run: |
           test -f README.md
@@ -84,6 +87,7 @@ jobs:
           test -f docs/release-checklist.md
           test -f docs/review/checklist.md
           test -f docs/adr/0004-public-distribution-license.md
+          test -f docs/adr/0007-glib-linux-target-risk-acceptance.md
           test -f src-tauri/icons/icon.ico
 
       - name: SQLiteスキーマを検証
