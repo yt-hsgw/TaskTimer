@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { DragEvent, FormEvent } from "react";
+import type {
+  DragEvent,
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+} from "react";
 import type {
   TaskListItem,
   WeekCalendarItem,
@@ -244,16 +249,6 @@ export function WeekCalendar({
         </div>
 
         <div className="calendar-heading-controls">
-          <button
-            className="calendar-add-task-button"
-            type="button"
-            aria-label={`${formatDateLabel(anchorDate)}にタスクを追加`}
-            title="タスクを追加"
-            disabled={isCreatingTaskPending}
-            onClick={() => openCreateForm(anchorDate, null)}
-          >
-            ＋
-          </button>
           <div className="calendar-view-switch" aria-label="カレンダー表示切替">
             {(["week", "day", "month"] as const).map((mode) => (
               <button
@@ -511,15 +506,20 @@ function TimeGridCalendar({
                 : ""
             }`}
             key={`${day.date}:all-day`}
+            role="gridcell"
+            tabIndex={0}
+            aria-label={`${formatCreateSourceLabel(day.date, null)}。ダブルクリックまたはEnterでタスクを追加`}
+            title="ダブルクリックでタスクを追加"
+            onDoubleClick={(event) =>
+              handleCreateCellDoubleClick(event, day.date, null, onOpenCreateTask)
+            }
+            onKeyDown={(event) =>
+              handleCreateCellKeyDown(event, day.date, null, onOpenCreateTask)
+            }
             onDragOver={(event) => onDragOver(dropTargetForDay, event)}
             onDragLeave={(event) => onDragLeave(dropTargetForDay, event)}
             onDrop={(event) => onDrop(dropTargetForDay, event)}
           >
-            <CalendarAddButton
-              dueDate={day.date}
-              dueTime={null}
-              onOpenCreateTask={onOpenCreateTask}
-            />
             <CalendarCellItems
               isLoading={isLoading}
               items={dateOnlyItems}
@@ -618,15 +618,30 @@ function TimeGridRow({
                 : ""
             }`}
             key={`${day.date}:${hour}`}
+            role="gridcell"
+            tabIndex={0}
+            aria-label={`${formatCreateSourceLabel(day.date, formatHourInput(hour))}。ダブルクリックまたはEnterでタスクを追加`}
+            title="ダブルクリックでタスクを追加"
+            onDoubleClick={(event) =>
+              handleCreateCellDoubleClick(
+                event,
+                day.date,
+                formatHourInput(hour),
+                onOpenCreateTask,
+              )
+            }
+            onKeyDown={(event) =>
+              handleCreateCellKeyDown(
+                event,
+                day.date,
+                formatHourInput(hour),
+                onOpenCreateTask,
+              )
+            }
             onDragOver={(event) => onDragOver(dropTargetForHour, event)}
             onDragLeave={(event) => onDragLeave(dropTargetForHour, event)}
             onDrop={(event) => onDrop(dropTargetForHour, event)}
           >
-            <CalendarAddButton
-              dueDate={day.date}
-              dueTime={formatHourInput(hour)}
-              onOpenCreateTask={onOpenCreateTask}
-            />
             {shouldShowCurrentTime ? (
               <div
                 className="calendar-current-time-line"
@@ -762,17 +777,26 @@ function MonthCalendar({
                   : ""
               }`}
               key={day.date}
+              role="gridcell"
+              tabIndex={0}
+              aria-label={`${formatCreateSourceLabel(day.date, null)}。ダブルクリックまたはEnterでタスクを追加`}
+              title="ダブルクリックでタスクを追加"
+              onDoubleClick={(event) =>
+                handleCreateCellDoubleClick(
+                  event,
+                  day.date,
+                  null,
+                  onOpenCreateTask,
+                )
+              }
+              onKeyDown={(event) =>
+                handleCreateCellKeyDown(event, day.date, null, onOpenCreateTask)
+              }
               onDragOver={(event) => onDragOver(dropTargetForDay, event)}
               onDragLeave={(event) => onDragLeave(dropTargetForDay, event)}
               onDrop={(event) => onDrop(dropTargetForDay, event)}
             >
               <div className="calendar-month-day-heading">
-                <CalendarAddButton
-                  dueDate={day.date}
-                  dueTime={null}
-                  variant="month"
-                  onOpenCreateTask={onOpenCreateTask}
-                />
                 <span>{day.dayOfMonth}</span>
               </div>
               {isLoading ? (
@@ -852,6 +876,7 @@ function CalendarItemButton({
         event.stopPropagation();
         onSelectItem(item);
       }}
+      onDoubleClick={(event) => event.stopPropagation()}
     >
       <span className="calendar-item-title">{item.title}</span>
       {relationLabel ? (
@@ -864,32 +889,29 @@ function CalendarItemButton({
   );
 }
 
-function CalendarAddButton({
-  dueDate,
-  dueTime,
-  variant = "cell",
-  onOpenCreateTask,
-}: {
-  dueDate: string;
-  dueTime: string | null;
-  variant?: "cell" | "month";
-  onOpenCreateTask(dueDate: string, dueTime: string | null): void;
-}) {
-  const label = `${formatCreateSourceLabel(dueDate, dueTime)}にタスクを追加`;
-  return (
-    <button
-      className={`calendar-cell-add-button is-${variant}`}
-      type="button"
-      aria-label={label}
-      title="タスクを追加"
-      onClick={(event) => {
-        event.stopPropagation();
-        onOpenCreateTask(dueDate, dueTime);
-      }}
-    >
-      ＋
-    </button>
-  );
+function handleCreateCellDoubleClick(
+  event: ReactMouseEvent<HTMLElement>,
+  dueDate: string,
+  dueTime: string | null,
+  onOpenCreateTask: (dueDate: string, dueTime: string | null) => void,
+) {
+  if ((event.target as HTMLElement).closest(".calendar-item")) {
+    return;
+  }
+  onOpenCreateTask(dueDate, dueTime);
+}
+
+function handleCreateCellKeyDown(
+  event: ReactKeyboardEvent<HTMLElement>,
+  dueDate: string,
+  dueTime: string | null,
+  onOpenCreateTask: (dueDate: string, dueTime: string | null) => void,
+) {
+  if (event.target !== event.currentTarget || event.key !== "Enter") {
+    return;
+  }
+  event.preventDefault();
+  onOpenCreateTask(dueDate, dueTime);
 }
 
 function canRescheduleItem(item: WeekCalendarItem) {

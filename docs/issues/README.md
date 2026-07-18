@@ -55,6 +55,9 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [047 通知OS登録状態のRepository境界とDB状態を追加する](047-notification-os-registration-state.md) / GitHub #115
 - [048 Windows/macOSネイティブ将来通知adapterの実現性を検証する](048-native-notification-adapter-feasibility.md) / GitHub #118
 - [049 Windowsネイティブ将来通知adapterのPoCを実装する](049-windows-native-notification-poc.md) / GitHub #123
+- [050 作業画面の操作配置と表示密度を整理する](050-ui-workspace-polish.md)
+- [051 かんばんをドラッグ操作とカスタム状態へ拡張する](051-kanban-custom-workflow.md) / GitHub #126
+- [052 カレンダー項目を期間表示し端のドラッグで調整する](052-calendar-duration-resize.md) / GitHub #127
 
 ## 運用
 

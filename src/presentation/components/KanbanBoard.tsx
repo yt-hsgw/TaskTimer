@@ -15,6 +15,7 @@ type KanbanBoardProps = {
   isMutating: boolean;
   pendingTaskActionIds: ReadonlySet<string>;
   onSelectTask(taskId: string): void;
+  onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onChangeTaskStatus(
     task: TaskWithSubtasks,
     status: BoardStatus,
@@ -60,6 +61,7 @@ export function KanbanBoard({
   isMutating,
   pendingTaskActionIds,
   onSelectTask,
+  onToggleTaskCompletion,
   onChangeTaskStatus,
 }: KanbanBoardProps) {
   const taskById = useMemo(
@@ -115,6 +117,7 @@ export function KanbanBoard({
                           isSelected={row.id === selectedTaskId}
                           isMutating={isMutating || pendingTaskActionIds.has(row.id)}
                           onSelectTask={onSelectTask}
+                          onToggleTaskCompletion={onToggleTaskCompletion}
                           onChangeTaskStatus={onChangeTaskStatus}
                         />
                       );
@@ -135,6 +138,7 @@ type KanbanCardProps = {
   isSelected: boolean;
   isMutating: boolean;
   onSelectTask(taskId: string): void;
+  onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onChangeTaskStatus(
     task: TaskWithSubtasks,
     status: BoardStatus,
@@ -147,6 +151,7 @@ function KanbanCard({
   isSelected,
   isMutating,
   onSelectTask,
+  onToggleTaskCompletion,
   onChangeTaskStatus,
 }: KanbanCardProps) {
   const hasProgress = row.subtaskTotalCount > 0;
@@ -161,44 +166,62 @@ function KanbanCard({
         row.status === "done" ? "is-done" : ""
       }`}
     >
-      <button
-        className="kanban-card-main"
-        type="button"
-        aria-label={`${row.title}の詳細を開く`}
-        onClick={() => onSelectTask(row.id)}
-      >
-        <span className="kanban-card-title">{row.title}</span>
-        <span className="kanban-card-meta">
-          <span>{statusLabels[row.status]}</span>
-          {row.dueDate ? (
-            <span className="task-due-label">
-              期限 {formatDateLabel(row.dueDate)}
-              {row.dueTime ? ` ${row.dueTime}` : ""}
+      <div className="kanban-card-content">
+        <button
+          className={`task-check-button ${row.status === "done" ? "is-done" : ""}`}
+          type="button"
+          aria-label={row.status === "done" ? "未完了に戻す" : "タスクを完了"}
+          title={row.status === "done" ? "未完了に戻す" : "完了"}
+          disabled={isMutating || !task}
+          onClick={() => {
+            if (task) {
+              void onToggleTaskCompletion(task);
+            }
+          }}
+        >
+          {row.status === "done" ? "✓" : ""}
+        </button>
+        <button
+          className="kanban-card-main"
+          type="button"
+          aria-label={`${row.title}の詳細を開く`}
+          onClick={() => onSelectTask(row.id)}
+        >
+          <span className="kanban-card-title">{row.title}</span>
+          <span className="kanban-card-meta">
+            <span>{statusLabels[row.status]}</span>
+            {row.dueDate ? (
+              <span className="task-due-label">
+                期限 {formatDateLabel(row.dueDate)}
+                {row.dueTime ? ` ${row.dueTime}` : ""}
+              </span>
+            ) : null}
+            {row.isTimerActive ? <span>実行中</span> : null}
+          </span>
+          {memoPreview ? (
+            <span className="kanban-card-memo">{memoPreview}</span>
+          ) : null}
+          {row.tags.length > 0 ? (
+            <span className="kanban-card-tags" aria-label="タグ">
+              {row.tags.map((tag) => (
+                <span className="task-tag-chip" key={tag.id}>
+                  {tag.name}
+                </span>
+              ))}
             </span>
           ) : null}
-          {row.isTimerActive ? <span>実行中</span> : null}
-        </span>
-        {memoPreview ? <span className="kanban-card-memo">{memoPreview}</span> : null}
-        {row.tags.length > 0 ? (
-          <span className="kanban-card-tags" aria-label="タグ">
-            {row.tags.map((tag) => (
-              <span className="task-tag-chip" key={tag.id}>
-                {tag.name}
+          {hasProgress ? (
+            <span className="task-progress">
+              <span className="task-progress-bar">
+                <span style={{ width: `${progressPercent}%` }} />
               </span>
-            ))}
-          </span>
-        ) : null}
-        {hasProgress ? (
-          <span className="task-progress">
-            <span className="task-progress-bar">
-              <span style={{ width: `${progressPercent}%` }} />
+              <span className="task-progress-label">
+                {row.completedSubtaskCount}/{row.subtaskTotalCount}
+              </span>
             </span>
-            <span className="task-progress-label">
-              {row.completedSubtaskCount}/{row.subtaskTotalCount}
-            </span>
-          </span>
-        ) : null}
-      </button>
+          ) : null}
+        </button>
+      </div>
 
       <div className="kanban-card-actions" aria-label={`${row.title}の状態変更`}>
         {columns

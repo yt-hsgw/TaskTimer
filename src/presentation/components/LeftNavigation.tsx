@@ -1,5 +1,18 @@
 import { FormEvent, useState } from "react";
 import type { ReactNode } from "react";
+import {
+  CalendarDays,
+  CircleDot,
+  Columns3,
+  Hash,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pencil,
+  Plus,
+  Settings,
+  Star,
+  Trash2,
+} from "lucide-react";
 import type {
   TagItem,
   TaskListColorToken,
@@ -27,33 +40,8 @@ type LeftNavigationProps = {
   onSelectView(view: AppView): void;
   onCreateTaskList(name: string): Promise<boolean>;
   onRenameTaskList(listId: string, name: string): Promise<boolean>;
-  onUpdateTaskListColor(
-    listId: string,
-    colorToken: TaskListColorToken,
-  ): Promise<boolean>;
   onDeleteTaskList(listId: string): Promise<boolean>;
-  onCreateTag(name: string): Promise<boolean>;
-  onRenameTag(tagId: string, name: string): Promise<boolean>;
-  onDeleteTag(tagId: string): Promise<boolean>;
   onToggle(): void;
-};
-
-const taskListColorOptions: TaskListColorToken[] = [
-  "green",
-  "blue",
-  "amber",
-  "rose",
-  "violet",
-  "gray",
-];
-
-const taskListColorLabels: Record<TaskListColorToken, string> = {
-  green: "緑",
-  blue: "青",
-  amber: "黄",
-  rose: "赤",
-  violet: "紫",
-  gray: "灰",
 };
 
 export function LeftNavigation({
@@ -67,21 +55,13 @@ export function LeftNavigation({
   onSelectView,
   onCreateTaskList,
   onRenameTaskList,
-  onUpdateTaskListColor,
   onDeleteTaskList,
-  onCreateTag,
-  onRenameTag,
-  onDeleteTag,
   onToggle,
 }: LeftNavigationProps) {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newListName, setNewListName] = useState("");
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [editingListName, setEditingListName] = useState("");
-  const [isTagCreateOpen, setIsTagCreateOpen] = useState(false);
-  const [newTagName, setNewTagName] = useState("");
-  const [editingTagId, setEditingTagId] = useState<string | null>(null);
-  const [editingTagName, setEditingTagName] = useState("");
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -119,42 +99,6 @@ export function LeftNavigation({
     await onDeleteTaskList(list.id);
   };
 
-  const handleCreateTag = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const name = newTagName.trim();
-    if (!name) {
-      return;
-    }
-    const created = await onCreateTag(name);
-    if (created) {
-      setNewTagName("");
-      setIsTagCreateOpen(false);
-    }
-  };
-
-  const handleRenameTag = async (event: FormEvent<HTMLFormElement>, tagId: string) => {
-    event.preventDefault();
-    const name = editingTagName.trim();
-    if (!name) {
-      return;
-    }
-    const renamed = await onRenameTag(tagId, name);
-    if (renamed) {
-      setEditingTagId(null);
-      setEditingTagName("");
-    }
-  };
-
-  const handleDeleteTag = async (tag: TagItem) => {
-    const shouldDelete = window.confirm(
-      `「${tag.name}」タグを削除します。タスクは削除されません。`,
-    );
-    if (!shouldDelete) {
-      return;
-    }
-    await onDeleteTag(tag.id);
-  };
-
   return (
     <aside className="left-navigation" aria-label="主要ナビゲーション">
       <div className="nav-header">
@@ -172,7 +116,11 @@ export function LeftNavigation({
           aria-expanded={isOpen}
           onClick={onToggle}
         >
-          <span className="nav-panel-icon" aria-hidden="true" />
+          {isOpen ? (
+            <PanelLeftClose aria-hidden="true" size={20} strokeWidth={1.8} />
+          ) : (
+            <PanelLeftOpen aria-hidden="true" size={20} strokeWidth={1.8} />
+          )}
         </button>
       </div>
 
@@ -192,7 +140,7 @@ export function LeftNavigation({
                   setIsCreateOpen((current) => !current);
                 }}
               >
-                +
+                <Plus aria-hidden="true" size={17} />
               </button>
             </div>
           ) : null}
@@ -259,24 +207,6 @@ export function LeftNavigation({
                   />
                   {isOpen ? (
                     <div className="nav-list-actions">
-                      <div className="nav-color-picker" aria-label={`${list.name}の色`}>
-                        {taskListColorOptions.map((colorToken) => (
-                          <button
-                            className={`nav-color-button color-${colorToken}`}
-                            type="button"
-                            key={colorToken}
-                            aria-label={`${list.name}の色を${taskListColorLabels[colorToken]}に変更`}
-                            aria-pressed={list.colorToken === colorToken}
-                            title={taskListColorLabels[colorToken]}
-                            disabled={
-                              isMutating || list.colorToken === colorToken
-                            }
-                            onClick={() =>
-                              void onUpdateTaskListColor(list.id, colorToken)
-                            }
-                          />
-                        ))}
-                      </div>
                       {list.id !== DEFAULT_TASK_LIST_ID ? (
                         <>
                           <button
@@ -291,7 +221,7 @@ export function LeftNavigation({
                               setEditingListName(list.name);
                             }}
                           >
-                            ✎
+                            <Pencil aria-hidden="true" size={14} />
                           </button>
                           <button
                             className="nav-mini-button"
@@ -301,7 +231,7 @@ export function LeftNavigation({
                             disabled={isMutating}
                             onClick={() => void handleDelete(list)}
                           >
-                            ×
+                            <Trash2 aria-hidden="true" size={14} />
                           </button>
                         </>
                       ) : null}
@@ -329,116 +259,24 @@ export function LeftNavigation({
           {isOpen ? (
             <div className="nav-section-heading">
               <span>タグ</span>
-              <button
-                className="nav-mini-button"
-                type="button"
-                aria-label="タグを追加"
-                title="タグを追加"
-                disabled={isMutating}
-                onClick={() => {
-                  setEditingTagId(null);
-                  setIsTagCreateOpen((current) => !current);
-                }}
-              >
-                +
-              </button>
             </div>
-          ) : null}
-          {isOpen && isTagCreateOpen ? (
-            <form className="nav-list-form" onSubmit={handleCreateTag}>
-              <input
-                value={newTagName}
-                onChange={(event) => setNewTagName(event.target.value)}
-                placeholder="新しいタグ"
-                maxLength={40}
-                disabled={isMutating}
-                autoFocus
-              />
-              <button type="submit" disabled={isMutating || !newTagName.trim()}>
-                追加
-              </button>
-            </form>
           ) : null}
           {tags.map((tag) => (
-            <div className={`nav-list-row ${isOpen ? "has-actions" : ""}`} key={tag.id}>
-              {editingTagId === tag.id ? (
-                <form
-                  className="nav-list-form"
-                  onSubmit={(event) => void handleRenameTag(event, tag.id)}
-                >
-                  <input
-                    value={editingTagName}
-                    onChange={(event) => setEditingTagName(event.target.value)}
-                    maxLength={40}
-                    disabled={isMutating}
-                    autoFocus
-                  />
-                  <button
-                    type="submit"
-                    disabled={isMutating || !editingTagName.trim()}
-                  >
-                    保存
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isMutating}
-                    onClick={() => {
-                      setEditingTagId(null);
-                      setEditingTagName("");
-                    }}
-                  >
-                    ×
-                  </button>
-                </form>
-              ) : (
-                <>
-                  <NavButton
-                    icon="#"
-                    label={tag.name}
-                    count={tag.taskCount}
-                    isOpen={isOpen}
-                    isActive={
-                      activeView.kind === "tag" && activeView.tagId === tag.id
-                    }
-                    onClick={() => onSelectView({ kind: "tag", tagId: tag.id })}
-                  />
-                  {isOpen ? (
-                    <div className="nav-list-actions">
-                      <button
-                        className="nav-mini-button"
-                        type="button"
-                        aria-label={`${tag.name}の名前を変更`}
-                        title="名前を変更"
-                        disabled={isMutating}
-                        onClick={() => {
-                          setIsTagCreateOpen(false);
-                          setEditingTagId(tag.id);
-                          setEditingTagName(tag.name);
-                        }}
-                      >
-                        ✎
-                      </button>
-                      <button
-                        className="nav-mini-button"
-                        type="button"
-                        aria-label={`${tag.name}を削除`}
-                        title="削除"
-                        disabled={isMutating}
-                        onClick={() => void handleDeleteTag(tag)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ) : null}
-                </>
-              )}
-            </div>
+            <NavButton
+              icon={<Hash aria-hidden="true" size={18} strokeWidth={1.8} />}
+              label={tag.name}
+              count={tag.taskCount}
+              isOpen={isOpen}
+              isActive={activeView.kind === "tag" && activeView.tagId === tag.id}
+              onClick={() => onSelectView({ kind: "tag", tagId: tag.id })}
+              key={tag.id}
+            />
           ))}
         </div>
 
         <div className="nav-section">
           <NavButton
-            icon="◎"
+            icon={<CircleDot aria-hidden="true" size={18} strokeWidth={1.8} />}
             label="今日"
             count={todayCount}
             isOpen={isOpen}
@@ -446,7 +284,7 @@ export function LeftNavigation({
             onClick={() => onSelectView({ kind: "today" })}
           />
           <NavButton
-            icon="☆"
+            icon={<Star aria-hidden="true" size={18} strokeWidth={1.8} />}
             label="お気に入り"
             count={favoriteCount}
             isOpen={isOpen}
@@ -454,14 +292,14 @@ export function LeftNavigation({
             onClick={() => onSelectView({ kind: "favorites" })}
           />
           <NavButton
-            icon="▥"
+            icon={<Columns3 aria-hidden="true" size={18} strokeWidth={1.8} />}
             label="かんばん"
             isOpen={isOpen}
             isActive={activeView.kind === "board"}
             onClick={() => onSelectView({ kind: "board" })}
           />
           <NavButton
-            icon="▦"
+            icon={<CalendarDays aria-hidden="true" size={18} strokeWidth={1.8} />}
             label="カレンダー"
             isOpen={isOpen}
             isActive={activeView.kind === "calendar"}
@@ -472,7 +310,7 @@ export function LeftNavigation({
 
       <div className="nav-footer">
         <NavButton
-          icon="⚙"
+          icon={<Settings aria-hidden="true" size={21} strokeWidth={1.9} />}
           label="設定"
           isOpen={isOpen}
           isActive={activeView.kind === "settings"}
