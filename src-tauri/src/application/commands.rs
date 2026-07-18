@@ -236,6 +236,17 @@ pub fn create_task(
 }
 
 #[tauri::command]
+pub fn create_scheduled_task(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::CreateScheduledTaskRequestDto,
+) -> Result<super::dto::TaskDto, String> {
+    let (draft, schedule) = request.into();
+    super::usecases::create_scheduled_task(database.inner(), clock.inner(), draft, schedule)
+        .map(Into::into)
+}
+
+#[tauri::command]
 pub fn create_task_list(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,
@@ -417,6 +428,20 @@ pub fn update_subtask(
     let subtask_id = request.subtask_id.clone();
     super::usecases::update_subtask(database.inner(), clock.inner(), subtask_id, request.into())
         .map(Into::into)
+}
+
+#[tauri::command]
+pub fn resize_scheduled_work_item(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::ResizeScheduledWorkItemRequestDto,
+) -> Result<(), String> {
+    super::usecases::resize_scheduled_work_item(
+        database.inner(),
+        clock.inner(),
+        request.target.try_into()?,
+        request.schedule.into(),
+    )
 }
 
 #[tauri::command]

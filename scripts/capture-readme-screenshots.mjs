@@ -120,6 +120,88 @@ try {
       !document.querySelector(".calendar-cell-add-button")
     )`,
   );
+  await waitForExpression(
+    client,
+    sessionId,
+    `(() => {
+      const block = document.querySelector(".calendar-item.marker-scheduled.is-timed");
+      const handles = block?.querySelectorAll(".calendar-resize-handle") ?? [];
+      const content = block?.querySelector(".calendar-item-content");
+      return Boolean(
+        block &&
+        handles.length === 2 &&
+        content &&
+        block.getBoundingClientRect().height >= 130 &&
+        content.scrollWidth <= content.clientWidth + 1
+      );
+    })()`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".calendar-resize-handle.is-end.is-vertical")?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })
+      )`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector(".calendar-resize-handle.is-end.is-vertical:not(:disabled)") &&
+      !document.querySelector(".app-alert")
+    )`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `[...document.querySelectorAll(".calendar-view-switch button")]
+        .find((button) => button.textContent === "日")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector(".calendar-time-grid.is-day-mode .marker-scheduled") &&
+      document.querySelectorAll(".calendar-time-grid.is-day-mode .calendar-resize-handle").length === 2
+    )`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `[...document.querySelectorAll(".calendar-view-switch button")]
+        .find((button) => button.textContent === "月")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector(".calendar-month-grid .marker-scheduled") &&
+      document.querySelectorAll(".calendar-month-grid .calendar-resize-handle.is-horizontal").length === 2
+    )`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `[...document.querySelectorAll(".calendar-view-switch button")]
+        .find((button) => button.textContent === "週")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(".calendar-time-grid:not(.is-day-mode) .marker-scheduled"))`,
+  );
   await client.send(
     "Runtime.evaluate",
     {
@@ -786,12 +868,29 @@ function buildTauriInvokeMockSource() {
       const rangeStart = args.startDate ?? args.weekStartDate ?? "2026-07-06";
       const calendarItems = [
         {
+          id: "cal-review-scheduled",
+          target: { type: "task", id: "task-weekly-review" },
+          title: "週次レビュー資料を作成",
+          parentTitle: null,
+          date: addDays(rangeStart, 0),
+          time: "09:00",
+          endDate: addDays(rangeStart, 0),
+          endTime: "11:30",
+          isAllDay: false,
+          marker: "scheduled",
+          status: "in_progress",
+          colorToken: "green"
+        },
+        {
           id: "cal-review-start",
           target: { type: "task", id: "task-weekly-review" },
           title: "週次レビュー資料を作成",
           parentTitle: null,
           date: addDays(rangeStart, 0),
           time: null,
+          endDate: null,
+          endTime: null,
+          isAllDay: true,
           marker: "planned_start",
           status: "in_progress",
           colorToken: "green"
@@ -803,6 +902,9 @@ function buildTauriInvokeMockSource() {
           parentTitle: "週次レビュー資料を作成",
           date: addDays(rangeStart, 2),
           time: "10:15",
+          endDate: null,
+          endTime: null,
+          isAllDay: false,
           marker: "active_timer",
           status: "in_progress",
           colorToken: "green"
@@ -814,6 +916,9 @@ function buildTauriInvokeMockSource() {
           parentTitle: null,
           date: addDays(rangeStart, 4),
           time: null,
+          endDate: null,
+          endTime: null,
+          isAllDay: true,
           marker: "due",
           status: "todo",
           colorToken: "green"
@@ -886,7 +991,8 @@ function buildTauriInvokeMockSource() {
           succeeded: 1,
           failed: 0,
           lastError: null
-        })
+        }),
+        resize_scheduled_work_item: () => null
       };
       const handler = commands[command];
       if (!handler) {

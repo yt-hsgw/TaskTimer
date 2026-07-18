@@ -10,8 +10,8 @@ use crate::domain::{
     task::{
         validate_board_column_name, validate_date_range, validate_due_time_requires_due_date,
         validate_memo, validate_optional_date, validate_optional_time, validate_tag_name,
-        validate_task_list_color_token, validate_task_list_name, validate_title, WorkStatus,
-        DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID,
+        validate_task_list_color_token, validate_task_list_name, validate_title, WorkSchedule,
+        WorkStatus, DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID,
     },
     timer::WorkTargetRef,
 };
@@ -37,7 +37,7 @@ use super::{
         TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskRecord,
         TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository,
         UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate,
-        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
 
@@ -81,6 +81,15 @@ pub struct WorkItemUpdateDraft {
     pub timer_target_seconds: Option<i64>,
     pub recurrence_rule: Option<RecurrenceRuleDraft>,
     pub memo: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkScheduleDraft {
+    pub start_date: String,
+    pub start_time: Option<String>,
+    pub end_date: String,
+    pub end_time: Option<String>,
+    pub is_all_day: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,6 +160,19 @@ pub fn create_task(
     draft: WorkItemDraft,
 ) -> RepositoryResult<TaskRecord> {
     repository.create_task(validate_work_item_draft(draft, clock.now_utc_iso8601())?)
+}
+
+pub fn create_scheduled_task(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    draft: WorkItemDraft,
+    schedule: WorkScheduleDraft,
+) -> RepositoryResult<TaskRecord> {
+    let now = clock.now_utc_iso8601();
+    repository.create_scheduled_task(
+        validate_work_item_draft(draft, now.clone())?,
+        validate_work_schedule_draft(schedule, now)?,
+    )
 }
 
 pub fn create_task_list(
@@ -387,6 +409,19 @@ pub fn update_subtask(
     repository.update_subtask(
         subtask_id,
         validate_work_item_update_draft(draft, clock.now_utc_iso8601())?,
+    )
+}
+
+pub fn resize_scheduled_work_item(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    target: WorkTargetRef,
+    schedule: WorkScheduleDraft,
+) -> RepositoryResult<()> {
+    let target = validate_work_target_ref(target)?;
+    repository.resize_scheduled_work_item(
+        target,
+        validate_work_schedule_draft(schedule, clock.now_utc_iso8601())?,
     )
 }
 
@@ -1066,6 +1101,22 @@ fn validate_work_item_update_draft(
     })
 }
 
+fn validate_work_schedule_draft(
+    draft: WorkScheduleDraft,
+    now: String,
+) -> RepositoryResult<WorkScheduleUpdate> {
+    Ok(WorkScheduleUpdate {
+        schedule: WorkSchedule::parse(
+            draft.start_date.trim(),
+            draft.start_time.as_deref().map(str::trim),
+            draft.end_date.trim(),
+            draft.end_time.as_deref().map(str::trim),
+            draft.is_all_day,
+        )?,
+        now,
+    })
+}
+
 fn validate_create_list_id(value: Option<&str>) -> RepositoryResult<String> {
     match value {
         Some(raw_value) if !raw_value.trim().is_empty() => {
@@ -1259,6 +1310,40 @@ mod tests {
         );
 
         assert!(result.expect_err("due date is required").contains("期限日"));
+    }
+
+    #[test]
+    fn validate_work_schedule_draft_rejects_invalid_ranges() {
+        let result = validate_work_schedule_draft(
+            WorkScheduleDraft {
+                start_date: "2026-07-20".to_string(),
+                start_time: Some("10:00".to_string()),
+                end_date: "2026-07-20".to_string(),
+                end_time: Some("09:45".to_string()),
+                is_all_day: false,
+            },
+            "2026-07-18T00:00:00Z".to_string(),
+        );
+
+        assert!(result.expect_err("invalid schedule").contains("後"));
+    }
+
+    #[test]
+    fn validate_work_schedule_draft_normalizes_trimmed_values() {
+        let result = validate_work_schedule_draft(
+            WorkScheduleDraft {
+                start_date: " 2026-07-20 ".to_string(),
+                start_time: Some(" 09:00 ".to_string()),
+                end_date: " 2026-07-20 ".to_string(),
+                end_time: Some(" 10:00 ".to_string()),
+                is_all_day: false,
+            },
+            "2026-07-18T00:00:00Z".to_string(),
+        )
+        .expect("valid schedule");
+
+        assert_eq!(result.schedule.start_date, "2026-07-20");
+        assert_eq!(result.schedule.start_time.as_deref(), Some("09:00"));
     }
 
     #[test]

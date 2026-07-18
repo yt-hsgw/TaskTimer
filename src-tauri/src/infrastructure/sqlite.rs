@@ -35,7 +35,7 @@ use crate::{
         TaskListUpdate, TaskReadRepository, TaskRecord, TaskRowRecord, TaskStatusUpdate,
         TaskTagRecord, TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
         UiPreferenceRepository, UiPreferencesRecord, UiPreferencesUpdate, WeekCalendarItem,
-        WorkItemCreate, WorkItemUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        WorkItemCreate, WorkItemUpdate, WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
     domain::{
         notification::{
@@ -69,7 +69,7 @@ const BACKUP_DATABASE_FILE: &str = "tasktimer.sqlite3";
 const BACKUP_MANIFEST_FILE: &str = "backup-manifest.json";
 const JSON_EXPORT_FORMAT: &str = "tasktimer-json-export";
 const CSV_EXPORT_FORMAT: &str = "tasktimer-csv-export";
-const DATA_EXPORT_FORMAT_VERSION: i64 = 2;
+const DATA_EXPORT_FORMAT_VERSION: i64 = 3;
 const DATA_EXPORT_COMPATIBILITY: &str = "viewing-and-migration-aid-not-restore";
 const CSV_EXPORT_MANIFEST_FILE: &str = "export-manifest.json";
 const UI_PREF_LEFT_PANE_OPEN: &str = "left_pane_open";
@@ -255,6 +255,11 @@ struct ExportTaskRow {
     planned_start_date: Option<String>,
     due_date: Option<String>,
     due_time: Option<String>,
+    scheduled_start_date: Option<String>,
+    scheduled_start_time: Option<String>,
+    scheduled_end_date: Option<String>,
+    scheduled_end_time: Option<String>,
+    scheduled_is_all_day: bool,
     timer_target_seconds: Option<i64>,
     memo: String,
     sort_order: i64,
@@ -272,6 +277,11 @@ struct ExportSubtaskRow {
     planned_start_date: Option<String>,
     due_date: Option<String>,
     due_time: Option<String>,
+    scheduled_start_date: Option<String>,
+    scheduled_start_time: Option<String>,
+    scheduled_end_date: Option<String>,
+    scheduled_end_time: Option<String>,
+    scheduled_is_all_day: bool,
     timer_target_seconds: Option<i64>,
     memo: String,
     sort_order: i64,
@@ -1431,6 +1441,25 @@ impl TaskTimerCommandRepository for SqliteDatabase {
         self.with_transaction(|transaction| insert_task(transaction, input))
     }
 
+    fn create_scheduled_task(
+        &self,
+        input: WorkItemCreate,
+        schedule: WorkScheduleUpdate,
+    ) -> RepositoryResult<TaskRecord> {
+        self.with_transaction(|transaction| {
+            let task = insert_task(transaction, input)?;
+            update_work_schedule_row(
+                transaction,
+                &WorkTargetRef {
+                    target_type: WorkTargetType::Task,
+                    id: task.id.clone(),
+                },
+                schedule,
+            )?;
+            select_existing_task_by_id(transaction, &task.id)
+        })
+    }
+
     fn create_subtask(
         &self,
         task_id: String,
@@ -1452,6 +1481,14 @@ impl TaskTimerCommandRepository for SqliteDatabase {
         input: WorkItemUpdate,
     ) -> RepositoryResult<SubtaskRecord> {
         self.with_transaction(|transaction| update_subtask_detail(transaction, &subtask_id, input))
+    }
+
+    fn resize_scheduled_work_item(
+        &self,
+        target: WorkTargetRef,
+        input: WorkScheduleUpdate,
+    ) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| update_work_schedule_row(transaction, &target, input))
     }
 
     fn start_timer(&self, target: WorkTargetRef, now: String) -> RepositoryResult<ActiveTimer> {
@@ -2804,6 +2841,50 @@ fn update_subtask_detail(
     )?;
 
     select_existing_subtask_by_id(transaction, subtask_id)
+}
+
+fn update_work_schedule_row(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+    input: WorkScheduleUpdate,
+) -> RepositoryResult<()> {
+    let schedule = input.schedule;
+    let (table_name, target_label) = match target.target_type {
+        WorkTargetType::Task => ("tasks", "タスク"),
+        WorkTargetType::Subtask => ("subtasks", "サブタスク"),
+    };
+    let sql = format!(
+        "
+        UPDATE {table_name}
+        SET scheduled_start_date = ?1,
+            scheduled_start_time = ?2,
+            scheduled_end_date = ?3,
+            scheduled_end_time = ?4,
+            scheduled_is_all_day = ?5,
+            updated_at = ?6
+        WHERE id = ?7
+          AND deleted_at IS NULL
+          AND status <> 'archived'
+        "
+    );
+    let updated = transaction
+        .execute(
+            &sql,
+            params![
+                schedule.start_date,
+                schedule.start_time,
+                schedule.end_date,
+                schedule.end_time,
+                i64::from(schedule.is_all_day),
+                input.now,
+                target.id
+            ],
+        )
+        .map_err(|error| format!("{target_label}の予定期間を更新できません: {error}"))?;
+    if updated != 1 {
+        return Err(format!("更新対象の{target_label}が存在しません"));
+    }
+    Ok(())
 }
 
 fn insert_notification_rules_for_target(
@@ -6528,6 +6609,7 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
     run_timer_recurrence_migration(connection)?;
     run_pomodoro_migration(connection)?;
     run_due_time_migration(connection)?;
+    run_work_schedule_migration(connection)?;
     run_ui_read_model_migration(connection)?;
     run_board_column_migration(connection)?;
     run_tag_migration(connection)?;
@@ -6644,6 +6726,56 @@ fn run_due_time_migration(connection: &Connection) -> RepositoryResult<()> {
             ",
         )
         .map_err(|error| format!("期限時刻用インデックスを作成できません: {error}"))
+}
+
+fn run_work_schedule_migration(connection: &Connection) -> RepositoryResult<()> {
+    for table_name in ["tasks", "subtasks"] {
+        ensure_column(
+            connection,
+            table_name,
+            "scheduled_start_date",
+            &format!("ALTER TABLE {table_name} ADD COLUMN scheduled_start_date TEXT NULL"),
+        )?;
+        ensure_column(
+            connection,
+            table_name,
+            "scheduled_start_time",
+            &format!("ALTER TABLE {table_name} ADD COLUMN scheduled_start_time TEXT NULL"),
+        )?;
+        ensure_column(
+            connection,
+            table_name,
+            "scheduled_end_date",
+            &format!("ALTER TABLE {table_name} ADD COLUMN scheduled_end_date TEXT NULL"),
+        )?;
+        ensure_column(
+            connection,
+            table_name,
+            "scheduled_end_time",
+            &format!("ALTER TABLE {table_name} ADD COLUMN scheduled_end_time TEXT NULL"),
+        )?;
+        ensure_column(
+            connection,
+            table_name,
+            "scheduled_is_all_day",
+            &format!(
+                "ALTER TABLE {table_name} ADD COLUMN scheduled_is_all_day INTEGER NOT NULL DEFAULT 0 CHECK (scheduled_is_all_day IN (0, 1))"
+            ),
+        )?;
+    }
+    connection
+        .execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS tasks_schedule_range_idx
+            ON tasks (scheduled_start_date, scheduled_end_date)
+            WHERE deleted_at IS NULL AND scheduled_start_date IS NOT NULL;
+
+            CREATE INDEX IF NOT EXISTS subtasks_schedule_range_idx
+            ON subtasks (scheduled_start_date, scheduled_end_date)
+            WHERE deleted_at IS NULL AND scheduled_start_date IS NOT NULL;
+            ",
+        )
+        .map_err(|error| format!("予定期間用インデックスを作成できません: {error}"))
 }
 
 fn run_notification_preference_migration(connection: &Connection) -> RepositoryResult<()> {
@@ -7451,6 +7583,11 @@ fn write_csv_export_files(
             "planned_start_date",
             "due_date",
             "due_time",
+            "scheduled_start_date",
+            "scheduled_start_time",
+            "scheduled_end_date",
+            "scheduled_end_time",
+            "scheduled_is_all_day",
             "timer_target_seconds",
             "memo",
             "sort_order",
@@ -7473,6 +7610,11 @@ fn write_csv_export_files(
                     option_text(&row.planned_start_date),
                     option_text(&row.due_date),
                     option_text(&row.due_time),
+                    option_text(&row.scheduled_start_date),
+                    option_text(&row.scheduled_start_time),
+                    option_text(&row.scheduled_end_date),
+                    option_text(&row.scheduled_end_time),
+                    row.scheduled_is_all_day.to_string(),
                     option_i64_text(row.timer_target_seconds),
                     row.memo.clone(),
                     row.sort_order.to_string(),
@@ -7493,6 +7635,11 @@ fn write_csv_export_files(
             "planned_start_date",
             "due_date",
             "due_time",
+            "scheduled_start_date",
+            "scheduled_start_time",
+            "scheduled_end_date",
+            "scheduled_end_time",
+            "scheduled_is_all_day",
             "timer_target_seconds",
             "memo",
             "sort_order",
@@ -7512,6 +7659,11 @@ fn write_csv_export_files(
                     option_text(&row.planned_start_date),
                     option_text(&row.due_date),
                     option_text(&row.due_time),
+                    option_text(&row.scheduled_start_date),
+                    option_text(&row.scheduled_start_time),
+                    option_text(&row.scheduled_end_date),
+                    option_text(&row.scheduled_end_time),
+                    row.scheduled_is_all_day.to_string(),
                     option_i64_text(row.timer_target_seconds),
                     row.memo.clone(),
                     row.sort_order.to_string(),
@@ -7946,8 +8098,9 @@ fn select_export_tasks(connection: &Connection) -> RepositoryResult<Vec<ExportTa
             "
             SELECT id, list_id, board_column_id, title, status, lifecycle_status,
                    is_favorite, planned_start_date, due_date, due_time,
-                   timer_target_seconds, memo, sort_order, completed_at,
-                   created_at, updated_at
+                   scheduled_start_date, scheduled_start_time,
+                   scheduled_end_date, scheduled_end_time, scheduled_is_all_day,
+                   timer_target_seconds, memo, sort_order, completed_at, created_at, updated_at
             FROM tasks
             WHERE deleted_at IS NULL
             ORDER BY sort_order, created_at, id
@@ -7967,12 +8120,17 @@ fn select_export_tasks(connection: &Connection) -> RepositoryResult<Vec<ExportTa
                 planned_start_date: row.get(7)?,
                 due_date: row.get(8)?,
                 due_time: row.get(9)?,
-                timer_target_seconds: row.get(10)?,
-                memo: row.get(11)?,
-                sort_order: row.get(12)?,
-                completed_at: row.get(13)?,
-                created_at: row.get(14)?,
-                updated_at: row.get(15)?,
+                scheduled_start_date: row.get(10)?,
+                scheduled_start_time: row.get(11)?,
+                scheduled_end_date: row.get(12)?,
+                scheduled_end_time: row.get(13)?,
+                scheduled_is_all_day: row.get::<_, i64>(14)? != 0,
+                timer_target_seconds: row.get(15)?,
+                memo: row.get(16)?,
+                sort_order: row.get(17)?,
+                completed_at: row.get(18)?,
+                created_at: row.get(19)?,
+                updated_at: row.get(20)?,
             })
         })
         .map_err(|error| format!("エクスポート用タスクを取得できません: {error}"))?;
@@ -7984,8 +8142,9 @@ fn select_export_subtasks(connection: &Connection) -> RepositoryResult<Vec<Expor
         .prepare(
             "
             SELECT id, task_id, title, status, planned_start_date, due_date,
-                   due_time, timer_target_seconds, memo, sort_order,
-                   completed_at, created_at, updated_at
+                   due_time, scheduled_start_date, scheduled_start_time,
+                   scheduled_end_date, scheduled_end_time, scheduled_is_all_day,
+                   timer_target_seconds, memo, sort_order, completed_at, created_at, updated_at
             FROM subtasks
             WHERE deleted_at IS NULL
             ORDER BY task_id, sort_order, created_at, id
@@ -8002,12 +8161,17 @@ fn select_export_subtasks(connection: &Connection) -> RepositoryResult<Vec<Expor
                 planned_start_date: row.get(4)?,
                 due_date: row.get(5)?,
                 due_time: row.get(6)?,
-                timer_target_seconds: row.get(7)?,
-                memo: row.get(8)?,
-                sort_order: row.get(9)?,
-                completed_at: row.get(10)?,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                scheduled_start_date: row.get(7)?,
+                scheduled_start_time: row.get(8)?,
+                scheduled_end_date: row.get(9)?,
+                scheduled_end_time: row.get(10)?,
+                scheduled_is_all_day: row.get::<_, i64>(11)? != 0,
+                timer_target_seconds: row.get(12)?,
+                memo: row.get(13)?,
+                sort_order: row.get(14)?,
+                completed_at: row.get(15)?,
+                created_at: row.get(16)?,
+                updated_at: row.get(17)?,
             })
         })
         .map_err(|error| format!("エクスポート用サブタスクを取得できません: {error}"))?;
@@ -8256,6 +8420,11 @@ fn collect_task_calendar_items(
                    tasks.planned_start_date,
                    tasks.due_date,
                    tasks.due_time,
+                   tasks.scheduled_start_date,
+                   tasks.scheduled_start_time,
+                   tasks.scheduled_end_date,
+                   tasks.scheduled_end_time,
+                   tasks.scheduled_is_all_day,
                    tasks.status,
                    task_lists.color_token
             FROM tasks
@@ -8267,6 +8436,10 @@ fn collect_task_calendar_items(
               AND (
                 tasks.planned_start_date BETWEEN ?1 AND ?2
                 OR tasks.due_date BETWEEN ?1 AND ?2
+                OR (
+                  tasks.scheduled_start_date <= ?2
+                  AND tasks.scheduled_end_date >= ?1
+                )
               )
             ",
         )
@@ -8281,8 +8454,13 @@ fn collect_task_calendar_items(
                 planned_start_date: row.get(2)?,
                 due_date: row.get(3)?,
                 due_time: row.get(4)?,
-                status: WorkStatus::from_db(&row.get::<_, String>(5)?).map_err(db_value_error)?,
-                color_token: row.get(6)?,
+                scheduled_start_date: row.get(5)?,
+                scheduled_start_time: row.get(6)?,
+                scheduled_end_date: row.get(7)?,
+                scheduled_end_time: row.get(8)?,
+                scheduled_is_all_day: row.get::<_, i64>(9)? != 0,
+                status: WorkStatus::from_db(&row.get::<_, String>(10)?).map_err(db_value_error)?,
+                color_token: row.get(11)?,
                 parent_title: None,
             })
         })
@@ -8311,6 +8489,11 @@ fn collect_subtask_calendar_items(
                    subtasks.planned_start_date,
                    subtasks.due_date,
                    subtasks.due_time,
+                   subtasks.scheduled_start_date,
+                   subtasks.scheduled_start_time,
+                   subtasks.scheduled_end_date,
+                   subtasks.scheduled_end_time,
+                   subtasks.scheduled_is_all_day,
                    subtasks.status,
                    tasks.title AS parent_title,
                    task_lists.color_token
@@ -8327,6 +8510,10 @@ fn collect_subtask_calendar_items(
               AND (
                 subtasks.planned_start_date BETWEEN ?1 AND ?2
                 OR subtasks.due_date BETWEEN ?1 AND ?2
+                OR (
+                  subtasks.scheduled_start_date <= ?2
+                  AND subtasks.scheduled_end_date >= ?1
+                )
               )
             ",
         )
@@ -8341,9 +8528,14 @@ fn collect_subtask_calendar_items(
                 planned_start_date: row.get(2)?,
                 due_date: row.get(3)?,
                 due_time: row.get(4)?,
-                status: WorkStatus::from_db(&row.get::<_, String>(5)?).map_err(db_value_error)?,
-                parent_title: row.get(6)?,
-                color_token: row.get(7)?,
+                scheduled_start_date: row.get(5)?,
+                scheduled_start_time: row.get(6)?,
+                scheduled_end_date: row.get(7)?,
+                scheduled_end_time: row.get(8)?,
+                scheduled_is_all_day: row.get::<_, i64>(9)? != 0,
+                status: WorkStatus::from_db(&row.get::<_, String>(10)?).map_err(db_value_error)?,
+                parent_title: row.get(11)?,
+                color_token: row.get(12)?,
             })
         })
         .map_err(|error| format!("サブタスクカレンダーを取得できません: {error}"))?;
@@ -8429,6 +8621,9 @@ fn collect_active_timer_calendar_item(
                     parent_title: row.get(5)?,
                     date,
                     time: extract_iso_time(&started_at),
+                    end_date: None,
+                    end_time: None,
+                    is_all_day: false,
                     marker: CalendarMarker::ActiveTimer,
                     status: WorkStatus::from_db(&row.get::<_, String>(4)?)
                         .map_err(db_value_error)?,
@@ -8452,6 +8647,11 @@ struct CalendarSourceRow {
     planned_start_date: Option<String>,
     due_date: Option<String>,
     due_time: Option<String>,
+    scheduled_start_date: Option<String>,
+    scheduled_start_time: Option<String>,
+    scheduled_end_date: Option<String>,
+    scheduled_end_time: Option<String>,
+    scheduled_is_all_day: bool,
     status: WorkStatus,
     parent_title: Option<String>,
     color_token: String,
@@ -8459,6 +8659,25 @@ struct CalendarSourceRow {
 
 fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>) {
     let target_type_text = row.target_type.as_str().to_string();
+    if let (Some(date), Some(end_date)) = (
+        row.scheduled_start_date.clone(),
+        row.scheduled_end_date.clone(),
+    ) {
+        items.push(WeekCalendarItem {
+            id: format!("{target_type_text}:{}:scheduled", row.id),
+            target: target_ref(row.target_type.clone(), row.id.clone()),
+            title: row.title.clone(),
+            parent_title: row.parent_title.clone(),
+            date,
+            time: row.scheduled_start_time.clone(),
+            end_date: Some(end_date),
+            end_time: row.scheduled_end_time.clone(),
+            is_all_day: row.scheduled_is_all_day,
+            marker: CalendarMarker::Scheduled,
+            status: row.status.clone(),
+            color_token: row.color_token.clone(),
+        });
+    }
     if let Some(date) = row.planned_start_date {
         items.push(WeekCalendarItem {
             id: format!("{target_type_text}:{}:planned_start", row.id),
@@ -8467,6 +8686,9 @@ fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>
             parent_title: row.parent_title.clone(),
             date,
             time: None,
+            end_date: None,
+            end_time: None,
+            is_all_day: true,
             marker: CalendarMarker::PlannedStart,
             status: row.status.clone(),
             color_token: row.color_token.clone(),
@@ -8474,13 +8696,18 @@ fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>
     }
 
     if let Some(date) = row.due_date {
+        let due_time = row.due_time;
+        let is_all_day = due_time.is_none();
         items.push(WeekCalendarItem {
             id: format!("{target_type_text}:{}:due", row.id),
             target: target_ref(row.target_type, row.id),
             title: row.title,
             parent_title: row.parent_title,
             date,
-            time: row.due_time,
+            time: due_time,
+            end_date: None,
+            end_time: None,
+            is_all_day,
             marker: CalendarMarker::Due,
             status: row.status,
             color_token: row.color_token,
@@ -12922,5 +13149,203 @@ mod tests {
         assert_eq!(notification_gateway.messages().len(), 1);
         assert_eq!(registered_count, 1);
         assert_eq!(next_notification, None);
+    }
+
+    #[test]
+    fn scheduled_ranges_support_tasks_subtasks_calendar_and_recurrence() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-18T00:00:00Z",
+        };
+        let task = usecases::create_scheduled_task(
+            &database,
+            &clock,
+            draft("期間付きタスク"),
+            usecases::WorkScheduleDraft {
+                start_date: "2026-07-19".to_string(),
+                start_time: Some("22:00".to_string()),
+                end_date: "2026-07-20".to_string(),
+                end_time: Some("10:00".to_string()),
+                is_all_day: false,
+            },
+        )
+        .expect("create scheduled task");
+        let subtask = usecases::create_subtask(
+            &database,
+            &clock,
+            task.id.clone(),
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "終日サブタスク".to_string(),
+                planned_start_date: Some("2026-07-20".to_string()),
+                due_date: None,
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create subtask");
+        usecases::update_subtask(
+            &database,
+            &clock,
+            subtask.id.clone(),
+            usecases::WorkItemUpdateDraft {
+                list_id: None,
+                title: subtask.title.clone(),
+                planned_start_date: Some("2026-07-20".to_string()),
+                due_date: None,
+                due_time: None,
+                timer_target_seconds: None,
+                recurrence_rule: Some(usecases::RecurrenceRuleDraft {
+                    frequency: "weekly".to_string(),
+                    interval: 1,
+                }),
+                memo: None,
+            },
+        )
+        .expect("add recurrence");
+        usecases::resize_scheduled_work_item(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Subtask,
+                id: subtask.id.clone(),
+            },
+            usecases::WorkScheduleDraft {
+                start_date: "2026-07-20".to_string(),
+                start_time: None,
+                end_date: "2026-07-22".to_string(),
+                end_time: None,
+                is_all_day: true,
+            },
+        )
+        .expect("schedule subtask");
+
+        let items = database
+            .list_calendar_items("2026-07-20", "2026-07-21")
+            .expect("calendar items");
+        let scheduled_task = items
+            .iter()
+            .find(|item| item.id == format!("task:{}:scheduled", task.id))
+            .expect("scheduled task item");
+        assert_eq!(scheduled_task.date, "2026-07-19");
+        assert_eq!(scheduled_task.end_date.as_deref(), Some("2026-07-20"));
+        assert_eq!(scheduled_task.end_time.as_deref(), Some("10:00"));
+        let scheduled_subtask = items
+            .iter()
+            .find(|item| item.id == format!("subtask:{}:scheduled", subtask.id))
+            .expect("scheduled subtask item");
+        assert!(scheduled_subtask.is_all_day);
+        assert_eq!(
+            scheduled_subtask.parent_title.as_deref(),
+            Some("期間付きタスク")
+        );
+
+        let tree = database
+            .list_tasks_with_subtasks(20)
+            .expect("task tree after schedule");
+        assert!(tree[0].subtasks[0].recurrence_rule.is_some());
+        let notification_count: i64 = database
+            .with_connection(|connection| {
+                connection
+                    .query_row("SELECT COUNT(*) FROM notification_rules", [], |row| {
+                        row.get(0)
+                    })
+                    .map_err(|error| format!("notification count: {error}"))
+            })
+            .expect("notification count");
+        assert_eq!(
+            notification_count, 1,
+            "planned-start notification is unchanged"
+        );
+
+        let invalid = usecases::resize_scheduled_work_item(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id.clone(),
+            },
+            usecases::WorkScheduleDraft {
+                start_date: "2026-07-20".to_string(),
+                start_time: Some("11:00".to_string()),
+                end_date: "2026-07-20".to_string(),
+                end_time: Some("10:00".to_string()),
+                is_all_day: false,
+            },
+        );
+        assert!(invalid.expect_err("invalid resize").contains("後"));
+        let saved_end_time: String = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT scheduled_end_time FROM tasks WHERE id = ?1",
+                        params![task.id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("saved schedule: {error}"))
+            })
+            .expect("saved schedule");
+        assert_eq!(saved_end_time, "10:00");
+    }
+
+    #[test]
+    fn scheduled_ranges_are_included_in_json_and_csv_exports() {
+        let database = in_memory_database();
+        let export_root = temp_dir("tasktimer-schedule-export");
+        fs::create_dir_all(&export_root).expect("export root");
+        let clock = FixedClock {
+            now: "2026-07-18T00:00:00Z",
+        };
+        usecases::create_scheduled_task(
+            &database,
+            &clock,
+            draft("エクスポート予定"),
+            usecases::WorkScheduleDraft {
+                start_date: "2026-07-20".to_string(),
+                start_time: Some("09:00".to_string()),
+                end_date: "2026-07-20".to_string(),
+                end_time: Some("10:30".to_string()),
+                is_all_day: false,
+            },
+        )
+        .expect("create scheduled task");
+
+        let json_export = usecases::create_json_export(
+            &database,
+            &clock,
+            usecases::DataExportCreateDraft {
+                destination_dir: export_root.to_string_lossy().to_string(),
+            },
+        )
+        .expect("json export");
+        let json: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(&json_export.export_path).expect("read json export"),
+        )
+        .expect("parse json export");
+        assert_eq!(
+            json["manifest"]["formatVersion"],
+            DATA_EXPORT_FORMAT_VERSION
+        );
+        assert_eq!(json["tasks"][0]["scheduled_start_date"], "2026-07-20");
+        assert_eq!(json["tasks"][0]["scheduled_end_time"], "10:30");
+
+        let csv_export = usecases::create_csv_export(
+            &database,
+            &clock,
+            usecases::DataExportCreateDraft {
+                destination_dir: export_root.to_string_lossy().to_string(),
+            },
+        )
+        .expect("csv export");
+        let tasks_csv = fs::read_to_string(Path::new(&csv_export.export_path).join("tasks.csv"))
+            .expect("read tasks csv");
+        assert!(tasks_csv
+            .lines()
+            .next()
+            .expect("csv header")
+            .contains("scheduled_start_date"));
+        assert!(tasks_csv.contains("2026-07-20,09:00,2026-07-20,10:30,false"));
+
+        fs::remove_dir_all(export_root).expect("cleanup export");
     }
 }

@@ -8,6 +8,7 @@ import type {
   PomodoroSettings,
   PomodoroSettingsDraft,
   RecurrenceRuleDraft,
+  ScheduledTaskDraft,
   TagItem,
   TaskListColorToken,
   TaskListItem,
@@ -17,6 +18,7 @@ import type {
   WeekCalendarItem,
   WorkItemDraft,
   WorkItemUpdateDraft,
+  WorkScheduleDraft,
 } from "../application/usecases/contracts";
 import type { NotificationDisplayMode } from "../domain/notification/types";
 import type { ActiveTimer, TimerSession } from "../domain/timer/types";
@@ -562,6 +564,17 @@ export function App() {
         });
       }),
     [activeView, runCreateTaskMutation],
+  );
+
+  const handleCreateScheduledTask = useCallback(
+    (input: ScheduledTaskDraft) =>
+      runCreateTaskMutation(async () => {
+        await tauriTaskTimerGateway.createScheduledTask({
+          ...input,
+          listId: input.listId ?? DEFAULT_TASK_LIST_ID,
+        });
+      }),
+    [runCreateTaskMutation],
   );
 
   const handleCreateTaskList = useCallback(
@@ -1168,6 +1181,20 @@ export function App() {
     [handleUpdateSubtask, handleUpdateTask, tasks],
   );
 
+  const handleResizeCalendarItem = useCallback(
+    (item: WeekCalendarItem, schedule: WorkScheduleDraft) => {
+      if (item.marker !== "scheduled") {
+        setErrorMessage("期間を変更できるのは予定ブロックだけです。");
+        return Promise.resolve(false);
+      }
+      return runMutation(async () => {
+        await tauriTaskTimerGateway.resizeScheduledWorkItem(item.target, schedule);
+        return resolveTaskIdForTarget(tasks, item.target) ?? undefined;
+      });
+    },
+    [runMutation, tasks],
+  );
+
   const handleChangeCalendarViewMode = useCallback(
     (viewMode: CalendarViewMode) => {
       setCalendarViewMode(viewMode);
@@ -1440,8 +1467,9 @@ export function App() {
                 onNextRange={handleNextCalendarRange}
                 onToday={handleTodayCalendarRange}
                 onSelectItem={handleSelectCalendarItem}
-                onCreateTask={handleCreateTask}
+                onCreateTask={handleCreateScheduledTask}
                 onRescheduleItem={handleRescheduleCalendarItem}
+                onResizeItem={handleResizeCalendarItem}
               />
               {selectedTask ? (
                 <TaskDetailPane
