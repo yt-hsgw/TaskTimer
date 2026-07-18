@@ -7,7 +7,7 @@ use crate::domain::{
 
 use super::{
     repositories::{
-        ActivePomodoro, ActiveTimer, DataExportManifestRecord, DataExportRecord,
+        ActivePomodoro, ActiveTimer, BoardColumnRecord, DataExportManifestRecord, DataExportRecord,
         NativeNotificationRegistrationSummary, NextNotificationSchedule,
         NotificationDeliveryAttemptRecord, NotificationDispatchSummary, NotificationSyncResult,
         PomodoroSettingsRecord, RecurrenceRuleRecord, SqliteBackupManifestRecord,
@@ -16,9 +16,9 @@ use super::{
         WeekCalendarItem,
     },
     usecases::{
-        DataExportCreateDraft, PomodoroSettingsDraft, RecurrenceRuleDraft, SqliteBackupCreateDraft,
-        SqliteBackupRestoreDraft, TagDraft, TaskListDraft, UiPreferencesDraft, WorkItemDraft,
-        WorkItemUpdateDraft,
+        BoardColumnDraft, DataExportCreateDraft, PomodoroSettingsDraft, RecurrenceRuleDraft,
+        SqliteBackupCreateDraft, SqliteBackupRestoreDraft, TagDraft, TaskListDraft,
+        UiPreferencesDraft, WorkItemDraft, WorkItemUpdateDraft,
     },
 };
 
@@ -70,6 +70,39 @@ pub struct UpdateTaskListRequestDto {
 #[serde(rename_all = "camelCase")]
 pub struct DeleteTaskListRequestDto {
     pub list_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBoardColumnRequestDto {
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateBoardColumnRequestDto {
+    pub column_id: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReorderBoardColumnsRequestDto {
+    pub ordered_column_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteBoardColumnRequestDto {
+    pub column_id: String,
+    pub move_tasks_to_column_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveTaskToBoardColumnRequestDto {
+    pub task_id: String,
+    pub board_column_id: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -453,6 +486,7 @@ pub struct TaskListDto {
 pub struct TaskRowDto {
     pub id: String,
     pub list_id: String,
+    pub board_column_id: String,
     pub title: String,
     pub status: String,
     pub is_favorite: bool,
@@ -579,6 +613,19 @@ pub struct UiPreferencesDto {
     pub calendar_view_mode: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoardColumnDto {
+    pub id: String,
+    pub title: String,
+    pub sort_order: i64,
+    pub task_count: i64,
+    pub active_task_count: i64,
+    pub completed_task_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 impl TryFrom<UpdateNotificationDisplayModeRequestDto> for NotificationDisplayMode {
     type Error = String;
 
@@ -660,6 +707,18 @@ impl From<CreateTaskListRequestDto> for TaskListDraft {
             name: value.name,
             color_token: value.color_token,
         }
+    }
+}
+
+impl From<CreateBoardColumnRequestDto> for BoardColumnDraft {
+    fn from(value: CreateBoardColumnRequestDto) -> Self {
+        Self { title: value.title }
+    }
+}
+
+impl From<UpdateBoardColumnRequestDto> for BoardColumnDraft {
+    fn from(value: UpdateBoardColumnRequestDto) -> Self {
+        Self { title: value.title }
     }
 }
 
@@ -806,6 +865,21 @@ impl From<TagRecord> for TagDto {
     }
 }
 
+impl From<BoardColumnRecord> for BoardColumnDto {
+    fn from(value: BoardColumnRecord) -> Self {
+        Self {
+            id: value.id,
+            title: value.title,
+            sort_order: value.sort_order,
+            task_count: value.task_count,
+            active_task_count: value.active_task_count,
+            completed_task_count: value.completed_task_count,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
 impl From<SubtaskRecord> for SubtaskDto {
     fn from(value: SubtaskRecord) -> Self {
         Self {
@@ -897,6 +971,7 @@ impl From<TaskRowRecord> for TaskRowDto {
         Self {
             id: value.id,
             list_id: value.list_id,
+            board_column_id: value.board_column_id,
             title: value.title,
             status: value.status.as_str().to_string(),
             is_favorite: value.is_favorite,

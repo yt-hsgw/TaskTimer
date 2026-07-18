@@ -21,11 +21,24 @@ CREATE TABLE IF NOT EXISTS tags (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS board_columns (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL CHECK (length(trim(title)) > 0 AND length(title) <= 80),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   list_id TEXT NOT NULL DEFAULT 'default',
+  board_column_id TEXT NULL,
   title TEXT NOT NULL CHECK (length(trim(title)) > 0),
   status TEXT NOT NULL CHECK (status IN ('todo', 'in_progress', 'done', 'archived')),
+  lifecycle_status TEXT NOT NULL DEFAULT 'active' CHECK (
+    lifecycle_status IN ('active', 'done', 'archived')
+  ),
   is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1)),
   planned_start_date TEXT NULL,
   due_date TEXT NULL,
@@ -47,6 +60,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (list_id) REFERENCES task_lists(id) ON DELETE RESTRICT,
+  FOREIGN KEY (board_column_id) REFERENCES board_columns(id) ON DELETE RESTRICT,
   CHECK (
     planned_start_date IS NULL
     OR due_date IS NULL

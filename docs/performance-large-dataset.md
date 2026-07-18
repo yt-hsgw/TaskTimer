@@ -112,6 +112,7 @@ workflowの制約:
 | 対象 | 意図 |
 | --- | --- |
 | `task_lists_with_counts` | 左ペインのリスト件数集計。 |
+| `board_columns_with_lifecycle_counts` | かんばん列ごとの進行中/完了件数集計。 |
 | `initial_task_tree_200` | 起動時に詳細選択へ使う上限付きタスクツリー取得。 |
 | `task_rows_default_list` | 標準リストの中央一覧Read Model。 |
 | `task_rows_all_lists` | 今日/お気に入りなど横断ビューへ影響する一覧Read Model。 |

@@ -62,6 +62,14 @@ pub fn list_task_lists(
 }
 
 #[tauri::command]
+pub fn list_board_columns(
+    database: DatabaseState<'_>,
+) -> Result<Vec<super::dto::BoardColumnDto>, String> {
+    super::usecases::list_board_columns(database.inner())
+        .map(|columns| columns.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
 pub fn list_tags(database: DatabaseState<'_>) -> Result<Vec<super::dto::TagDto>, String> {
     super::usecases::list_tags(database.inner())
         .map(|tags| tags.into_iter().map(Into::into).collect())
@@ -255,6 +263,69 @@ pub fn delete_task_list(
     request: super::dto::DeleteTaskListRequestDto,
 ) -> Result<(), String> {
     super::usecases::delete_task_list(database.inner(), clock.inner(), request.list_id)
+}
+
+#[tauri::command]
+pub fn create_board_column(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::CreateBoardColumnRequestDto,
+) -> Result<super::dto::BoardColumnDto, String> {
+    super::usecases::create_board_column(database.inner(), clock.inner(), request.into())
+        .map(Into::into)
+}
+
+#[tauri::command]
+pub fn update_board_column(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::UpdateBoardColumnRequestDto,
+) -> Result<super::dto::BoardColumnDto, String> {
+    let column_id = request.column_id.clone();
+    super::usecases::update_board_column(database.inner(), clock.inner(), column_id, request.into())
+        .map(Into::into)
+}
+
+#[tauri::command]
+pub fn reorder_board_columns(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::ReorderBoardColumnsRequestDto,
+) -> Result<Vec<super::dto::BoardColumnDto>, String> {
+    super::usecases::reorder_board_columns(
+        database.inner(),
+        clock.inner(),
+        request.ordered_column_ids,
+    )
+    .map(|columns| columns.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
+pub fn delete_board_column(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::DeleteBoardColumnRequestDto,
+) -> Result<(), String> {
+    super::usecases::delete_board_column(
+        database.inner(),
+        clock.inner(),
+        request.column_id,
+        request.move_tasks_to_column_id,
+    )
+}
+
+#[tauri::command]
+pub fn move_task_to_board_column(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::MoveTaskToBoardColumnRequestDto,
+) -> Result<(), String> {
+    super::usecases::move_task_to_board_column(
+        database.inner(),
+        clock.inner(),
+        request.task_id,
+        request.board_column_id,
+    )
 }
 
 #[tauri::command]

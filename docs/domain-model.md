@@ -7,8 +7,10 @@ erDiagram
   TASK {
     string id PK
     string list_id FK
+    string board_column_id FK
     string title
     string status
+    string lifecycle_status
     bool is_favorite
     date planned_start_date
     date due_date
@@ -16,6 +18,15 @@ erDiagram
     text memo
     int sort_order
     datetime completed_at
+    datetime deleted_at
+    datetime created_at
+    datetime updated_at
+  }
+
+  BOARD_COLUMN {
+    string id PK
+    string title
+    int sort_order
     datetime deleted_at
     datetime created_at
     datetime updated_at
@@ -163,6 +174,7 @@ erDiagram
   }
 
   TASK_LIST ||--o{ TASK : 含む
+  BOARD_COLUMN ||--o{ TASK : 配置する
   TASK ||--o{ TASK_TAG : 持つ
   TAG ||--o{ TASK_TAG : 割り当て
   TASK ||--o{ SUBTASK : 持つ
@@ -199,8 +211,10 @@ erDiagram
 
 - `id`
 - `list_id`
+- `board_column_id`
 - `title`
 - `status`: `todo`, `in_progress`, `done`, `archived`
+- `lifecycle_status`: `active`, `done`, `archived`
 - `is_favorite`
 - `planned_start_date`
 - `due_date`
@@ -220,8 +234,9 @@ erDiagram
 - 期限時刻は `HH:MM` 形式とし、期限日がない場合は保存できない。
 - 完了済みまたはアーカイブ済みタスクはタイマー開始不可。
 - 未完了サブタスクがあるタスクの完了には明示確認が必要。確認後は完了可能だが、サブタスク状態は変更しない。
-- かんばん画面から `todo`、`in_progress`、`done` へ手動変更できる。`done` へ変更する場合は親タスク完了と同じ確認ルールを使う。
-- `done` から `todo` または `in_progress` へ戻す場合は `completed_at` を解除する。
+- かんばん上の業務状態は `board_column_id`、完了/アーカイブ状態は `lifecycle_status` を正とする。
+- `status` は既存画面と外部データ互換のため保持し、完了、再開、アーカイブ、復元、列移動時に同一トランザクションで同期する。
+- 完了後も `board_column_id` を保持し、完了前に所属していた列の完了セクションへ表示する。
 - タスクのアーカイブは `status = archived` として保存し、削除とは別の復元可能な状態として扱う。
 - タスクアーカイブ時、子サブタスク、タイマー履歴、通知ルール、繰り返し設定、完了時刻は変更しない。
 - アーカイブ済みタスクとその子サブタスクは、通常一覧、今日、お気に入り、カレンダー、通知dispatchから除外する。
@@ -231,7 +246,19 @@ erDiagram
 - タスク削除時に対象タスクまたは子サブタスクでタイマー/ポモドーロ開始中の場合、そのセッションもソフト削除して通常のアクティブ検索から除外する。
 - お気に入り状態はタスク単位で保持する。
 - タグは親タスク単位で複数付与できる。
-- 完了済みタスクは完了セクションへ表示されるが、データ上は `status` と `completed_at` を正とする。
+- 完了済みタスクは完了セクションへ表示され、データ上は `lifecycle_status` と `completed_at` を正とする。
+
+### BoardColumn
+
+かんばん上の業務状態を表す。
+
+ルール:
+
+- 名称はtrim後に必須、最大80文字、制御文字不可。
+- アクティブな列名は大文字小文字を区別せず一意にする。
+- 列は最低1件必要とし、最終1列は削除できない。
+- 列削除時は移動先の別列を必須とし、所属タスクの列変更と列のソフト削除を同一トランザクションで行う。
+- 並び順は重複のない連番として1トランザクションで更新する。
 
 ### Tag
 

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const outputDir = path.join(repoRoot, "docs", "assets", "readme");
 const outputPath = path.join(outputDir, "tasktimer-overview.png");
+const kanbanOutputPath = path.join(outputDir, "tasktimer-kanban.png");
 const chromePath = await resolveChromePath();
 
 const vitePort = await getFreePort();
@@ -171,7 +172,31 @@ try {
   await waitForExpression(
     client,
     sessionId,
-    `Boolean(document.querySelector(".kanban-card .task-check-button"))`,
+    `(() => {
+      const board = document.querySelector(".kanban-board");
+      const columns = [...document.querySelectorAll(".kanban-column")];
+      const cards = [...document.querySelectorAll(".kanban-card")];
+      return Boolean(
+        board &&
+        columns.length === 2 &&
+        cards.length === 3 &&
+        document.querySelectorAll(".kanban-drag-handle").length === 2 &&
+        document.querySelectorAll(".kanban-card-drag-handle").length === 3 &&
+        document.querySelector(".kanban-card .task-check-button") &&
+        !document.querySelector(".kanban-card-actions") &&
+        columns.every((column) => column.scrollWidth <= column.clientWidth + 1) &&
+        cards.every((card) => card.scrollWidth <= card.clientWidth + 1)
+      );
+    })()`,
+  );
+  const kanbanScreenshot = await client.send(
+    "Page.captureScreenshot",
+    { format: "png", fromSurface: true },
+    sessionId,
+  );
+  await writeFile(
+    kanbanOutputPath,
+    Buffer.from(kanbanScreenshot.data, "base64"),
   );
   await client.send(
     "Runtime.evaluate",
@@ -228,6 +253,9 @@ try {
   await writeFile(outputPath, Buffer.from(screenshot.data, "base64"));
   await client.close();
   console.log(`README screenshot written: ${path.relative(repoRoot, outputPath)}`);
+  console.log(
+    `README screenshot written: ${path.relative(repoRoot, kanbanOutputPath)}`,
+  );
 } finally {
   if (chromeProcess) {
     chromeProcess.kill("SIGTERM");
@@ -587,6 +615,26 @@ function buildTauriInvokeMockSource() {
       updatedAt: now,
       tags: [],
       subtasks: []
+    },
+    {
+      id: "task-design-notes",
+      listId: "default",
+      title: "設計メモを整理",
+      status: "done",
+      isFavorite: false,
+      plannedStartDate: null,
+      dueDate: "2026-07-08",
+      dueTime: null,
+      timerTargetSeconds: 1800,
+      recurrenceRule: null,
+      memo: "決定事項を設計資料へ反映する。",
+      sortOrder: 30,
+      completedAt: "2026-07-08T08:00:00Z",
+      deletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+      tags: [],
+      subtasks: []
     }
   ];
   const activeTimer = {
@@ -605,9 +653,31 @@ function buildTauriInvokeMockSource() {
       name: "タスク",
       colorToken: "green",
       sortOrder: 0,
-      taskCount: 2,
+      taskCount: 3,
       activeTaskCount: 2,
+      completedTaskCount: 1,
+      createdAt: now,
+      updatedAt: now
+    }
+  ];
+  const boardColumns = [
+    {
+      id: "board-todo",
+      title: "未着手",
+      sortOrder: 0,
+      taskCount: 1,
+      activeTaskCount: 1,
       completedTaskCount: 0,
+      createdAt: now,
+      updatedAt: now
+    },
+    {
+      id: "board-in-progress",
+      title: "進行中",
+      sortOrder: 1,
+      taskCount: 2,
+      activeTaskCount: 1,
+      completedTaskCount: 1,
       createdAt: now,
       updatedAt: now
     }
@@ -634,6 +704,7 @@ function buildTauriInvokeMockSource() {
     {
       id: "task-weekly-review",
       listId: "default",
+      boardColumnId: "board-in-progress",
       title: "週次レビュー資料を作成",
       status: "in_progress",
       isFavorite: true,
@@ -654,6 +725,7 @@ function buildTauriInvokeMockSource() {
     {
       id: "task-release-check",
       listId: "default",
+      boardColumnId: "board-todo",
       title: "リリース前チェック",
       status: "todo",
       isFavorite: false,
@@ -663,6 +735,27 @@ function buildTauriInvokeMockSource() {
       timerTargetSeconds: 3600,
       sortOrder: 20,
       completedAt: null,
+      createdAt: now,
+      updatedAt: now,
+      subtaskTotalCount: 0,
+      completedSubtaskCount: 0,
+      activeTimerTarget: null,
+      isTimerActive: false,
+      tags: []
+    },
+    {
+      id: "task-design-notes",
+      listId: "default",
+      boardColumnId: "board-in-progress",
+      title: "設計メモを整理",
+      status: "done",
+      isFavorite: false,
+      plannedStartDate: null,
+      dueDate: "2026-07-08",
+      dueTime: null,
+      timerTargetSeconds: 1800,
+      sortOrder: 30,
+      completedAt: "2026-07-08T08:00:00Z",
       createdAt: now,
       updatedAt: now,
       subtaskTotalCount: 0,
@@ -730,6 +823,7 @@ function buildTauriInvokeMockSource() {
         health_check: () => "tauri-ready",
         list_tasks: () => clone(tasks),
         list_task_lists: () => clone(taskLists),
+        list_board_columns: () => clone(boardColumns),
         list_tags: () => clone(tags),
         list_task_rows: () => clone(taskRows),
         list_calendar_items: () => clone(calendarItems),

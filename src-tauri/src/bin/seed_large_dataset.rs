@@ -200,6 +200,14 @@ fn seed_database(connection: &mut Connection, config: &Config) -> Result<(), Box
     )?;
     transaction.execute(
         "
+        INSERT INTO board_columns (id, title, sort_order, created_at, updated_at)
+        VALUES ('board-todo', '未着手', 0, ?1, ?1),
+               ('board-in-progress', '進行中', 1, ?1, ?1)
+        ",
+        params![created_at],
+    )?;
+    transaction.execute(
+        "
         INSERT INTO ui_preferences (key, value, updated_at)
         VALUES ('last_task_list_id', 'default', ?1)
         ON CONFLICT(key) DO NOTHING
@@ -232,13 +240,13 @@ fn seed_database(connection: &mut Connection, config: &Config) -> Result<(), Box
         let mut statement = transaction.prepare(
             "
             INSERT INTO tasks (
-              id, list_id, title, status, is_favorite,
+              id, list_id, board_column_id, title, status, lifecycle_status, is_favorite,
               planned_start_date, due_date, due_time, timer_target_seconds,
               memo, sort_order, completed_at, deleted_at, created_at, updated_at
             ) VALUES (
-              ?1, ?2, ?3, ?4, ?5,
-              ?6, ?7, ?8, ?9,
-              ?10, ?11, ?12, NULL, ?13, ?13
+              ?1, ?2, ?3, ?4, ?5, ?6, ?7,
+              ?8, ?9, ?10, ?11,
+              ?12, ?13, ?14, NULL, ?15, ?15
             )
             ",
         )?;
@@ -256,8 +264,10 @@ fn seed_database(connection: &mut Connection, config: &Config) -> Result<(), Box
             statement.execute(params![
                 task_id(index),
                 task_list_id(index % config.list_count),
+                task_board_column_id(index),
                 format!("性能検証タスク {:05}", index + 1),
                 task_status(index),
+                task_lifecycle_status(index),
                 if index % 11 == 0 { 1 } else { 0 },
                 planned,
                 due,
@@ -347,6 +357,8 @@ fn seed_database(connection: &mut Connection, config: &Config) -> Result<(), Box
         "
         UPDATE tasks
         SET status = 'in_progress',
+            lifecycle_status = 'active',
+            board_column_id = 'board-in-progress',
             completed_at = NULL,
             updated_at = ?2
         WHERE id = ?1
@@ -393,6 +405,10 @@ fn create_performance_indexes(connection: &Connection) -> Result<(), Box<dyn Err
 
         CREATE INDEX IF NOT EXISTS tasks_list_status_idx
         ON tasks (list_id, status, sort_order, created_at)
+        WHERE deleted_at IS NULL;
+
+        CREATE INDEX IF NOT EXISTS tasks_board_column_lifecycle_idx
+        ON tasks (board_column_id, lifecycle_status, sort_order, created_at)
         WHERE deleted_at IS NULL;
 
         CREATE INDEX IF NOT EXISTS tasks_favorite_idx
@@ -485,6 +501,22 @@ fn task_status(index: usize) -> &'static str {
         "in_progress"
     } else {
         "todo"
+    }
+}
+
+fn task_board_column_id(index: usize) -> &'static str {
+    if task_status(index) == "in_progress" {
+        "board-in-progress"
+    } else {
+        "board-todo"
+    }
+}
+
+fn task_lifecycle_status(index: usize) -> &'static str {
+    if task_status(index) == "done" {
+        "done"
+    } else {
+        "active"
     }
 }
 

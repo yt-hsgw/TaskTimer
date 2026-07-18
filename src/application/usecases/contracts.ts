@@ -233,9 +233,21 @@ export type TagItem = {
   updatedAt: string;
 };
 
+export type BoardColumn = {
+  id: string;
+  title: string;
+  sortOrder: number;
+  taskCount: number;
+  activeTaskCount: number;
+  completedTaskCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type TaskRow = {
   id: string;
   listId: string;
+  boardColumnId: string;
   title: string;
   status: Task["status"];
   isFavorite: boolean;
@@ -258,6 +270,7 @@ export type TaskTimerGateway = {
   healthCheck(): Promise<string>;
   listTasks(): Promise<TaskWithSubtasks[]>;
   listTaskLists(): Promise<TaskListItem[]>;
+  listBoardColumns(): Promise<BoardColumn[]>;
   listTags(): Promise<TagItem[]>;
   listTaskRows(listId?: string | null): Promise<TaskRow[]>;
   listArchivedTaskRows(): Promise<TaskRow[]>;
@@ -275,6 +288,11 @@ export type TaskTimerGateway = {
   createTaskList(input: TaskListDraft): Promise<TaskListItem>;
   updateTaskList(listId: string, input: TaskListDraft): Promise<TaskListItem>;
   deleteTaskList(listId: string): Promise<void>;
+  createBoardColumn(title: string): Promise<BoardColumn>;
+  updateBoardColumn(columnId: string, title: string): Promise<BoardColumn>;
+  reorderBoardColumns(orderedColumnIds: string[]): Promise<BoardColumn[]>;
+  deleteBoardColumn(columnId: string, moveTasksToColumnId: string): Promise<void>;
+  moveTaskToBoardColumn(taskId: string, boardColumnId: string): Promise<void>;
   createTag(input: TagDraft): Promise<TagItem>;
   updateTag(tagId: string, input: TagDraft): Promise<TagItem>;
   deleteTag(tagId: string): Promise<void>;
