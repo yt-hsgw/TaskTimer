@@ -12,12 +12,15 @@ GitHub Issue: #58
 - アクティブタイマーがDBから復元されることを自動テスト化する。
 - 長時間のwall-clock差分が `elapsed_seconds` に反映されることを自動テスト化する。
 - `registered` になった通知ルールが復帰後の再dispatchで再送されないことを自動テスト化する。
+- 一時停止中にDB接続を閉じ、長時間経過後に再接続して停止しても、停止中の時間が経過時間へ混ざらないことを自動テスト化する。
+- GitHub-hosted Windows VMでタイマー復元、wall-clock計算、通知重複防止を継続検証する。
 - Windows実機で確認する観点と手順を記録する。
 
 ## スコープ外
 
 - OSへ将来時刻の通知を予約する仕組み。これはGitHub #51で扱う。
 - OSスリープイベントをTauri pluginで直接購読する仕組み。
+- GitHub-hosted runner自体をOSスリープさせる検証。
 - バックグラウンド常駐や自動更新。
 
 ## 設計レビュー
@@ -92,7 +95,17 @@ Tauri pluginでOS電源イベントを直接購読する。
 
 - アプリ再起動後に `get_active_timer` が開始中タイマーを返す。
 - 長時間のwall-clock差分を含めて停止時 `elapsed_seconds` が確定する。
+- 一時停止中のDB再接続と長時間のwall-clock差分後も、一時停止区間を除外して `elapsed_seconds` が確定する。
 - `registered` 通知ルールは次回dispatch対象にならない。
+- 復帰相当の通知同期で、期限到来通知を1回だけ送信し、次の未来通知を再予約する。
+
+### Windows VM回帰検証
+
+`.github/workflows/windows-resume-regression.yml` はPull Requestと手動実行でWindows runner上のRustテストを実行する。
+
+- Windows向け依存を含む状態でSQLite RepositoryとUse Caseの全テストを実行する。
+- 実際のOS電源スリープはGitHub-hosted runnerで安定して自動化できないため、固定時刻のジャンプとDB再接続を復帰相当の代理入力にする。
+- workflow成功は実スリープ確認の代替ではない。実電源イベント、WebView2のフォーカス復帰、OS通知表示はRelease前手動確認に残す。
 
 ## 手動確認範囲
 
@@ -112,12 +125,21 @@ Windows実機またはVMで次を確認する。
 
 - 復帰相当のイベントでスナップショット再同期が行われる。
 - 自動テスト化できる範囲がRustテストで固定されている。
+- GitHub-hosted Windows VMで回帰テストが成功し、実行結果をIssueへ記録できる。
 - Windows実機確認手順が文書化されている。
 - 不具合が見つかった場合の記録方針が明確である。
 
+## 実装結果
+
+- `paused_timer_survives_database_reopen_and_excludes_wall_clock_gap` を追加し、一時停止後の長時間経過とDB再接続を経ても、停止前の120秒だけが作業時間として確定することを固定した。
+- `Windows復帰回帰検証` workflowを追加し、Windows向け依存を含むRustテスト全体をPull Requestと手動実行で確認できるようにした。
+- ローカルではRustテスト95件、Clippy、TypeScript/Vite build、npm監査、実行時プライバシー監査が成功した。
+- 実電源スリープとOS通知表示は自動確認済みと扱わず、Release前手動確認を維持する。
+
 ## レビュー判断
 
-フォローアップ付き承認。
+承認。
 
-- このPRでは、実装上の再同期と自動テスト、実機確認手順を追加する。
-- Windows実機でのスリープ/復帰結果は、次回Release前ゲートまたはユーザー確認時にこの手順で記録する。
+- 実装上の再同期、自動テスト、Windows VM回帰workflow、実機確認手順をIssue #58の完了範囲とする。
+- 実際のWindowsスリープ/復帰はRelease artifactごとの手動ゲートであり、workflow成功だけで確認済みとは扱わない。
+- 手動確認で差分が見つかった場合は、別IssueとしてOS情報と再現手順を記録する。

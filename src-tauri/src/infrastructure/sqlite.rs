@@ -10812,6 +10812,67 @@ mod tests {
     }
 
     #[test]
+    fn paused_timer_survives_database_reopen_and_excludes_wall_clock_gap() {
+        let data_dir = std::env::temp_dir().join(format!("tasktimer-test-{}", Uuid::new_v4()));
+        let start_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let pause_clock = FixedClock {
+            now: "2026-07-06T00:02:00Z",
+        };
+        let stop_clock = FixedClock {
+            now: "2026-07-06T10:00:00Z",
+        };
+        let timer_id;
+
+        {
+            let database = SqliteDatabase::open_in_dir(data_dir.clone()).expect("open database");
+            let task = usecases::create_task(&database, &start_clock, draft("一時停止復帰確認"))
+                .expect("create task");
+            let active = usecases::start_timer(
+                &database,
+                &start_clock,
+                WorkTargetRef {
+                    target_type: WorkTargetType::Task,
+                    id: task.id,
+                },
+            )
+            .expect("start timer");
+            usecases::pause_active_timer(&database, &pause_clock).expect("pause timer");
+            timer_id = active.id;
+        }
+
+        let reopened = SqliteDatabase::open_in_dir(data_dir.clone()).expect("reopen database");
+        let active = reopened
+            .get_active_timer()
+            .expect("active timer")
+            .expect("persisted paused timer");
+        assert_eq!(active.id, timer_id);
+        assert_eq!(active.paused_at.as_deref(), Some("2026-07-06T00:02:00Z"));
+
+        let stopped =
+            usecases::stop_active_timer(&reopened, &stop_clock).expect("stop paused timer");
+        let resumed_at: String = reopened
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT resumed_at FROM timer_pauses WHERE timer_session_id = ?1",
+                        params![stopped.id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("pause row: {error}"))
+            })
+            .expect("pause row");
+
+        assert_eq!(stopped.elapsed_seconds, Some(120));
+        assert_eq!(stopped.paused_at, None);
+        assert_eq!(resumed_at, "2026-07-06T10:00:00Z");
+        assert!(reopened.get_active_timer().expect("active timer").is_none());
+
+        fs::remove_dir_all(data_dir).expect("cleanup");
+    }
+
+    #[test]
     fn pause_resume_and_stop_active_timer_excludes_paused_seconds() {
         let database = in_memory_database();
         let start_clock = FixedClock {

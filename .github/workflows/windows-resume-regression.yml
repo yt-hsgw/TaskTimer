@@ -1,0 +1,55 @@
+name: Windows復帰回帰検証
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/windows-resume-regression.yml"
+      - "src-tauri/Cargo.toml"
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/migrations/**"
+      - "src-tauri/src/application/**"
+      - "src-tauri/src/domain/**"
+      - "src-tauri/src/infrastructure/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  resume-regression:
+    name: Windowsタイマー・通知復帰検証
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v5
+
+      - name: Rustを準備
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Rustビルドキャッシュを復元
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-resume-regression-rust
+          workspaces: |
+            src-tauri -> target
+
+      - name: Windows回帰テストを実行
+        shell: pwsh
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: 検証範囲を記録
+        shell: pwsh
+        run: |
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Windows復帰回帰検証"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- 開始中タイマーのDB再接続とwall-clock差分"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- 一時停止中タイマーのDB再接続と停止区間除外"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- 復帰相当の通知同期と重複送信防止"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "> 実際のOS電源スリープとOS通知表示はRelease前手動確認の対象です。"
