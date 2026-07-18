@@ -33,7 +33,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [025 OSスリープ・復帰時のタイマーと通知を強化する](025-sleep-resume-timer-notification.md) / GitHub #58
 - [026 通知の全体有効・無効設定を追加する](026-notification-rule-toggle-ui.md) / GitHub #55（完了）
 - [027 タスク詳細とサブタスク選択UXを改善する](027-task-detail-subtask-ux.md) / GitHub #68
-- [028 大量データで一覧とカレンダー表示を検証する](028-performance-large-dataset.md) / GitHub #72
+- [028 大量データで一覧とカレンダー表示を検証する](028-performance-large-dataset.md) / GitHub #72（完了）
 - [029 ローカルデータのバックアップとエクスポート方針を設計する](029-data-backup-export.md) / GitHub #73
 - [030 通知失敗履歴と再試行結果を表示する](030-notification-failure-history.md) / GitHub #53
 - [031 カスタムリスト管理を追加する](031-custom-list-management.md) / GitHub #54
