@@ -28,6 +28,7 @@ import type {
   TaskRow,
   TaskWithSubtasks,
 } from "../../application/usecases/contracts";
+import { usePresentationRenderProbe } from "../renderProbe";
 
 type KanbanBoardProps = {
   columns: BoardColumn[];
@@ -79,6 +80,7 @@ export function KanbanBoard({
   onMoveTask,
   onLoadMoreTasks,
 }: KanbanBoardProps) {
+  usePresentationRenderProbe("KanbanBoard");
   const [isCreatingColumn, setIsCreatingColumn] = useState(false);
   const [newColumnTitle, setNewColumnTitle] = useState("");
   const [pendingDeleteColumnId, setPendingDeleteColumnId] = useState<

@@ -18,6 +18,7 @@ import type {
   WorkStatus,
   WorkTargetRef,
 } from "../../domain/task/types";
+import { usePresentationRenderProbe } from "../renderProbe";
 
 type TaskDetailPaneProps = {
   task: TaskWithSubtasks;
@@ -165,6 +166,7 @@ export function TaskDetailPane({
   onAttachTagToTask,
   onDetachTagFromTask,
 }: TaskDetailPaneProps) {
+  usePresentationRenderProbe("TaskDetailPane");
   const selectedSubtask = useMemo(
     () =>
       selectedSubtaskId

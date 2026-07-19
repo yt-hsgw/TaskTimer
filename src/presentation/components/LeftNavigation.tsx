@@ -19,6 +19,7 @@ import type {
   TaskListItem,
 } from "../../application/usecases/contracts";
 import { DEFAULT_TASK_LIST_ID } from "../../domain/task/types";
+import { usePresentationRenderProbe } from "../renderProbe";
 
 export type AppView =
   | { kind: "list"; listId: string }
@@ -58,6 +59,7 @@ export function LeftNavigation({
   onDeleteTaskList,
   onToggle,
 }: LeftNavigationProps) {
+  usePresentationRenderProbe("LeftNavigation");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newListName, setNewListName] = useState("");
   const [editingListId, setEditingListId] = useState<string | null>(null);

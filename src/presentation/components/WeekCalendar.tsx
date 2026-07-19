@@ -15,6 +15,7 @@ import type {
   WorkScheduleDraft,
 } from "../../application/usecases/contracts";
 import type { WorkTargetRef } from "../../domain/task/types";
+import { usePresentationRenderProbe } from "../renderProbe";
 
 export type CalendarViewMode = "week" | "day" | "month";
 
@@ -95,6 +96,7 @@ export function WeekCalendar({
   onRescheduleItem,
   onResizeItem,
 }: WeekCalendarProps) {
+  usePresentationRenderProbe("WeekCalendar");
   const titleInputRef = useRef<HTMLInputElement>(null);
   const [createDraft, setCreateDraft] = useState<CalendarTaskDraft | null>(null);
   const [draggedItem, setDraggedItem] = useState<WeekCalendarItem | null>(null);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   ActivePomodoro,
@@ -41,10 +41,46 @@ import {
   type DataManagementActionResult,
 } from "./components/SettingsPanel";
 import { LeftNavigation, type AppView } from "./components/LeftNavigation";
+import { usePresentationRenderProbe } from "./renderProbe";
+
+const MemoizedWeekCalendar = memo(WeekCalendar);
+const MemoizedTaskPanel = memo(TaskPanel);
+const MemoizedKanbanBoard = memo(KanbanBoard);
+const MemoizedTaskDetailPane = memo(TaskDetailPane);
+const MemoizedSettingsPanel = memo(SettingsPanel);
+const MemoizedLeftNavigation = memo(LeftNavigation);
 
 type LoadSnapshotOptions = {
   showLoading?: boolean;
 };
+
+type ReadModelRefreshPlan = {
+  taskPage?: boolean;
+  taskLists?: boolean;
+  boardColumns?: boolean;
+  tags?: boolean;
+  calendar?: boolean;
+  runtime?: boolean;
+  settings?: boolean;
+  notifications?: boolean;
+  syncExpiredPomodoro?: boolean;
+};
+
+type MutationScope =
+  | "navigation"
+  | "detail"
+  | "board"
+  | "calendar"
+  | "settings";
+
+type MutationOptions = {
+  refresh: ReadModelRefreshPlan;
+  scope: MutationScope;
+  invalidateCalendar?: boolean;
+  invalidateBoardColumns?: boolean;
+};
+
+type MutationRefreshOptions = Omit<MutationOptions, "scope">;
 
 type TaskPageViewState = {
   scopeKey: string;
@@ -56,8 +92,31 @@ type TaskPageViewState = {
 const NOTIFICATION_SCHEDULER_MAX_TIMEOUT_MS = 60_000;
 const NOTIFICATION_SCHEDULER_DUE_DELAY_MS = 500;
 const TASK_PAGE_SIZE = 200;
+const INITIAL_MUTATION_COUNTS: Record<MutationScope, number> = {
+  navigation: 0,
+  detail: 0,
+  board: 0,
+  calendar: 0,
+  settings: 0,
+};
+const TASK_CONTENT_REFRESH = {
+  refresh: { taskPage: true, taskLists: true, notifications: true },
+  invalidateCalendar: true,
+} satisfies MutationRefreshOptions;
+const TASK_LIFECYCLE_REFRESH = {
+  refresh: { taskPage: true, taskLists: true, notifications: true },
+  invalidateCalendar: true,
+  invalidateBoardColumns: true,
+} satisfies MutationRefreshOptions;
+const TASK_TIMER_REFRESH = {
+  refresh: { taskPage: true, runtime: true, notifications: true },
+} satisfies MutationRefreshOptions;
+const POMODORO_REFRESH = {
+  refresh: { runtime: true, notifications: true },
+} satisfies MutationRefreshOptions;
 
 export function App() {
+  usePresentationRenderProbe("App");
   const [tasks, setTasks] = useState<TaskWithSubtasks[]>([]);
   const [taskRows, setTaskRows] = useState<TaskRow[]>([]);
   const [taskPageState, setTaskPageState] = useState<TaskPageViewState>({
@@ -105,7 +164,11 @@ export function App() {
   const [hasHydratedUiPreferences, setHasHydratedUiPreferences] =
     useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [isMutating, setIsMutating] = useState(false);
+  const [isTaskPageLoading, setIsTaskPageLoading] = useState(false);
+  const [isCalendarLoading, setIsCalendarLoading] = useState(false);
+  const [mutationCounts, setMutationCounts] = useState(
+    INITIAL_MUTATION_COUNTS,
+  );
   const [isCreatingTaskPending, setIsCreatingTaskPending] = useState(false);
   const [isLoadingMoreTasks, setIsLoadingMoreTasks] = useState(false);
   const [pendingTaskActionIds, setPendingTaskActionIds] = useState<
@@ -118,9 +181,43 @@ export function App() {
   });
   const lastPersistedUiPreferencesRef = useRef<string | null>(null);
   const taskPageStateRef = useRef(taskPageState);
-  const snapshotRequestIdRef = useRef(0);
-  const snapshotInFlightRef = useRef(false);
+  const taskPageRequestIdRef = useRef(0);
+  const taskPageInFlightRef = useRef(false);
+  const taskListsRequestIdRef = useRef(0);
+  const boardColumnsRequestIdRef = useRef(0);
+  const tagsRequestIdRef = useRef(0);
+  const calendarRequestIdRef = useRef(0);
+  const runtimeRequestIdRef = useRef(0);
+  const settingsRequestIdRef = useRef(0);
+  const notificationsRequestIdRef = useRef(0);
+  const hasLoadedInitialSnapshotRef = useRef(false);
+  const isInitialSnapshotLoadingRef = useRef(false);
+  const loadedTaskScopeKeyRef = useRef<string | null>(null);
+  const loadedCalendarQueryKeyRef = useRef<string | null>(null);
+  const calendarInvalidationVersionRef = useRef(0);
+  const loadedCalendarInvalidationVersionRef = useRef(-1);
+  const boardColumnsInvalidationVersionRef = useRef(0);
+  const loadedBoardColumnsInvalidationVersionRef = useRef(-1);
   const loadMoreRequestIdRef = useRef(0);
+  const activeViewRef = useRef(activeView);
+  const refreshReadModelsRef = useRef<
+    (plan: ReadModelRefreshPlan) => Promise<void>
+  >(async () => undefined);
+  activeViewRef.current = activeView;
+
+  const isNavigationMutating = mutationCounts.navigation > 0;
+  const isDetailMutating = mutationCounts.detail > 0;
+  const isBoardMutating = mutationCounts.board > 0;
+  const isCalendarMutating = mutationCounts.calendar > 0;
+  const isSettingsMutating = mutationCounts.settings > 0;
+  const visiblePendingTaskActionIds = useMemo(() => {
+    if (!isDetailMutating || !selectedTaskId) {
+      return pendingTaskActionIds;
+    }
+    const next = new Set(pendingTaskActionIds);
+    next.add(selectedTaskId);
+    return next;
+  }, [isDetailMutating, pendingTaskActionIds, selectedTaskId]);
 
   const favoriteCount = taskNavigationCounts.favoriteCount;
   const todayDate = getTodayDateInputValue();
@@ -152,6 +249,7 @@ export function App() {
     () => getCalendarQueryRange(calendarViewMode, calendarAnchorDate),
     [calendarAnchorDate, calendarViewMode],
   );
+  const calendarQueryKey = `${calendarRange.startDate}:${calendarRange.endDate}`;
 
   const visibleTasks = tasks;
   const visibleTaskRows = taskRows;
@@ -173,11 +271,10 @@ export function App() {
     );
   }, [selectedSubtaskId, selectedTask]);
 
-  const loadSnapshot = useCallback(
-    async (options?: LoadSnapshotOptions) => {
-      const showLoading = options?.showLoading ?? true;
-      const requestId = ++snapshotRequestIdRef.current;
-      snapshotInFlightRef.current = true;
+  const refreshTaskPage = useCallback(
+    async (showLoading = false) => {
+      const requestId = ++taskPageRequestIdRef.current;
+      taskPageInFlightRef.current = true;
       loadMoreRequestIdRef.current += 1;
       const currentPageState = taskPageStateRef.current;
       const targetTaskCount =
@@ -185,43 +282,17 @@ export function App() {
           ? Math.max(currentPageState.loadedCount, TASK_PAGE_SIZE)
           : TASK_PAGE_SIZE;
       if (showLoading) {
-        setIsLoading(true);
+        setIsTaskPageLoading(true);
       }
       setIsLoadingMoreTasks(false);
-      setErrorMessage(null);
 
       try {
-        await tauriTaskTimerGateway.healthCheck();
-        const pomodoroSyncResult =
-          await tauriTaskTimerGateway.syncExpiredPomodoro();
-        const [
-          nextTaskPage,
-          nextTaskLists,
-          nextBoardColumns,
-          nextTags,
-          nextItems,
-          nextActiveTimer,
-          nextActivePomodoro,
-          nextPomodoroSettings,
-          nextDisplayMode,
-          nextNotificationsEnabled,
-        ] = await Promise.all([
-          loadTaskPageWindow(taskPageScope, todayDate, targetTaskCount),
-          tauriTaskTimerGateway.listTaskLists(),
-          tauriTaskTimerGateway.listBoardColumns(),
-          tauriTaskTimerGateway.listTags(),
-          tauriTaskTimerGateway.listCalendarItems(
-            calendarRange.startDate,
-            calendarRange.endDate,
-          ),
-          tauriTaskTimerGateway.getActiveTimer(),
-          tauriTaskTimerGateway.getActivePomodoro(),
-          tauriTaskTimerGateway.getPomodoroSettings(),
-          tauriTaskTimerGateway.getNotificationDisplayMode(),
-          tauriTaskTimerGateway.getNotificationsEnabled(),
-        ]);
-
-        if (requestId !== snapshotRequestIdRef.current) {
+        const nextTaskPage = await loadTaskPageWindow(
+          taskPageScope,
+          todayDate,
+          targetTaskCount,
+        );
+        if (requestId !== taskPageRequestIdRef.current) {
           return;
         }
         const nextPageState = createTaskPageViewState(
@@ -229,53 +300,204 @@ export function App() {
           nextTaskPage,
         );
         taskPageStateRef.current = nextPageState;
+        loadedTaskScopeKeyRef.current = taskPageScopeKey;
         setTasks(nextTaskPage.tasks);
         setTaskRows(nextTaskPage.rows);
         setTaskPageState(nextPageState);
         setTaskNavigationCounts(nextTaskPage.navigationCounts);
-        setTaskLists(nextTaskLists);
-        setBoardColumns(nextBoardColumns);
-        setTags(nextTags);
-        setItems(nextItems);
-        setActiveTimer(nextActiveTimer);
-        setActivePomodoro(nextActivePomodoro);
-        setPomodoroSettings(nextPomodoroSettings);
-        setDisplayMode(nextDisplayMode);
-        setNotificationsEnabled(nextNotificationsEnabled);
-        const notificationSyncResult =
-          await tauriTaskTimerGateway.syncNotifications();
-        await tauriTaskTimerGateway.processNativeNotificationRegistrations();
-        if (requestId !== snapshotRequestIdRef.current) {
-          return;
-        }
-        setNotificationSummary(
-          combineNotificationSummaries(
-            pomodoroSyncResult.notificationSummary,
-            notificationSyncResult.dispatchSummary,
-          ),
-        );
-        setNextNotificationSchedule(notificationSyncResult.nextSchedule);
-      } catch (error) {
-        if (requestId === snapshotRequestIdRef.current) {
-          setNextNotificationSchedule(null);
-          setErrorMessage(toErrorMessage(error));
-        }
       } finally {
-        if (requestId === snapshotRequestIdRef.current) {
-          snapshotInFlightRef.current = false;
-          if (showLoading) {
-            setIsLoading(false);
-          }
+        if (requestId === taskPageRequestIdRef.current) {
+          taskPageInFlightRef.current = false;
+          setIsTaskPageLoading(false);
         }
       }
     },
+    [taskPageScope, taskPageScopeKey, todayDate],
+  );
+
+  const refreshTaskLists = useCallback(async () => {
+    const requestId = ++taskListsRequestIdRef.current;
+    const nextTaskLists = await tauriTaskTimerGateway.listTaskLists();
+    if (requestId === taskListsRequestIdRef.current) {
+      setTaskLists(nextTaskLists);
+    }
+  }, []);
+
+  const refreshBoardColumns = useCallback(async () => {
+    const requestId = ++boardColumnsRequestIdRef.current;
+    const invalidationVersion = boardColumnsInvalidationVersionRef.current;
+    const nextBoardColumns = await tauriTaskTimerGateway.listBoardColumns();
+    if (requestId === boardColumnsRequestIdRef.current) {
+      setBoardColumns(nextBoardColumns);
+      loadedBoardColumnsInvalidationVersionRef.current = invalidationVersion;
+    }
+  }, []);
+
+  const refreshTags = useCallback(async () => {
+    const requestId = ++tagsRequestIdRef.current;
+    const nextTags = await tauriTaskTimerGateway.listTags();
+    if (requestId === tagsRequestIdRef.current) {
+      setTags(nextTags);
+    }
+  }, []);
+
+  const refreshCalendar = useCallback(
+    async (showLoading = false) => {
+      const requestId = ++calendarRequestIdRef.current;
+      const invalidationVersion = calendarInvalidationVersionRef.current;
+      if (showLoading) {
+        setIsCalendarLoading(true);
+      }
+      try {
+        const nextItems = await tauriTaskTimerGateway.listCalendarItems(
+          calendarRange.startDate,
+          calendarRange.endDate,
+        );
+        if (requestId === calendarRequestIdRef.current) {
+          setItems(nextItems);
+          loadedCalendarQueryKeyRef.current = calendarQueryKey;
+          loadedCalendarInvalidationVersionRef.current = invalidationVersion;
+        }
+      } finally {
+        if (requestId === calendarRequestIdRef.current) {
+          setIsCalendarLoading(false);
+        }
+      }
+    },
+    [calendarQueryKey, calendarRange.endDate, calendarRange.startDate],
+  );
+
+  const refreshRuntime = useCallback(async (syncExpiredPomodoro = false) => {
+    const requestId = ++runtimeRequestIdRef.current;
+    const pomodoroSyncResult = syncExpiredPomodoro
+      ? await tauriTaskTimerGateway.syncExpiredPomodoro()
+      : null;
+    const [nextActiveTimer, nextActivePomodoro] = await Promise.all([
+      tauriTaskTimerGateway.getActiveTimer(),
+      tauriTaskTimerGateway.getActivePomodoro(),
+    ]);
+    if (requestId !== runtimeRequestIdRef.current) {
+      return null;
+    }
+    setActiveTimer(nextActiveTimer);
+    setActivePomodoro(nextActivePomodoro);
+    return pomodoroSyncResult?.notificationSummary ?? null;
+  }, []);
+
+  const refreshSettings = useCallback(async () => {
+    const requestId = ++settingsRequestIdRef.current;
+    const [nextPomodoroSettings, nextDisplayMode, nextNotificationsEnabled] =
+      await Promise.all([
+        tauriTaskTimerGateway.getPomodoroSettings(),
+        tauriTaskTimerGateway.getNotificationDisplayMode(),
+        tauriTaskTimerGateway.getNotificationsEnabled(),
+      ]);
+    if (requestId === settingsRequestIdRef.current) {
+      setPomodoroSettings(nextPomodoroSettings);
+      setDisplayMode(nextDisplayMode);
+      setNotificationsEnabled(nextNotificationsEnabled);
+    }
+  }, []);
+
+  const refreshNotifications = useCallback(
+    async (priorSummary: NotificationDispatchSummary | null = null) => {
+      const requestId = ++notificationsRequestIdRef.current;
+      const notificationSyncResult =
+        await tauriTaskTimerGateway.syncNotifications();
+      await tauriTaskTimerGateway.processNativeNotificationRegistrations();
+      if (requestId !== notificationsRequestIdRef.current) {
+        return;
+      }
+      setNotificationSummary(
+        priorSummary
+          ? combineNotificationSummaries(
+              priorSummary,
+              notificationSyncResult.dispatchSummary,
+            )
+          : notificationSyncResult.dispatchSummary,
+      );
+      setNextNotificationSchedule(notificationSyncResult.nextSchedule);
+    },
+    [],
+  );
+
+  const refreshReadModels = useCallback(
+    async (plan: ReadModelRefreshPlan) => {
+      let pomodoroSummary: NotificationDispatchSummary | null = null;
+      const refreshes: Promise<void>[] = [];
+      if (plan.taskPage) {
+        refreshes.push(refreshTaskPage());
+      }
+      if (plan.taskLists) {
+        refreshes.push(refreshTaskLists());
+      }
+      if (plan.boardColumns) {
+        refreshes.push(refreshBoardColumns());
+      }
+      if (plan.tags) {
+        refreshes.push(refreshTags());
+      }
+      if (plan.calendar) {
+        refreshes.push(refreshCalendar());
+      }
+      if (plan.runtime || plan.syncExpiredPomodoro) {
+        refreshes.push(
+          refreshRuntime(plan.syncExpiredPomodoro).then((summary) => {
+            pomodoroSummary = summary;
+          }),
+        );
+      }
+      if (plan.settings) {
+        refreshes.push(refreshSettings());
+      }
+      await Promise.all(refreshes);
+      if (plan.notifications) {
+        await refreshNotifications(pomodoroSummary);
+      }
+    },
     [
-      calendarRange.endDate,
-      calendarRange.startDate,
-      taskPageScope,
-      taskPageScopeKey,
-      todayDate,
+      refreshBoardColumns,
+      refreshCalendar,
+      refreshNotifications,
+      refreshRuntime,
+      refreshSettings,
+      refreshTags,
+      refreshTaskLists,
+      refreshTaskPage,
     ],
+  );
+  refreshReadModelsRef.current = refreshReadModels;
+
+  const loadSnapshot = useCallback(
+    async (options?: LoadSnapshotOptions) => {
+      const showLoading = options?.showLoading ?? true;
+      if (showLoading) {
+        setIsLoading(true);
+      }
+      setErrorMessage(null);
+      try {
+        await tauriTaskTimerGateway.healthCheck();
+        await refreshReadModels({
+          taskPage: true,
+          taskLists: true,
+          boardColumns: true,
+          tags: true,
+          calendar: true,
+          runtime: true,
+          settings: true,
+          notifications: true,
+          syncExpiredPomodoro: true,
+        });
+      } catch (error) {
+        setNextNotificationSchedule(null);
+        setErrorMessage(toErrorMessage(error));
+      } finally {
+        if (showLoading) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [refreshReadModels],
   );
 
   useEffect(() => {
@@ -321,8 +543,65 @@ export function App() {
     if (!hasHydratedUiPreferences) {
       return;
     }
-    void loadSnapshot({ showLoading: true });
+    if (
+      hasLoadedInitialSnapshotRef.current ||
+      isInitialSnapshotLoadingRef.current
+    ) {
+      return;
+    }
+    isInitialSnapshotLoadingRef.current = true;
+    void loadSnapshot({ showLoading: true }).finally(() => {
+      isInitialSnapshotLoadingRef.current = false;
+      hasLoadedInitialSnapshotRef.current = true;
+    });
   }, [hasHydratedUiPreferences, loadSnapshot]);
+
+  useEffect(() => {
+    if (
+      !hasLoadedInitialSnapshotRef.current ||
+      activeView.kind === "settings" ||
+      loadedTaskScopeKeyRef.current === taskPageScopeKey
+    ) {
+      return;
+    }
+    setErrorMessage(null);
+    void refreshTaskPage(true).catch((error) => {
+      setErrorMessage(toErrorMessage(error));
+    });
+  }, [activeView.kind, refreshTaskPage, taskPageScopeKey]);
+
+  useEffect(() => {
+    if (!hasLoadedInitialSnapshotRef.current || activeView.kind !== "calendar") {
+      return;
+    }
+    const isCurrentRangeLoaded =
+      loadedCalendarQueryKeyRef.current === calendarQueryKey;
+    const isCurrentVersionLoaded =
+      loadedCalendarInvalidationVersionRef.current ===
+      calendarInvalidationVersionRef.current;
+    if (isCurrentRangeLoaded && isCurrentVersionLoaded) {
+      return;
+    }
+    setErrorMessage(null);
+    void refreshCalendar(true).catch((error) => {
+      setErrorMessage(toErrorMessage(error));
+    });
+  }, [activeView.kind, calendarQueryKey, refreshCalendar]);
+
+  useEffect(() => {
+    if (
+      !hasLoadedInitialSnapshotRef.current ||
+      activeView.kind !== "board" ||
+      loadedBoardColumnsInvalidationVersionRef.current ===
+        boardColumnsInvalidationVersionRef.current
+    ) {
+      return;
+    }
+    setErrorMessage(null);
+    void refreshBoardColumns().catch((error) => {
+      setErrorMessage(toErrorMessage(error));
+    });
+  }, [activeView.kind, refreshBoardColumns]);
 
   useEffect(() => {
     if (activeView.kind === "list") {
@@ -383,9 +662,17 @@ export function App() {
 
       resumeSyncRef.current.isSyncing = true;
       resumeSyncRef.current.lastSyncedAt = now;
-      void loadSnapshot({ showLoading: false }).finally(() => {
-        resumeSyncRef.current.isSyncing = false;
-      });
+      void refreshReadModels({
+        runtime: true,
+        notifications: true,
+        syncExpiredPomodoro: true,
+      })
+        .catch((error) => {
+          setErrorMessage(toErrorMessage(error));
+        })
+        .finally(() => {
+          resumeSyncRef.current.isSyncing = false;
+        });
     };
 
     const handleVisibilityChange = () => {
@@ -400,7 +687,7 @@ export function App() {
       window.removeEventListener("focus", syncAfterResume);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [loadSnapshot]);
+  }, [refreshReadModels]);
 
   useEffect(() => {
     const timeoutMs = getPomodoroSyncTimeoutMs(activePomodoro);
@@ -409,10 +696,16 @@ export function App() {
     }
 
     const timerId = window.setTimeout(() => {
-      void loadSnapshot({ showLoading: false });
+      void refreshReadModels({
+        runtime: true,
+        notifications: true,
+        syncExpiredPomodoro: true,
+      }).catch((error) => {
+        setErrorMessage(toErrorMessage(error));
+      });
     }, timeoutMs);
     return () => window.clearTimeout(timerId);
-  }, [activePomodoro, loadSnapshot]);
+  }, [activePomodoro, refreshReadModels]);
 
   useEffect(() => {
     if (
@@ -424,7 +717,9 @@ export function App() {
     }
 
     const timerId = window.setTimeout(() => {
-      void loadSnapshot({ showLoading: false });
+      void refreshReadModels({ notifications: true }).catch((error) => {
+        setErrorMessage(toErrorMessage(error));
+      });
     }, getNotificationScheduleTimeoutMs(nextNotificationSchedule.notifyAt));
 
     return () => {
@@ -432,9 +727,9 @@ export function App() {
     };
   }, [
     hasHydratedUiPreferences,
-    loadSnapshot,
     nextNotificationSchedule,
     notificationsEnabled,
+    refreshReadModels,
   ]);
 
   useEffect(() => {
@@ -450,7 +745,8 @@ export function App() {
     if (
       activeView.kind !== "calendar" ||
       !selectedCalendarTarget ||
-      isLoading
+      isLoading ||
+      isCalendarLoading
     ) {
       return;
     }
@@ -459,7 +755,13 @@ export function App() {
       setSelectedTaskId(null);
       setSelectedCalendarTarget(null);
     }
-  }, [activeView.kind, isLoading, items, selectedCalendarTarget]);
+  }, [
+    activeView.kind,
+    isCalendarLoading,
+    isLoading,
+    items,
+    selectedCalendarTarget,
+  ]);
 
   useEffect(() => {
     if (activeView.kind === "settings") {
@@ -500,11 +802,15 @@ export function App() {
     setSelectedCalendarTarget(null);
   }, []);
 
+  const handleToggleNavigation = useCallback(() => {
+    setIsNavigationOpen((current) => !current);
+  }, []);
+
   const handleLoadMoreTasks = useCallback(async () => {
     const currentPageState = taskPageStateRef.current;
     if (
       isLoadingMoreTasks ||
-      snapshotInFlightRef.current ||
+      taskPageInFlightRef.current ||
       currentPageState.scopeKey !== taskPageScopeKey ||
       !currentPageState.nextCursor
     ) {
@@ -553,14 +859,47 @@ export function App() {
     }
   }, [isLoadingMoreTasks, taskPageScope, taskPageScopeKey, todayDate]);
 
+  const updateMutationCount = useCallback(
+    (scope: MutationScope, difference: 1 | -1) => {
+      setMutationCounts((current) => ({
+        ...current,
+        [scope]: Math.max(0, current[scope] + difference),
+      }));
+    },
+    [],
+  );
+
+  const refreshAfterMutation = useCallback(
+    async (options: MutationRefreshOptions) => {
+      const plan = { ...options.refresh };
+      if (options.invalidateCalendar) {
+        calendarInvalidationVersionRef.current += 1;
+        if (activeViewRef.current.kind === "calendar") {
+          plan.calendar = true;
+        }
+      }
+      if (options.invalidateBoardColumns) {
+        boardColumnsInvalidationVersionRef.current += 1;
+        if (activeViewRef.current.kind === "board") {
+          plan.boardColumns = true;
+        }
+      }
+      await refreshReadModelsRef.current(plan);
+    },
+    [],
+  );
+
   const runMutation = useCallback(
-    async (operation: () => Promise<string | void>) => {
-      setIsMutating(true);
+    async (
+      operation: () => Promise<string | void>,
+      options: MutationOptions,
+    ) => {
+      updateMutationCount(options.scope, 1);
       setErrorMessage(null);
 
       try {
         const nextSelectedTaskId = await operation();
-        await loadSnapshot({ showLoading: false });
+        await refreshAfterMutation(options);
         if (nextSelectedTaskId) {
           setSelectedTaskId(nextSelectedTaskId);
         }
@@ -569,20 +908,24 @@ export function App() {
         setErrorMessage(toErrorMessage(error));
         return false;
       } finally {
-        setIsMutating(false);
+        updateMutationCount(options.scope, -1);
       }
     },
-    [loadSnapshot],
+    [refreshAfterMutation, updateMutationCount],
   );
 
   const runTaskActionMutation = useCallback(
-    async (taskId: string, operation: () => Promise<string | void>) => {
+    async (
+      taskId: string,
+      operation: () => Promise<string | void>,
+      options: MutationRefreshOptions,
+    ) => {
       setPendingTaskActionIds((current) => new Set(current).add(taskId));
       setErrorMessage(null);
 
       try {
         const nextSelectedTaskId = await operation();
-        await loadSnapshot({ showLoading: false });
+        await refreshAfterMutation(options);
         if (nextSelectedTaskId) {
           setSelectedTaskId(nextSelectedTaskId);
         }
@@ -598,17 +941,20 @@ export function App() {
         });
       }
     },
-    [loadSnapshot],
+    [refreshAfterMutation],
   );
 
   const runCreateTaskMutation = useCallback(
-    async (operation: () => Promise<void>) => {
+    async (
+      operation: () => Promise<void>,
+      options: MutationRefreshOptions,
+    ) => {
       setIsCreatingTaskPending(true);
       setErrorMessage(null);
 
       try {
         await operation();
-        await loadSnapshot({ showLoading: false });
+        await refreshAfterMutation(options);
         return true;
       } catch (error) {
         setErrorMessage(toErrorMessage(error));
@@ -617,7 +963,7 @@ export function App() {
         setIsCreatingTaskPending(false);
       }
     },
-    [loadSnapshot],
+    [refreshAfterMutation],
   );
 
   const handleCreateTask = useCallback(
@@ -629,7 +975,7 @@ export function App() {
             input.listId ??
             (activeView.kind === "list" ? activeView.listId : DEFAULT_TASK_LIST_ID),
         });
-      }),
+      }, TASK_LIFECYCLE_REFRESH),
     [activeView, runCreateTaskMutation],
   );
 
@@ -640,7 +986,7 @@ export function App() {
           ...input,
           listId: input.listId ?? DEFAULT_TASK_LIST_ID,
         });
-      }),
+      }, TASK_LIFECYCLE_REFRESH),
     [runCreateTaskMutation],
   );
 
@@ -650,6 +996,9 @@ export function App() {
         const list = await tauriTaskTimerGateway.createTaskList({ name });
         setActiveView({ kind: "list", listId: list.id });
         clearDetailSelection();
+      }, {
+        scope: "navigation",
+        refresh: { taskLists: true },
       }),
     [clearDetailSelection, runMutation],
   );
@@ -662,6 +1011,9 @@ export function App() {
           name,
           colorToken: currentList?.colorToken,
         });
+      }, {
+        scope: "navigation",
+        refresh: { taskLists: true },
       }),
     [runMutation, taskLists],
   );
@@ -677,6 +1029,10 @@ export function App() {
           name: currentList.name,
           colorToken,
         });
+      }, {
+        scope: "detail",
+        refresh: { taskLists: true },
+        invalidateCalendar: true,
       }),
     [runMutation, taskLists],
   );
@@ -689,6 +1045,9 @@ export function App() {
           setActiveView({ kind: "list", listId: DEFAULT_TASK_LIST_ID });
           clearDetailSelection();
         }
+      }, {
+        scope: "navigation",
+        refresh: { taskLists: true },
       }),
     [activeView, clearDetailSelection, runMutation],
   );
@@ -697,6 +1056,9 @@ export function App() {
     (name: string) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.createTag({ name });
+      }, {
+        scope: "detail",
+        refresh: { tags: true },
       }),
     [runMutation],
   );
@@ -705,6 +1067,9 @@ export function App() {
     (tagId: string, name: string) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.updateTag(tagId, { name });
+      }, {
+        scope: "detail",
+        refresh: { taskPage: true, tags: true },
       }),
     [runMutation],
   );
@@ -717,6 +1082,9 @@ export function App() {
           setActiveView({ kind: "list", listId: DEFAULT_TASK_LIST_ID });
           clearDetailSelection();
         }
+      }, {
+        scope: "detail",
+        refresh: { taskPage: true, tags: true },
       }),
     [activeView, clearDetailSelection, runMutation],
   );
@@ -726,6 +1094,9 @@ export function App() {
       runMutation(async () => {
         await tauriTaskTimerGateway.attachTagToTask(taskId, tagId);
         return taskId;
+      }, {
+        scope: "detail",
+        refresh: { taskPage: true, tags: true },
       }),
     [runMutation],
   );
@@ -735,6 +1106,9 @@ export function App() {
       runMutation(async () => {
         await tauriTaskTimerGateway.detachTagFromTask(taskId, tagId);
         return taskId;
+      }, {
+        scope: "detail",
+        refresh: { taskPage: true, tags: true },
       }),
     [runMutation],
   );
@@ -744,6 +1118,9 @@ export function App() {
       runMutation(async () => {
         await tauriTaskTimerGateway.createSubtask({ ...input, taskId });
         return taskId;
+      }, {
+        scope: "detail",
+        ...TASK_CONTENT_REFRESH,
       }),
     [runMutation],
   );
@@ -756,6 +1133,9 @@ export function App() {
           taskId,
         });
         return task.id;
+      }, {
+        scope: "detail",
+        ...TASK_CONTENT_REFRESH,
       }),
     [runMutation],
   );
@@ -768,6 +1148,9 @@ export function App() {
           subtaskId,
         });
         return subtask.taskId;
+      }, {
+        scope: "detail",
+        ...TASK_CONTENT_REFRESH,
       }),
     [runMutation],
   );
@@ -777,6 +1160,9 @@ export function App() {
       runMutation(async () => {
         await tauriTaskTimerGateway.startTimer(target);
         return target.type === "task" ? target.id : undefined;
+      }, {
+        scope: "detail",
+        ...TASK_TIMER_REFRESH,
       }),
     [runMutation],
   );
@@ -786,6 +1172,9 @@ export function App() {
       runMutation(async () => {
         await tauriTaskTimerGateway.startPomodoro(target);
         return target.type === "task" ? target.id : undefined;
+      }, {
+        scope: "detail",
+        ...POMODORO_REFRESH,
       }),
     [runMutation],
   );
@@ -794,6 +1183,9 @@ export function App() {
     () =>
       runMutation(async () => {
         await tauriTaskTimerGateway.pausePomodoro();
+      }, {
+        scope: "detail",
+        ...POMODORO_REFRESH,
       }),
     [runMutation],
   );
@@ -802,6 +1194,9 @@ export function App() {
     () =>
       runMutation(async () => {
         await tauriTaskTimerGateway.resumePomodoro();
+      }, {
+        scope: "detail",
+        ...POMODORO_REFRESH,
       }),
     [runMutation],
   );
@@ -812,6 +1207,9 @@ export function App() {
         const completed =
           await tauriTaskTimerGateway.completePomodoroWorkPhase();
         return completed.target.type === "task" ? completed.target.id : undefined;
+      }, {
+        scope: "detail",
+        ...POMODORO_REFRESH,
       }),
     [runMutation],
   );
@@ -825,6 +1223,9 @@ export function App() {
           completed.id,
         );
         return nextBreak.target.type === "task" ? nextBreak.target.id : undefined;
+      }, {
+        scope: "detail",
+        ...POMODORO_REFRESH,
       }),
     [runMutation],
   );
@@ -838,6 +1239,9 @@ export function App() {
           completed.id,
         );
         return nextWork.target.type === "task" ? nextWork.target.id : undefined;
+      }, {
+        scope: "detail",
+        ...POMODORO_REFRESH,
       }),
     [runMutation],
   );
@@ -848,6 +1252,9 @@ export function App() {
         const nextWork =
           await tauriTaskTimerGateway.skipPomodoroBreak(pomodoroSessionId);
         return nextWork.target.type === "task" ? nextWork.target.id : undefined;
+      }, {
+        scope: "detail",
+        ...POMODORO_REFRESH,
       }),
     [runMutation],
   );
@@ -857,6 +1264,9 @@ export function App() {
       runMutation(async () => {
         const completed = await tauriTaskTimerGateway.completePomodoroBreak();
         return completed.target.type === "task" ? completed.target.id : undefined;
+      }, {
+        scope: "detail",
+        ...POMODORO_REFRESH,
       }),
     [runMutation],
   );
@@ -869,6 +1279,9 @@ export function App() {
           completed.id,
         );
         return nextWork.target.type === "task" ? nextWork.target.id : undefined;
+      }, {
+        scope: "detail",
+        ...POMODORO_REFRESH,
       }),
     [runMutation],
   );
@@ -878,6 +1291,9 @@ export function App() {
       runMutation(async () => {
         const cancelled = await tauriTaskTimerGateway.cancelPomodoro();
         return cancelled.target.type === "task" ? cancelled.target.id : undefined;
+      }, {
+        scope: "detail",
+        ...POMODORO_REFRESH,
       }),
     [runMutation],
   );
@@ -889,6 +1305,9 @@ export function App() {
         return pausedTimer.target.type === "task"
           ? pausedTimer.target.id
           : undefined;
+      }, {
+        scope: "detail",
+        ...TASK_TIMER_REFRESH,
       }),
     [runMutation],
   );
@@ -900,6 +1319,9 @@ export function App() {
         return resumedTimer.target.type === "task"
           ? resumedTimer.target.id
           : undefined;
+      }, {
+        scope: "detail",
+        ...TASK_TIMER_REFRESH,
       }),
     [runMutation],
   );
@@ -912,6 +1334,9 @@ export function App() {
         return stoppedTimer.target.type === "task"
           ? stoppedTimer.target.id
           : undefined;
+      }, {
+        scope: "detail",
+        ...TASK_TIMER_REFRESH,
       }),
     [runMutation],
   );
@@ -921,7 +1346,7 @@ export function App() {
       if (task.status === "done") {
         return runTaskActionMutation(task.id, async () => {
           await tauriTaskTimerGateway.reopenTask(task.id);
-        });
+        }, TASK_LIFECYCLE_REFRESH);
       }
 
       const hasIncompleteSubtasks = task.subtasks.some(
@@ -938,7 +1363,7 @@ export function App() {
 
       return runTaskActionMutation(task.id, async () => {
         await tauriTaskTimerGateway.completeTask(task.id, hasIncompleteSubtasks);
-      });
+      }, TASK_LIFECYCLE_REFRESH);
     },
     [runTaskActionMutation],
   );
@@ -947,6 +1372,9 @@ export function App() {
     (title: string) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.createBoardColumn(title);
+      }, {
+        scope: "board",
+        refresh: { boardColumns: true },
       }),
     [runMutation],
   );
@@ -955,6 +1383,9 @@ export function App() {
     (columnId: string, title: string) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.updateBoardColumn(columnId, title);
+      }, {
+        scope: "board",
+        refresh: { boardColumns: true },
       }),
     [runMutation],
   );
@@ -963,6 +1394,9 @@ export function App() {
     (orderedColumnIds: string[]) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.reorderBoardColumns(orderedColumnIds);
+      }, {
+        scope: "board",
+        refresh: { boardColumns: true },
       }),
     [runMutation],
   );
@@ -974,6 +1408,9 @@ export function App() {
           columnId,
           moveTasksToColumnId,
         );
+      }, {
+        scope: "board",
+        refresh: { taskPage: true, boardColumns: true },
       }),
     [runMutation],
   );
@@ -985,6 +1422,8 @@ export function App() {
           taskId,
           boardColumnId,
         );
+      }, {
+        refresh: { taskPage: true, boardColumns: true },
       }),
     [runTaskActionMutation],
   );
@@ -998,6 +1437,9 @@ export function App() {
           await tauriTaskTimerGateway.completeSubtask(subtask.id);
         }
         return subtask.taskId;
+      }, {
+        scope: "detail",
+        ...TASK_CONTENT_REFRESH,
       }),
     [runMutation],
   );
@@ -1006,6 +1448,8 @@ export function App() {
     (taskId: string, isFavorite: boolean) =>
       runTaskActionMutation(taskId, async () => {
         await tauriTaskTimerGateway.toggleTaskFavorite(taskId, isFavorite);
+      }, {
+        refresh: { taskPage: true },
       }),
     [runTaskActionMutation],
   );
@@ -1014,6 +1458,9 @@ export function App() {
     (task: TaskWithSubtasks) => {
       return runMutation(async () => {
         await tauriTaskTimerGateway.deleteTask(task.id);
+      }, {
+        scope: "detail",
+        ...TASK_LIFECYCLE_REFRESH,
       }).then((deleted) => {
         if (deleted) {
           setSelectedTaskId(null);
@@ -1031,6 +1478,9 @@ export function App() {
       return runMutation(async () => {
         await tauriTaskTimerGateway.deleteSubtask(subtask.id);
         return subtask.taskId;
+      }, {
+        scope: "detail",
+        ...TASK_CONTENT_REFRESH,
       }).then((deleted) => {
         if (deleted) {
           setSelectedSubtaskId(null);
@@ -1046,6 +1496,9 @@ export function App() {
     (nextDisplayMode: NotificationDisplayMode) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.updateNotificationDisplayMode(nextDisplayMode);
+      }, {
+        scope: "settings",
+        refresh: { settings: true, notifications: true },
       }),
     [runMutation],
   );
@@ -1054,6 +1507,9 @@ export function App() {
     (enabled: boolean) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.updateNotificationsEnabled(enabled);
+      }, {
+        scope: "settings",
+        refresh: { settings: true, notifications: true },
       }),
     [runMutation],
   );
@@ -1062,6 +1518,9 @@ export function App() {
     (input: PomodoroSettingsDraft) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.updatePomodoroSettings(input);
+      }, {
+        scope: "settings",
+        refresh: { settings: true },
       }),
     [runMutation],
   );
@@ -1070,6 +1529,9 @@ export function App() {
     () =>
       runMutation(async () => {
         return;
+      }, {
+        scope: "settings",
+        refresh: { notifications: true },
       }),
     [runMutation],
   );
@@ -1078,7 +1540,7 @@ export function App() {
     async (
       action: () => Promise<DataManagementActionResult>,
     ): Promise<DataManagementActionResult> => {
-      setIsMutating(true);
+      updateMutationCount("settings", 1);
       setErrorMessage(null);
       try {
         return await action();
@@ -1089,10 +1551,10 @@ export function App() {
           detail: toDataManagementErrorDetail(error),
         };
       } finally {
-        setIsMutating(false);
+        updateMutationCount("settings", -1);
       }
     },
-    [],
+    [updateMutationCount],
   );
 
   const handleCreateJsonExport = useCallback(
@@ -1169,6 +1631,15 @@ export function App() {
     setSelectedSubtaskId(subtaskId);
     setSelectedCalendarTarget({ type: "subtask", id: subtaskId });
   }, []);
+
+  const handleSelectDetailSubtask = useCallback(
+    (subtaskId: string) => {
+      if (selectedTaskId) {
+        handleSelectSubtask(selectedTaskId, subtaskId);
+      }
+    },
+    [handleSelectSubtask, selectedTaskId],
+  );
 
   const handleSelectParentTask = useCallback(() => {
     setSelectedSubtaskId(null);
@@ -1257,6 +1728,13 @@ export function App() {
       return runMutation(async () => {
         await tauriTaskTimerGateway.resizeScheduledWorkItem(item.target, schedule);
         return resolveTaskIdForTarget(tasks, item.target) ?? undefined;
+      }, {
+        scope: "calendar",
+        refresh: {
+          taskPage: true,
+          calendar: true,
+          notifications: true,
+        },
       });
     },
     [runMutation, tasks],
@@ -1325,19 +1803,19 @@ export function App() {
             onClick={() => setIsNavigationOpen(false)}
           />
         ) : null}
-        <LeftNavigation
+        <MemoizedLeftNavigation
           activeView={activeView}
           favoriteCount={favoriteCount}
           todayCount={todayCount}
           isOpen={isNavigationOpen}
           taskLists={taskLists}
           tags={tags}
-          isMutating={isMutating}
+          isMutating={isNavigationMutating}
           onSelectView={handleSelectView}
           onCreateTaskList={handleCreateTaskList}
           onRenameTaskList={handleRenameTaskList}
           onDeleteTaskList={handleDeleteTaskList}
-          onToggle={() => setIsNavigationOpen((current) => !current)}
+          onToggle={handleToggleNavigation}
         />
 
         <section className="workspace-main" aria-label="現在のビュー">
@@ -1350,7 +1828,7 @@ export function App() {
                 selectedTask ? "is-detail-open" : ""
               }`}
             >
-              <TaskPanel
+              <MemoizedTaskPanel
                 tasks={visibleTasks}
                 taskRows={visibleTaskRows}
                 selectedTaskId={selectedTaskId}
@@ -1374,13 +1852,13 @@ export function App() {
                         : "まだタスクはありません。"
                 }
                 showTaskForm={activeView.kind === "list"}
-                isLoading={isLoading}
-                isMutating={isMutating}
+                isLoading={isLoading || isTaskPageLoading}
+                isMutating={false}
                 isCreatingTaskPending={isCreatingTaskPending}
                 isLoadingMore={isLoadingMoreTasks}
                 totalTaskCount={taskPageState.totalCount}
                 hasMoreTasks={taskPageState.nextCursor !== null}
-                pendingTaskActionIds={pendingTaskActionIds}
+                pendingTaskActionIds={visiblePendingTaskActionIds}
                 selectedSubtaskId={selectedSubtaskId}
                 onSelectTask={handleSelectTask}
                 onSelectSubtask={handleSelectSubtask}
@@ -1390,7 +1868,7 @@ export function App() {
                 onLoadMoreTasks={handleLoadMoreTasks}
               />
               {selectedTask ? (
-                <TaskDetailPane
+                <MemoizedTaskDetailPane
                   task={selectedTask}
                   selectedSubtaskId={selectedSubtaskId}
                   activeTimer={activeTimer}
@@ -1398,14 +1876,12 @@ export function App() {
                   taskLists={taskLists}
                   tags={tags}
                   displayMode={displayMode}
-                  isMutating={isMutating}
+                  isMutating={isDetailMutating}
                   onClose={closeDetailPane}
                   onUpdateTask={handleUpdateTask}
                   onUpdateSubtask={handleUpdateSubtask}
                   onCreateSubtask={handleCreateSubtask}
-                  onSelectSubtask={(subtaskId) =>
-                    handleSelectSubtask(selectedTask.id, subtaskId)
-                  }
+                  onSelectSubtask={handleSelectDetailSubtask}
                   onSelectParentTask={handleSelectParentTask}
                   onStartTimer={handleStartTimer}
                   onPauseTimer={handlePauseTimer}
@@ -1448,17 +1924,17 @@ export function App() {
                 selectedTask ? "is-detail-open" : ""
               }`}
             >
-              <KanbanBoard
+              <MemoizedKanbanBoard
                 columns={boardColumns}
                 tasks={visibleTasks}
                 taskRows={visibleTaskRows}
                 selectedTaskId={selectedTaskId}
-                isLoading={isLoading}
-                isMutating={isMutating}
+                isLoading={isLoading || isTaskPageLoading}
+                isMutating={isBoardMutating}
                 isLoadingMore={isLoadingMoreTasks}
                 totalTaskCount={taskPageState.totalCount}
                 hasMoreTasks={taskPageState.nextCursor !== null}
-                pendingTaskActionIds={pendingTaskActionIds}
+                pendingTaskActionIds={visiblePendingTaskActionIds}
                 onSelectTask={handleSelectTask}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
                 onCreateColumn={handleCreateBoardColumn}
@@ -1469,7 +1945,7 @@ export function App() {
                 onLoadMoreTasks={handleLoadMoreTasks}
               />
               {selectedTask ? (
-                <TaskDetailPane
+                <MemoizedTaskDetailPane
                   task={selectedTask}
                   selectedSubtaskId={selectedSubtaskId}
                   activeTimer={activeTimer}
@@ -1477,14 +1953,12 @@ export function App() {
                   taskLists={taskLists}
                   tags={tags}
                   displayMode={displayMode}
-                  isMutating={isMutating}
+                  isMutating={isDetailMutating}
                   onClose={closeDetailPane}
                   onUpdateTask={handleUpdateTask}
                   onUpdateSubtask={handleUpdateSubtask}
                   onCreateSubtask={handleCreateSubtask}
-                  onSelectSubtask={(subtaskId) =>
-                    handleSelectSubtask(selectedTask.id, subtaskId)
-                  }
+                  onSelectSubtask={handleSelectDetailSubtask}
                   onSelectParentTask={handleSelectParentTask}
                   onStartTimer={handleStartTimer}
                   onPauseTimer={handlePauseTimer}
@@ -1527,15 +2001,15 @@ export function App() {
                 selectedTask ? "is-detail-open" : ""
               }`}
             >
-              <WeekCalendar
+              <MemoizedWeekCalendar
                 viewMode={calendarViewMode}
                 anchorDate={calendarAnchorDate}
                 items={items}
                 taskLists={taskLists}
                 defaultTaskListId={lastTaskListId}
-                isLoading={isLoading}
+                isLoading={isLoading || isCalendarLoading}
                 isCreatingTaskPending={isCreatingTaskPending}
-                isReschedulingItem={isMutating}
+                isReschedulingItem={isCalendarMutating || isDetailMutating}
                 selectedTarget={selectedCalendarTarget}
                 onChangeViewMode={handleChangeCalendarViewMode}
                 onPreviousRange={handlePreviousCalendarRange}
@@ -1547,7 +2021,7 @@ export function App() {
                 onResizeItem={handleResizeCalendarItem}
               />
               {selectedTask ? (
-                <TaskDetailPane
+                <MemoizedTaskDetailPane
                   task={selectedTask}
                   selectedSubtaskId={selectedSubtaskId}
                   activeTimer={activeTimer}
@@ -1555,14 +2029,12 @@ export function App() {
                   taskLists={taskLists}
                   tags={tags}
                   displayMode={displayMode}
-                  isMutating={isMutating}
+                  isMutating={isDetailMutating}
                   onClose={closeDetailPane}
                   onUpdateTask={handleUpdateTask}
                   onUpdateSubtask={handleUpdateSubtask}
                   onCreateSubtask={handleCreateSubtask}
-                  onSelectSubtask={(subtaskId) =>
-                    handleSelectSubtask(selectedTask.id, subtaskId)
-                  }
+                  onSelectSubtask={handleSelectDetailSubtask}
                   onSelectParentTask={handleSelectParentTask}
                   onStartTimer={handleStartTimer}
                   onPauseTimer={handlePauseTimer}
@@ -1600,11 +2072,11 @@ export function App() {
           ) : null}
 
           {activeView.kind === "settings" ? (
-            <SettingsPanel
+            <MemoizedSettingsPanel
               displayMode={displayMode}
               notificationsEnabled={notificationsEnabled}
               pomodoroSettings={pomodoroSettings}
-              isMutating={isMutating}
+              isMutating={isSettingsMutating}
               notificationSummary={notificationSummary}
               onUpdateDisplayMode={handleUpdateNotificationDisplayMode}
               onUpdateNotificationsEnabled={handleUpdateNotificationsEnabled}
