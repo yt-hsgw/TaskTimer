@@ -35,6 +35,10 @@ const thresholds = {
   favorites: 1000,
   kanban: 1500,
   kanban_drag: 1500,
+  same_navigation: 250,
+  favorite_refresh: 1000,
+  completion_refresh: 1200,
+  task_detail_save: 1200,
   calendar_week: 1500,
   calendar_day: 1500,
   calendar_month: 2000,
@@ -42,6 +46,16 @@ const thresholds = {
 };
 const taskPageSize = 200;
 const initialTaskPageCount = Math.min(profile.taskCount, taskPageSize);
+const UNRELATED_WORKSPACE_COMMANDS = [
+  "list_calendar_items",
+  "list_tags",
+  "get_active_timer",
+  "get_active_pomodoro",
+  "sync_expired_pomodoro",
+  "get_pomodoro_settings",
+  "get_notification_display_mode",
+  "get_notifications_enabled",
+];
 const chromePath = await resolveChromePath();
 const vitePort = await getFreePort();
 const debugPort = await getFreePort();
@@ -111,10 +125,9 @@ try {
         sessionId,
         name: "task_list_load_more",
         thresholdMs: thresholds.task_list_load_more,
-        action: `(async () => {
+        action: `(() => {
           document.querySelector(".subtask-expand-button")?.click();
           document.querySelector(".task-row-content")?.click();
-          await new Promise((resolve) => requestAnimationFrame(resolve));
           const board = document.querySelector(".task-board");
           if (board) {
             board.scrollTop = 120;
@@ -181,7 +194,20 @@ try {
     }),
   );
   const kanbanDragStartedAt = performance.now();
-  await verifyKanbanCardDrag(client, sessionId);
+  const kanbanDragResult = await verifyKanbanCardDrag(client, sessionId);
+  assertCommandScope("かんばんD&D", kanbanDragResult.commands, {
+    required: [
+      "move_task_to_board_column",
+      "list_task_page",
+      "list_board_columns",
+    ],
+    forbidden: UNRELATED_WORKSPACE_COMMANDS,
+  });
+  assertComponentsDidNotRender("かんばんD&D", kanbanDragResult.renderCounts, [
+    "LeftNavigation",
+    "WeekCalendar",
+    "SettingsPanel",
+  ]);
   measurements.push(
     createMeasurement(
       "kanban_drag",
@@ -240,6 +266,130 @@ try {
     `document.querySelector('#task-panel-title')?.textContent === "タスク" &&
       document.querySelectorAll(".task-row").length === ${initialTaskPageCount}`,
   );
+
+  await resetInvokeLog(client, sessionId);
+  await resetRenderCounts(client, sessionId);
+  const sameNavigationStartedAt = performance.now();
+  await evaluate(client, sessionId, clickNavigation("タスク"));
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector('button.nav-item[aria-label="タスク"][aria-current="page"]') &&
+      document.querySelector('#task-panel-title')?.textContent === "タスク"`,
+  );
+  const sameNavigationCommands = await takeInvokeLog(client, sessionId);
+  const sameNavigationRenderCounts = await takeRenderCounts(client, sessionId);
+  assertCommandScope("同一ナビ再選択", sameNavigationCommands, {
+    forbidden: ["list_task_page", "list_calendar_items", "list_board_columns"],
+  });
+  assertComponentsDidNotRender(
+    "同一ナビ再選択",
+    sameNavigationRenderCounts,
+    ["App", "LeftNavigation", "TaskPanel"],
+  );
+  measurements.push(
+    createMeasurement(
+      "same_navigation",
+      performance.now() - sameNavigationStartedAt,
+      thresholds.same_navigation,
+    ),
+  );
+
+  const favoriteButtonState = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const button = document.querySelector(".favorite-button");
+      return button ? {
+        label: button.getAttribute("aria-label"),
+        pressed: button.getAttribute("aria-pressed") === "true"
+      } : null;
+    })()`,
+  );
+  if (!favoriteButtonState?.label) {
+    throw new Error("お気に入り更新の検証対象がありません");
+  }
+  await resetInvokeLog(client, sessionId);
+  const favoriteStartedAt = performance.now();
+  await evaluate(client, sessionId, `document.querySelector(".favorite-button")?.click()`);
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const button = document.querySelector(".favorite-button");
+      return button &&
+        button.getAttribute("aria-pressed") === ${JSON.stringify(
+          String(!favoriteButtonState.pressed),
+        )} &&
+        !button.disabled;
+    })()`,
+  );
+  const favoriteCommands = await takeInvokeLog(client, sessionId);
+  assertCommandScope("お気に入り更新", favoriteCommands, {
+    required: ["toggle_task_favorite", "list_task_page"],
+    forbidden: [
+      ...UNRELATED_WORKSPACE_COMMANDS,
+      "list_board_columns",
+      "list_task_lists",
+      "sync_notifications",
+    ],
+  });
+  measurements.push(
+    createMeasurement(
+      "favorite_refresh",
+      performance.now() - favoriteStartedAt,
+      thresholds.favorite_refresh,
+    ),
+  );
+
+  const completionLabel = await evaluateValue(
+    client,
+    sessionId,
+    `document.querySelector(".task-check-button")?.getAttribute("aria-label")`,
+  );
+  if (!completionLabel) {
+    throw new Error("完了更新の検証対象がありません");
+  }
+  const completedLabel = completionLabel.replace(/を完了$/, "を未完了に戻す");
+  await resetInvokeLog(client, sessionId);
+  const completionStartedAt = performance.now();
+  await evaluate(
+    client,
+    sessionId,
+    `(() => {
+      window.confirm = () => true;
+      document.querySelector(".task-check-button")?.click();
+    })()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const button = [...document.querySelectorAll(".task-check-button")]
+        .find((candidate) => candidate.getAttribute("aria-label") === ${JSON.stringify(
+          completedLabel,
+        )});
+      return Boolean(button && !button.disabled);
+    })()`,
+  );
+  const completionCommands = await takeInvokeLog(client, sessionId);
+  assertCommandScope("タスク完了", completionCommands, {
+    required: [
+      "complete_task",
+      "list_task_page",
+      "list_task_lists",
+      "sync_notifications",
+    ],
+    forbidden: [...UNRELATED_WORKSPACE_COMMANDS, "list_board_columns"],
+  });
+  measurements.push(
+    createMeasurement(
+      "completion_refresh",
+      performance.now() - completionStartedAt,
+      thresholds.completion_refresh,
+    ),
+  );
+
   measurements.push(
     await measureView({
       client,
@@ -251,6 +401,24 @@ try {
         document.querySelector(".detail-subtask-list") &&
         !document.querySelector(".app-alert")`,
     }),
+  );
+
+  const detailSaveMeasurement = await verifyTaskDetailSave(client, sessionId);
+  assertCommandScope("タスク詳細保存", detailSaveMeasurement.commands, {
+    required: [
+      "update_task",
+      "list_task_page",
+      "list_task_lists",
+      "sync_notifications",
+    ],
+    forbidden: [...UNRELATED_WORKSPACE_COMMANDS, "list_board_columns"],
+  });
+  measurements.push(
+    createMeasurement(
+      "task_detail_save",
+      detailSaveMeasurement.durationMs,
+      thresholds.task_detail_save,
+    ),
   );
 
   printResults(options.profile, profile, measurements);
@@ -341,6 +509,140 @@ async function evaluateValue(client, sessionId, expression) {
   return result.result?.value;
 }
 
+async function resetInvokeLog(client, sessionId) {
+  await evaluate(
+    client,
+    sessionId,
+    `window.__taskTimerInvokeLog = []`,
+  );
+}
+
+async function takeInvokeLog(client, sessionId) {
+  return (
+    (await evaluateValue(
+      client,
+      sessionId,
+      `(() => {
+        const commands = [...(window.__taskTimerInvokeLog ?? [])];
+        window.__taskTimerInvokeLog = [];
+        return commands;
+      })()`,
+    )) ?? []
+  );
+}
+
+async function resetRenderCounts(client, sessionId) {
+  await evaluate(
+    client,
+    sessionId,
+    `window.__TASKTIMER_RENDER_COUNTS__ = {}`,
+  );
+}
+
+async function takeRenderCounts(client, sessionId) {
+  return (
+    (await evaluateValue(
+      client,
+      sessionId,
+      `(() => {
+        const counts = { ...(window.__TASKTIMER_RENDER_COUNTS__ ?? {}) };
+        window.__TASKTIMER_RENDER_COUNTS__ = {};
+        return counts;
+      })()`,
+    )) ?? {}
+  );
+}
+
+function assertCommandScope(label, commands, { required = [], forbidden = [] }) {
+  const missing = required.filter((command) => !commands.includes(command));
+  const unexpected = forbidden.filter((command) => commands.includes(command));
+  if (missing.length === 0 && unexpected.length === 0) {
+    return;
+  }
+  throw new Error(
+    `${label}のRead Model更新範囲が不正です: ${JSON.stringify({
+      missing,
+      unexpected,
+      commands,
+    })}`,
+  );
+}
+
+function assertComponentsDidNotRender(label, renderCounts, componentNames) {
+  const unexpected = componentNames.filter(
+    (componentName) => (renderCounts[componentName] ?? 0) > 0,
+  );
+  if (unexpected.length === 0) {
+    return;
+  }
+  throw new Error(
+    `${label}で無関係なコンポーネントが再描画されました: ${JSON.stringify({
+      unexpected,
+      renderCounts,
+    })}`,
+  );
+}
+
+async function verifyTaskDetailSave(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  const startedAt = performance.now();
+  await evaluate(
+    client,
+    sessionId,
+    `(() => {
+      const section = document.querySelector('.detail-section[aria-label="タスクを編集"]');
+      const toggle = section?.querySelector(".detail-section-toggle");
+      if (toggle?.getAttribute("aria-expanded") !== "true") {
+        toggle.click();
+      }
+    })()`,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(
+      '.detail-section[aria-label="タスクを編集"] .detail-form input[required]'
+    ))`,
+    5000,
+  );
+  const nextTitle = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const section = document.querySelector('.detail-section[aria-label="タスクを編集"]');
+      const input = section.querySelector('.detail-form input[required]');
+      if (!input) {
+        return null;
+      }
+      const nextValue = input.value + " 更新";
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, nextValue);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      section.querySelector('.detail-form button[type="submit"]')?.click();
+      return nextValue;
+    })()`,
+  );
+  if (!nextTitle) {
+    throw new Error("タスク詳細保存の検証対象がありません");
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector("#task-detail-title")?.textContent === ${JSON.stringify(
+      nextTitle,
+    )} &&
+      !document.querySelector('.detail-section[aria-label="タスクを編集"] .detail-form button[type="submit"]')?.disabled &&
+      !document.querySelector(".app-alert")`,
+  );
+  return {
+    commands: await takeInvokeLog(client, sessionId),
+    durationMs: performance.now() - startedAt,
+  };
+}
+
 async function verifyKanbanCardDrag(client, sessionId) {
   await evaluate(
     client,
@@ -362,6 +664,8 @@ async function verifyKanbanCardDrag(client, sessionId) {
     sessionId,
     `!document.querySelector(".task-detail-pane")`,
   );
+  await resetInvokeLog(client, sessionId);
+  await resetRenderCounts(client, sessionId);
 
   const geometry = await evaluateValue(
     client,
@@ -499,6 +803,10 @@ async function verifyKanbanCardDrag(client, sessionId) {
       );
     })()`,
   );
+  return {
+    commands: await takeInvokeLog(client, sessionId),
+    renderCounts: await takeRenderCounts(client, sessionId),
+  };
 }
 
 async function inspectPage(client, sessionId) {
@@ -729,8 +1037,11 @@ function buildTauriInvokeMockSource(profile) {
     };
   };
 
+  window.__taskTimerInvokeLog = [];
+  window.__TASKTIMER_RENDER_COUNTS__ = {};
   window.__TAURI_INTERNALS__ = {
     invoke(command, args = {}) {
+      window.__taskTimerInvokeLog.push(command);
       const rangeStart = args.startDate ?? args.weekStartDate ?? today;
       const rangeEnd = args.endDate ?? addDays(rangeStart, 6);
       const span = daySpan(rangeStart, rangeEnd);
@@ -758,6 +1069,68 @@ function buildTauriInvokeMockSource(profile) {
         list_task_rows: () => clone(taskRows),
         list_calendar_items: () => clone(calendarItems),
         list_week_calendar_items: () => clone(calendarItems),
+        toggle_task_favorite: () => {
+          const task = tasks.find(
+            (candidate) => candidate.id === args.request?.taskId
+          );
+          const row = taskRows.find(
+            (candidate) => candidate.id === args.request?.taskId
+          );
+          if (!task || !row) {
+            throw new Error("お気に入り変更対象が存在しません");
+          }
+          task.isFavorite = Boolean(args.request.isFavorite);
+          row.isFavorite = task.isFavorite;
+          task.updatedAt = now;
+          row.updatedAt = now;
+          return clone(task);
+        },
+        complete_task: () => {
+          const task = tasks.find(
+            (candidate) => candidate.id === args.request?.taskId
+          );
+          const row = taskRows.find(
+            (candidate) => candidate.id === args.request?.taskId
+          );
+          if (!task || !row) {
+            throw new Error("完了対象が存在しません");
+          }
+          task.status = "done";
+          task.completedAt = now;
+          task.updatedAt = now;
+          row.status = "done";
+          row.completedAt = now;
+          row.updatedAt = now;
+          return clone(task);
+        },
+        update_task: () => {
+          const task = tasks.find(
+            (candidate) => candidate.id === args.request?.taskId
+          );
+          const row = taskRows.find(
+            (candidate) => candidate.id === args.request?.taskId
+          );
+          if (!task || !row) {
+            throw new Error("更新対象が存在しません");
+          }
+          const request = args.request;
+          task.listId = request.listId ?? task.listId;
+          task.title = request.title ?? task.title;
+          task.plannedStartDate = request.plannedStartDate ?? null;
+          task.dueDate = request.dueDate ?? null;
+          task.dueTime = request.dueTime ?? null;
+          task.timerTargetSeconds = request.timerTargetSeconds ?? null;
+          task.memo = request.memo ?? "";
+          task.updatedAt = now;
+          row.listId = task.listId;
+          row.title = task.title;
+          row.plannedStartDate = task.plannedStartDate;
+          row.dueDate = task.dueDate;
+          row.dueTime = task.dueTime;
+          row.timerTargetSeconds = task.timerTargetSeconds;
+          row.updatedAt = now;
+          return clone(task);
+        },
         move_task_to_board_column: () => new Promise((resolve, reject) => {
           setTimeout(() => {
             const row = taskRows.find(

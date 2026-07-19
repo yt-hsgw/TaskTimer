@@ -5,6 +5,7 @@ import type {
   WorkItemDraft,
 } from "../../application/usecases/contracts";
 import type { Subtask, Task } from "../../domain/task/types";
+import { usePresentationRenderProbe } from "../renderProbe";
 
 type TaskPanelProps = {
   tasks: TaskWithSubtasks[];
@@ -60,6 +61,7 @@ export function TaskPanel({
   onToggleTaskFavorite,
   onLoadMoreTasks,
 }: TaskPanelProps) {
+  usePresentationRenderProbe("TaskPanel");
   const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [isCompletedOpen, setIsCompletedOpen] = useState(true);
   const [expandedTaskIds, setExpandedTaskIds] = useState<ReadonlySet<string>>(

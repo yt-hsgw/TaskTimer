@@ -5,6 +5,7 @@ import type {
   PomodoroSettings,
   PomodoroSettingsDraft,
 } from "../../application/usecases/contracts";
+import { usePresentationRenderProbe } from "../renderProbe";
 
 export type DataManagementActionResult = {
   status: "success" | "failed" | "cancelled";
@@ -41,6 +42,7 @@ export function SettingsPanel({
   onCreateJsonExport,
   onCreateCsvExport,
 }: SettingsPanelProps) {
+  usePresentationRenderProbe("SettingsPanel");
   const [activeDataOperation, setActiveDataOperation] =
     useState<DataManagementOperation | null>(null);
   const [dataManagementResult, setDataManagementResult] =
