@@ -11,6 +11,29 @@ pub const POMODORO_CYCLES_MIN: i64 = 1;
 pub const POMODORO_CYCLES_MAX: i64 = 12;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PomodoroScope {
+    TaskLinked,
+    Standalone,
+}
+
+impl PomodoroScope {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::TaskLinked => "task_linked",
+            Self::Standalone => "standalone",
+        }
+    }
+
+    pub fn from_db(value: &str) -> Result<Self, String> {
+        match value {
+            "task_linked" => Ok(Self::TaskLinked),
+            "standalone" => Ok(Self::Standalone),
+            _ => Err(format!("不正なポモドーロscopeです: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PomodoroPhase {
     Work,
     ShortBreak,

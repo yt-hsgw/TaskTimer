@@ -508,13 +508,11 @@ pub fn start_timer(
 }
 
 #[tauri::command]
-pub fn start_pomodoro(
+pub fn start_standalone_pomodoro(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,
-    request: super::dto::StartPomodoroRequestDto,
 ) -> Result<super::dto::ActivePomodoroDto, String> {
-    super::usecases::start_pomodoro(database.inner(), clock.inner(), request.target.try_into()?)
-        .map(Into::into)
+    super::usecases::start_standalone_pomodoro(database.inner(), clock.inner()).map(Into::into)
 }
 
 #[tauri::command]

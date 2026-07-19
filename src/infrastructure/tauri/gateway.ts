@@ -132,8 +132,8 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     }),
   startTimer: (target: WorkTargetRef) =>
     invoke<ActiveTimer>("start_timer", { request: { target } }),
-  startPomodoro: (target: WorkTargetRef) =>
-    invoke<ActivePomodoro>("start_pomodoro", { request: { target } }),
+  startStandalonePomodoro: () =>
+    invoke<ActivePomodoro>("start_standalone_pomodoro"),
   pausePomodoro: () => invoke<ActivePomodoro>("pause_pomodoro"),
   resumePomodoro: () => invoke<ActivePomodoro>("resume_pomodoro"),
   completePomodoroWorkPhase: () =>

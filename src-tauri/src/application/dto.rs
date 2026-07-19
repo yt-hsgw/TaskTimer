@@ -223,12 +223,6 @@ pub struct StartTimerRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct StartPomodoroRequestDto {
-    pub target: WorkTargetRefDto,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct UpdatePomodoroSettingsRequestDto {
     pub work_seconds: i64,
     pub short_break_seconds: i64,
@@ -412,7 +406,8 @@ pub struct PomodoroSettingsDto {
 #[serde(rename_all = "camelCase")]
 pub struct ActivePomodoroDto {
     pub id: String,
-    pub target: WorkTargetRefDto,
+    pub scope: String,
+    pub target: Option<WorkTargetRefDto>,
     pub timer_session_id: Option<String>,
     pub phase: String,
     pub status: String,
@@ -1270,10 +1265,11 @@ impl From<ActivePomodoro> for ActivePomodoroDto {
     fn from(value: ActivePomodoro) -> Self {
         Self {
             id: value.id,
-            target: WorkTargetRefDto {
-                r#type: value.target.target_type.as_str().to_string(),
-                id: value.target.id,
-            },
+            scope: value.scope.as_str().to_string(),
+            target: value.target.map(|target| WorkTargetRefDto {
+                r#type: target.target_type.as_str().to_string(),
+                id: target.id,
+            }),
             timer_session_id: value.timer_session_id,
             phase: value.phase.as_str().to_string(),
             status: value.status.as_str().to_string(),

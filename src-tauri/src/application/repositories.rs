@@ -4,7 +4,7 @@ use crate::domain::{
         NotificationOsRegistrationAction, NotificationOsRegistrationStatus,
         NotificationRegistrationStatus,
     },
-    pomodoro::{PomodoroPhase, PomodoroStatus},
+    pomodoro::{PomodoroPhase, PomodoroScope, PomodoroStatus},
     recurrence::RecurrenceFrequency,
     task::{WorkSchedule, WorkScheduleDestination, WorkStatus},
     timer::{TimerCompletionReason, WorkTargetRef, WorkTargetType},
@@ -106,7 +106,8 @@ pub struct PomodoroSettingsUpdate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivePomodoro {
     pub id: String,
-    pub target: WorkTargetRef,
+    pub scope: PomodoroScope,
+    pub target: Option<WorkTargetRef>,
     pub timer_session_id: Option<String>,
     pub phase: PomodoroPhase,
     pub status: PomodoroStatus,
@@ -126,7 +127,7 @@ pub struct ActivePomodoro {
 pub struct PomodoroExpiry {
     pub expired_pomodoro: ActivePomodoro,
     pub active_pomodoro: Option<ActivePomodoro>,
-    pub target_title: String,
+    pub notification_title: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -589,7 +590,7 @@ pub struct UiPreferencesUpdate {
 }
 
 pub type RepositoryResult<T> = Result<T, String>;
-pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 8;
+pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 9;
 
 pub trait CalendarRepository {
     fn list_calendar_items(
@@ -636,11 +637,14 @@ pub trait PomodoroRepository {
 
     fn get_active_pomodoro(&self) -> RepositoryResult<Option<ActivePomodoro>>;
 
-    fn start_pomodoro(
+    #[cfg(test)]
+    fn start_legacy_task_linked_pomodoro(
         &self,
         target: WorkTargetRef,
         now: String,
     ) -> RepositoryResult<ActivePomodoro>;
+
+    fn start_standalone_pomodoro(&self, now: String) -> RepositoryResult<ActivePomodoro>;
 
     fn pause_pomodoro(&self, now: String) -> RepositoryResult<ActivePomodoro>;
 

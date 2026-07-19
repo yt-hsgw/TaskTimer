@@ -435,6 +435,114 @@ button {
   overflow-y: auto;
 }
 
+.pomodoro-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.pomodoro-panel-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.legacy-session-badge {
+  background: #fff9e9;
+  border: 1px solid #ddc98b;
+  border-radius: 6px;
+  color: #705d21;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 8px;
+}
+
+.pomodoro-focus {
+  align-items: center;
+  align-self: center;
+  background: #f6faf8;
+  border: 1px solid #cbdcd5;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  justify-content: center;
+  min-height: 310px;
+  padding: 32px;
+  width: min(100%, 620px);
+}
+
+.pomodoro-focus.is-short_break,
+.pomodoro-focus.is-long_break {
+  background: #f5f8fc;
+  border-color: #cad8e8;
+}
+
+.pomodoro-phase-label,
+.pomodoro-cycle-label {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.pomodoro-focus-countdown {
+  color: var(--ink);
+  font-size: 68px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+}
+
+.pomodoro-focus-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.pomodoro-focus-actions button,
+.pomodoro-primary-action {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+.pomodoro-settings-summary {
+  align-self: center;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  max-width: 760px;
+  padding-top: 16px;
+  width: 100%;
+}
+
+.pomodoro-settings-summary span {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  gap: 3px;
+  text-align: center;
+}
+
+.pomodoro-settings-summary strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
 .settings-content {
   display: grid;
   gap: 20px;
@@ -3576,6 +3684,10 @@ button {
     width: auto;
     z-index: 30;
   }
+
+  .pomodoro-settings-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 560px) {
@@ -3586,6 +3698,20 @@ button {
   .top-bar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .pomodoro-panel {
+    gap: 16px;
+    padding: 12px;
+  }
+
+  .pomodoro-focus {
+    min-height: 270px;
+    padding: 24px 14px;
+  }
+
+  .pomodoro-focus-countdown {
+    font-size: 52px;
   }
 
   .calendar-toolbar {

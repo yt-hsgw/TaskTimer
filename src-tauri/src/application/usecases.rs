@@ -59,6 +59,7 @@ const UI_VIEW_TODAY: &str = "today";
 const UI_VIEW_FAVORITES: &str = "favorites";
 const UI_VIEW_BOARD: &str = "board";
 const UI_VIEW_CALENDAR: &str = "calendar";
+const UI_VIEW_POMODORO: &str = "pomodoro";
 const UI_VIEW_SETTINGS: &str = "settings";
 const CALENDAR_VIEW_WEEK: &str = "week";
 const CALENDAR_VIEW_DAY: &str = "day";
@@ -624,13 +625,21 @@ pub fn get_active_pomodoro(
     repository.get_active_pomodoro()
 }
 
-pub fn start_pomodoro(
+#[cfg(test)]
+pub fn start_legacy_task_linked_pomodoro(
     repository: &impl PomodoroRepository,
     clock: &impl Clock,
     target: WorkTargetRef,
 ) -> RepositoryResult<ActivePomodoro> {
     let target = validate_work_target_ref(target)?;
-    repository.start_pomodoro(target, clock.now_utc_iso8601())
+    repository.start_legacy_task_linked_pomodoro(target, clock.now_utc_iso8601())
+}
+
+pub fn start_standalone_pomodoro(
+    repository: &impl PomodoroRepository,
+    clock: &impl Clock,
+) -> RepositoryResult<ActivePomodoro> {
+    repository.start_standalone_pomodoro(clock.now_utc_iso8601())
 }
 
 pub fn pause_pomodoro(
@@ -706,7 +715,7 @@ pub fn sync_expired_pomodoro(
         let display_mode = repository.get_notification_display_mode()?;
         let message = build_pomodoro_expiry_notification(
             &display_mode,
-            &expiry.target_title,
+            &expiry.notification_title,
             &expiry.expired_pomodoro.phase,
         );
         match notification_gateway.send(&message) {
@@ -1400,7 +1409,7 @@ fn validate_ui_view(value: &str) -> RepositoryResult<String> {
     let trimmed = value.trim();
     match trimmed {
         UI_VIEW_LIST | UI_VIEW_TODAY | UI_VIEW_FAVORITES | UI_VIEW_BOARD | UI_VIEW_CALENDAR
-        | UI_VIEW_SETTINGS => Ok(trimmed.to_string()),
+        | UI_VIEW_POMODORO | UI_VIEW_SETTINGS => Ok(trimmed.to_string()),
         _ => Err("最後のビュー設定が不正です".to_string()),
     }
 }

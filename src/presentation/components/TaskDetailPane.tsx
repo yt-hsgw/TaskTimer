@@ -42,16 +42,6 @@ type TaskDetailPaneProps = {
   onPauseTimer(): Promise<boolean>;
   onResumeTimer(): Promise<boolean>;
   onStopTimer(): Promise<boolean>;
-  onStartPomodoro(target: WorkTargetRef): Promise<boolean>;
-  onPausePomodoro(): Promise<boolean>;
-  onResumePomodoro(): Promise<boolean>;
-  onCompletePomodoroWork(): Promise<boolean>;
-  onCompletePomodoroWorkAndStartBreak(): Promise<boolean>;
-  onCompletePomodoroWorkAndStartNext(): Promise<boolean>;
-  onSkipPomodoroBreak(pomodoroSessionId: string): Promise<boolean>;
-  onCompletePomodoroBreak(): Promise<boolean>;
-  onCompletePomodoroBreakAndStartNext(): Promise<boolean>;
-  onCancelPomodoro(): Promise<boolean>;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onToggleSubtaskCompletion(subtask: Subtask): Promise<boolean>;
   onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
@@ -145,16 +135,6 @@ export function TaskDetailPane({
   onPauseTimer,
   onResumeTimer,
   onStopTimer,
-  onStartPomodoro,
-  onPausePomodoro,
-  onResumePomodoro,
-  onCompletePomodoroWork,
-  onCompletePomodoroWorkAndStartBreak,
-  onCompletePomodoroWorkAndStartNext,
-  onSkipPomodoroBreak,
-  onCompletePomodoroBreak,
-  onCompletePomodoroBreakAndStartNext,
-  onCancelPomodoro,
   onToggleTaskCompletion,
   onToggleSubtaskCompletion,
   onDeleteTask,
@@ -210,7 +190,6 @@ export function TaskDetailPane({
   const [newTagName, setNewTagName] = useState("");
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
   const [editingTagName, setEditingTagName] = useState("");
-  const [nowTick, setNowTick] = useState(Date.now());
   const [openSections, setOpenSections] = useState<
     Record<DetailSectionKey, boolean>
   >({
@@ -428,23 +407,11 @@ export function TaskDetailPane({
   }
 
   const isActive = isActiveTarget(activeTimer, detailTarget);
-  const isPomodoroActive = isActivePomodoroTarget(activePomodoro, detailTarget);
-  const timerBadge = isPomodoroActive
-    ? formatPomodoroBadge(activePomodoro)
-    : isActive
+  const timerBadge = isActive
       ? activeTimer?.pausedAt
         ? "一時停止中"
         : "実行中"
       : statusLabels[detailItem.status];
-
-  useEffect(() => {
-    if (!activePomodoro) {
-      return;
-    }
-    setNowTick(Date.now());
-    const timerId = window.setInterval(() => setNowTick(Date.now()), 1_000);
-    return () => window.clearInterval(timerId);
-  }, [activePomodoro]);
 
   return (
     <aside className="task-detail-pane" aria-labelledby="task-detail-title">
@@ -1087,36 +1054,9 @@ export function TaskDetailPane({
             onStopTimer={onStopTimer}
           />
         </div>
-        <PomodoroControls
-          target={detailTarget}
-          label={detailItem.title}
-          status={detailItem.status}
-          activeTimer={activeTimer}
-          activePomodoro={activePomodoro}
-          now={nowTick}
-          isMutating={isMutating}
-          onStartPomodoro={onStartPomodoro}
-          onPausePomodoro={onPausePomodoro}
-          onResumePomodoro={onResumePomodoro}
-          onCompletePomodoroWork={onCompletePomodoroWork}
-          onCompletePomodoroWorkAndStartBreak={
-            onCompletePomodoroWorkAndStartBreak
-          }
-          onCompletePomodoroWorkAndStartNext={
-            onCompletePomodoroWorkAndStartNext
-          }
-          onSkipPomodoroBreak={onSkipPomodoroBreak}
-          onCompletePomodoroBreak={onCompletePomodoroBreak}
-          onCompletePomodoroBreakAndStartNext={
-            onCompletePomodoroBreakAndStartNext
-          }
-          onCancelPomodoro={onCancelPomodoro}
-        />
         <div className="detail-metrics">
           <span>
-            {isPomodoroActive && activePomodoro
-              ? formatPomodoroPhase(activePomodoro.phase)
-              : isActive
+            {isActive
               ? activeTimer?.pausedAt
                 ? "一時停止中"
                 : "実行中"
@@ -1315,17 +1255,12 @@ function TimerControls({
     !isMutating;
 
   if (activePomodoro) {
-    const isPomodoroTarget = isActivePomodoroTarget(activePomodoro, target);
     return (
       <button
         className="icon-button"
         type="button"
         aria-label={`${label}の通常タイマー`}
-        title={
-          isPomodoroTarget
-            ? "ポモドーロで実行中です"
-            : "他のポモドーロが実行中です"
-        }
+        title="ポモドーロが実行中です"
         disabled
       >
         ▶
@@ -1377,194 +1312,6 @@ function TimerControls({
     >
       ▶
     </button>
-  );
-}
-
-type PomodoroControlsProps = {
-  target: WorkTargetRef;
-  label: string;
-  status: Task["status"];
-  activeTimer: ActiveTimer | null;
-  activePomodoro: ActivePomodoro | null;
-  now: number;
-  isMutating: boolean;
-  onStartPomodoro(target: WorkTargetRef): Promise<boolean>;
-  onPausePomodoro(): Promise<boolean>;
-  onResumePomodoro(): Promise<boolean>;
-  onCompletePomodoroWork(): Promise<boolean>;
-  onCompletePomodoroWorkAndStartBreak(): Promise<boolean>;
-  onCompletePomodoroWorkAndStartNext(): Promise<boolean>;
-  onSkipPomodoroBreak(pomodoroSessionId: string): Promise<boolean>;
-  onCompletePomodoroBreak(): Promise<boolean>;
-  onCompletePomodoroBreakAndStartNext(): Promise<boolean>;
-  onCancelPomodoro(): Promise<boolean>;
-};
-
-function PomodoroControls({
-  target,
-  label,
-  status,
-  activeTimer,
-  activePomodoro,
-  now,
-  isMutating,
-  onStartPomodoro,
-  onPausePomodoro,
-  onResumePomodoro,
-  onCompletePomodoroWork,
-  onCompletePomodoroWorkAndStartBreak,
-  onCompletePomodoroWorkAndStartNext,
-  onSkipPomodoroBreak,
-  onCompletePomodoroBreak,
-  onCompletePomodoroBreakAndStartNext,
-  onCancelPomodoro,
-}: PomodoroControlsProps) {
-  const isActive = isActivePomodoroTarget(activePomodoro, target);
-  const canStart =
-    !activeTimer &&
-    !activePomodoro &&
-    status !== "done" &&
-    status !== "archived" &&
-    !isMutating;
-
-  if (!activePomodoro) {
-    return (
-      <div className="pomodoro-card">
-        <div className="pomodoro-card-header">
-          <div>
-            <span>ポモドーロ</span>
-            <strong>未開始</strong>
-          </div>
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={!canStart}
-            title={activeTimer ? "通常タイマーが実行中です" : "ポモドーロを開始"}
-            onClick={() => void onStartPomodoro(target)}
-          >
-            開始
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isActive) {
-    return (
-      <div className="pomodoro-card is-muted">
-        <div className="pomodoro-card-header">
-          <div>
-            <span>ポモドーロ</span>
-            <strong>別の対象で実行中</strong>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const isPaused = activePomodoro.status === "paused";
-  const isWorkPhase = activePomodoro.phase === "work";
-
-  return (
-    <div className={`pomodoro-card is-${activePomodoro.phase}`}>
-      <div className="pomodoro-card-header">
-        <div>
-          <span>ポモドーロ</span>
-          <strong>{formatPomodoroPhase(activePomodoro.phase)}</strong>
-        </div>
-        <strong className="pomodoro-countdown">
-          {formatDuration(
-            getPomodoroRemainingSeconds(activePomodoro, now),
-          )}
-        </strong>
-      </div>
-
-      <div className="pomodoro-meta">
-        <span>{formatPomodoroStatus(activePomodoro.status)}</span>
-        <span>{formatPomodoroCycle(activePomodoro)}</span>
-        <span>{formatDuration(activePomodoro.phaseDurationSeconds)}</span>
-      </div>
-
-      <div className="pomodoro-actions">
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={isPaused ? `${label}のポモドーロを再開` : `${label}のポモドーロを一時停止`}
-          title={isPaused ? "再開" : "一時停止"}
-          disabled={isMutating}
-          onClick={() =>
-            isPaused ? void onResumePomodoro() : void onPausePomodoro()
-          }
-        >
-          {isPaused ? "▶" : "Ⅱ"}
-        </button>
-
-        {isWorkPhase ? (
-          <>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={isMutating}
-              onClick={() => void onCompletePomodoroWorkAndStartBreak()}
-            >
-              休憩を開始
-            </button>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={isMutating}
-              onClick={() => void onCompletePomodoroWorkAndStartNext()}
-            >
-              次の作業
-            </button>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={isMutating}
-              onClick={() => void onCompletePomodoroWork()}
-            >
-              作業を完了
-            </button>
-          </>
-        ) : (
-          <>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={isMutating}
-              onClick={() => void onCompletePomodoroBreakAndStartNext()}
-            >
-              次の作業
-            </button>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={isMutating}
-              onClick={() => void onCompletePomodoroBreak()}
-            >
-              休憩を完了
-            </button>
-            <button
-              className="secondary-button"
-              type="button"
-              disabled={isMutating}
-              onClick={() => void onSkipPomodoroBreak(activePomodoro.id)}
-            >
-              スキップ
-            </button>
-          </>
-        )}
-
-        <button
-          className="stop-button"
-          type="button"
-          disabled={isMutating}
-          onClick={() => void onCancelPomodoro()}
-        >
-          終了
-        </button>
-      </div>
-    </div>
   );
 }
 
@@ -1659,81 +1406,6 @@ function isActiveTarget(activeTimer: ActiveTimer | null, target: WorkTargetRef) 
   return (
     activeTimer?.target.type === target.type && activeTimer.target.id === target.id
   );
-}
-
-function isActivePomodoroTarget(
-  activePomodoro: ActivePomodoro | null,
-  target: WorkTargetRef,
-) {
-  return (
-    activePomodoro?.target.type === target.type &&
-    activePomodoro.target.id === target.id
-  );
-}
-
-function formatPomodoroBadge(activePomodoro: ActivePomodoro | null) {
-  if (!activePomodoro) {
-    return "未開始";
-  }
-  return activePomodoro.status === "paused"
-    ? "一時停止中"
-    : formatPomodoroPhase(activePomodoro.phase);
-}
-
-function formatPomodoroPhase(phase: ActivePomodoro["phase"]) {
-  if (phase === "work") {
-    return "作業";
-  }
-  if (phase === "long_break") {
-    return "長い休憩";
-  }
-  return "短い休憩";
-}
-
-function formatPomodoroStatus(status: ActivePomodoro["status"]) {
-  if (status === "paused") {
-    return "一時停止中";
-  }
-  if (status === "completed") {
-    return "完了";
-  }
-  if (status === "cancelled") {
-    return "キャンセル";
-  }
-  return "実行中";
-}
-
-function formatPomodoroCycle(activePomodoro: ActivePomodoro) {
-  if (activePomodoro.phase === "work") {
-    return `${activePomodoro.cycleCount + 1}セット目`;
-  }
-  return `${activePomodoro.cycleCount}セット完了`;
-}
-
-function getPomodoroRemainingSeconds(activePomodoro: ActivePomodoro, now: number) {
-  const startedAt = new Date(activePomodoro.phaseStartedAt).getTime();
-  const pausedAt = activePomodoro.pausedAt
-    ? new Date(activePomodoro.pausedAt).getTime()
-    : null;
-  const effectiveNow =
-    activePomodoro.status === "paused" && pausedAt ? pausedAt : now;
-  if (Number.isNaN(startedAt) || Number.isNaN(effectiveNow)) {
-    return activePomodoro.phaseDurationSeconds;
-  }
-
-  const elapsedSeconds = Math.max(
-    0,
-    Math.floor((effectiveNow - startedAt) / 1_000) -
-      activePomodoro.pausedTotalSeconds,
-  );
-  return Math.max(0, activePomodoro.phaseDurationSeconds - elapsedSeconds);
-}
-
-function formatDuration(totalSeconds: number) {
-  const seconds = Math.max(0, Math.round(totalSeconds));
-  const minutes = Math.floor(seconds / 60);
-  const remainingSeconds = seconds % 60;
-  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
 function formatTimerTarget(value: number | null) {

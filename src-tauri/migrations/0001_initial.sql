@@ -257,8 +257,9 @@ VALUES (
 
 CREATE TABLE IF NOT EXISTS pomodoro_sessions (
   id TEXT PRIMARY KEY,
-  target_type TEXT NOT NULL CHECK (target_type IN ('task', 'subtask')),
-  target_id TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK (scope IN ('task_linked', 'standalone')),
+  target_type TEXT NULL CHECK (target_type IS NULL OR target_type IN ('task', 'subtask')),
+  target_id TEXT NULL,
   timer_session_id TEXT NULL,
   phase TEXT NOT NULL CHECK (phase IN ('work', 'short_break', 'long_break')),
   status TEXT NOT NULL CHECK (status IN ('running', 'paused', 'completed', 'cancelled')),
@@ -273,7 +274,14 @@ CREATE TABLE IF NOT EXISTS pomodoro_sessions (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (timer_session_id) REFERENCES timer_sessions(id) ON DELETE RESTRICT,
-  CHECK (phase <> 'work' OR timer_session_id IS NOT NULL),
+  CHECK (
+    (scope = 'task_linked' AND target_type IS NOT NULL AND target_id IS NOT NULL)
+    OR (scope = 'standalone' AND target_type IS NULL AND target_id IS NULL)
+  ),
+  CHECK (
+    (scope = 'task_linked' AND (phase <> 'work' OR timer_session_id IS NOT NULL))
+    OR (scope = 'standalone' AND timer_session_id IS NULL)
+  ),
   CHECK (completed_at IS NULL OR completed_at >= phase_started_at),
   CHECK (cancelled_at IS NULL OR cancelled_at >= phase_started_at)
 );
