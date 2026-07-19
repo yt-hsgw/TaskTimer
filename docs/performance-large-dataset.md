@@ -250,6 +250,7 @@ Presentation描画計測結果:
 
 | 日時 | OS/ブラウザ | TaskTimer commit | プロファイル | コマンド | WARN件数 | メモ |
 | --- | --- | --- | --- | --- | ---: | --- |
+| 2026-07-19 | Darwin / headless Chrome | #147作業ブランチ | 401タスク / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 完全重複・境界一致・連鎖重複・サブタスク・複数時間カードを含む。重複レイアウト3ms、週表示48ms、全項目閾値内。 |
 | 2026-07-19 | Darwin / headless Chrome | #146作業ブランチ | 401タスク / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 空き時間軸と月表示のドラッグ範囲作成を含む。時間範囲作成334ms、月範囲作成149ms、既存の予定移動・端リサイズ・日付変更も全項目閾値内。 |
 | 2026-07-19 | Darwin / headless Chrome | #138作業ブランチ | 50タスク / 200サブタスク / 4リスト | `npm run perf:ui -- --profile smoke --fail-on-warning` | 0 | カード本文D&D、前面オーバーレイ、移動先列強調、120ms保存遅延中の楽観表示、保存後移動を含む。D&D 428ms、全項目閾値内。 |
 | 2026-07-18 | Darwin 25.5.0 arm64 / headless Chrome | #131作業ブランチ | ページ対象401タスク / 初期200 + 追加200 / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 最大1,337ms。追加読み込み971ms、選択・展開・詳細・スクロール位置を維持。 |

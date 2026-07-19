@@ -132,6 +132,14 @@ type CalendarCreateSelection =
   | DateCalendarCreateSelection;
 
 type CalendarItemVariant = "all-day" | "timed" | "month";
+type TimedCalendarItemLayout = {
+  laneIndex: number;
+  laneCount: number;
+};
+type TimedCalendarLayout = {
+  itemLayouts: ReadonlyMap<string, TimedCalendarItemLayout>;
+  itemsByDate: ReadonlyMap<string, WeekCalendarItem[]>;
+};
 const RESIZE_PREVIEW_ID_SUFFIX = ":resize-preview";
 const MOVE_PREVIEW_ID_SUFFIX = ":move-preview";
 const CALENDAR_VISIBLE_ITEM_LIMIT = 3;
@@ -1022,6 +1030,10 @@ function TimeGridCalendar({
     () => buildCalendarDayLayouts(days, headerItems),
     [days, headerItems],
   );
+  const timedCalendarLayout = useMemo(
+    () => buildTimedCalendarLayout(days, items),
+    [days, items],
+  );
   const rangeBoundaryStart = days[0]?.date;
   const rangeBoundaryEnd = days.at(-1)?.date;
 
@@ -1124,6 +1136,36 @@ function TimeGridCalendar({
           onMoveItemKeyDown={onMoveItemKeyDown}
         />
       ))}
+      {!isLoading
+        ? days.map((day, dayIndex) => (
+            <div
+              className="calendar-timed-day-overlay"
+              data-calendar-date={day.date}
+              key={`${day.date}:timed-overlay`}
+              style={{
+                gridColumn: dayIndex + 2,
+                gridRow: `3 / span ${businessHours.length}`,
+              }}
+            >
+              <CalendarCellItems
+                isLoading={false}
+                items={timedCalendarLayout.itemsByDate.get(day.date) ?? []}
+                timedItemLayouts={timedCalendarLayout.itemLayouts}
+                selectedTarget={selectedTarget}
+                draggedItem={draggedItem}
+                isReschedulingItem={isReschedulingItem}
+                variant="timed"
+                displayDate={day.date}
+                onSelectItem={onSelectItem}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                onResizeItem={onResizeItem}
+                onResizePreview={onResizePreview}
+                onMoveItemKeyDown={onMoveItemKeyDown}
+              />
+            </div>
+          ))
+        : null}
     </div>
   );
 }
@@ -1186,11 +1228,7 @@ function TimeGridRow({
         const hourItems = items
           .filter((item) => {
             if (item.marker === "scheduled") {
-              return (
-                !item.isAllDay &&
-                !isMultiDaySchedule(item) &&
-                getTimedScheduleSegment(item, day.date)?.startHour === hour
-              );
+              return false;
             }
             return item.date === day.date && getDisplayHour(item) === hour;
           })
@@ -1269,6 +1307,7 @@ function TimeGridRow({
 function CalendarCellItems({
   isLoading,
   items,
+  timedItemLayouts,
   selectedTarget,
   draggedItem,
   isReschedulingItem,
@@ -1286,6 +1325,7 @@ function CalendarCellItems({
 }: {
   isLoading: boolean;
   items: Array<WeekCalendarItem | null>;
+  timedItemLayouts?: ReadonlyMap<string, TimedCalendarItemLayout>;
   selectedTarget: WorkTargetRef | null;
   draggedItem: WeekCalendarItem | null;
   isReschedulingItem: boolean;
@@ -1331,6 +1371,9 @@ function CalendarCellItems({
             draggedItem={draggedItem}
             isReschedulingItem={isReschedulingItem}
             variant={variant}
+            timedLayout={timedItemLayouts?.get(
+              getTimedCalendarItemLayoutKey(displayDate, item.id),
+            )}
             rangeBoundaryStart={rangeBoundaryStart}
             rangeBoundaryEnd={rangeBoundaryEnd}
             onSelectItem={onSelectItem}
@@ -1603,9 +1646,214 @@ function buildCalendarDayLayouts(
   return layouts;
 }
 
+type TimedCalendarInterval = {
+  item: WeekCalendarItem;
+  startMinutes: number;
+  endMinutes: number;
+};
+
+type ActiveTimedCalendarLane = {
+  laneIndex: number;
+  endMinutes: number;
+};
+
+function buildTimedCalendarLayout(
+  days: CalendarDay[],
+  items: WeekCalendarItem[],
+): TimedCalendarLayout {
+  const visibleDates = new Set(days.map((day) => day.date));
+  const intervalsByDate = new Map<string, TimedCalendarInterval[]>();
+  for (const item of items) {
+    if (
+      item.marker !== "scheduled" ||
+      item.isAllDay ||
+      item.date !== item.endDate ||
+      !visibleDates.has(item.date)
+    ) {
+      continue;
+    }
+    const segment = getTimedScheduleSegment(item, item.date);
+    if (!segment) {
+      continue;
+    }
+    const startMinutes = segment.startMinutes;
+    const interval = {
+      item,
+      startMinutes,
+      endMinutes: startMinutes + segment.durationMinutes,
+    };
+    const dateIntervals = intervalsByDate.get(item.date) ?? [];
+    dateIntervals.push(interval);
+    intervalsByDate.set(item.date, dateIntervals);
+  }
+
+  const layouts = new Map<string, TimedCalendarItemLayout>();
+  const itemsByDate = new Map<string, WeekCalendarItem[]>();
+  for (const [date, intervals] of intervalsByDate) {
+    intervals.sort(
+      (first, second) =>
+        first.startMinutes - second.startMinutes ||
+        second.endMinutes - first.endMinutes ||
+        first.item.id.localeCompare(second.item.id),
+    );
+    itemsByDate.set(
+      date,
+      intervals.map((interval) => interval.item),
+    );
+    let group: TimedCalendarInterval[] = [];
+    let groupEndMinutes = -1;
+    for (const interval of intervals) {
+      if (group.length > 0 && interval.startMinutes >= groupEndMinutes) {
+        assignTimedCalendarLanes(date, group, layouts);
+        group = [];
+        groupEndMinutes = -1;
+      }
+      group.push(interval);
+      groupEndMinutes = Math.max(groupEndMinutes, interval.endMinutes);
+    }
+    assignTimedCalendarLanes(date, group, layouts);
+  }
+  return { itemLayouts: layouts, itemsByDate };
+}
+
+function assignTimedCalendarLanes(
+  date: string,
+  intervals: TimedCalendarInterval[],
+  layouts: Map<string, TimedCalendarItemLayout>,
+) {
+  if (intervals.length === 0) {
+    return;
+  }
+  const activeLanes: ActiveTimedCalendarLane[] = [];
+  const availableLanes: number[] = [];
+  const assignments: Array<{ itemId: string; laneIndex: number }> = [];
+  let nextLaneIndex = 0;
+
+  for (const interval of intervals) {
+    while (
+      activeLanes[0] &&
+      activeLanes[0].endMinutes <= interval.startMinutes
+    ) {
+      const available = popMinHeap(activeLanes, compareActiveTimedLanes);
+      if (available) {
+        pushMinHeap(availableLanes, available.laneIndex, compareNumbers);
+      }
+    }
+    const laneIndex =
+      popMinHeap(availableLanes, compareNumbers) ?? nextLaneIndex++;
+    assignments.push({ itemId: interval.item.id, laneIndex });
+    pushMinHeap(
+      activeLanes,
+      { laneIndex, endMinutes: interval.endMinutes },
+      compareActiveTimedLanes,
+    );
+  }
+
+  for (const assignment of assignments) {
+    layouts.set(getTimedCalendarItemLayoutKey(date, assignment.itemId), {
+      laneIndex: assignment.laneIndex,
+      laneCount: nextLaneIndex,
+    });
+  }
+}
+
+function pushMinHeap<T>(
+  heap: T[],
+  value: T,
+  compare: (first: T, second: T) => number,
+) {
+  heap.push(value);
+  let index = heap.length - 1;
+  while (index > 0) {
+    const parentIndex = Math.floor((index - 1) / 2);
+    if (compare(heap[parentIndex], heap[index]) <= 0) {
+      break;
+    }
+    [heap[parentIndex], heap[index]] = [heap[index], heap[parentIndex]];
+    index = parentIndex;
+  }
+}
+
+function popMinHeap<T>(
+  heap: T[],
+  compare: (first: T, second: T) => number,
+): T | undefined {
+  const minimum = heap[0];
+  const last = heap.pop();
+  if (heap.length === 0 || last === undefined) {
+    return minimum;
+  }
+  heap[0] = last;
+  let index = 0;
+  while (true) {
+    const leftIndex = index * 2 + 1;
+    const rightIndex = leftIndex + 1;
+    let minimumIndex = index;
+    if (
+      leftIndex < heap.length &&
+      compare(heap[leftIndex], heap[minimumIndex]) < 0
+    ) {
+      minimumIndex = leftIndex;
+    }
+    if (
+      rightIndex < heap.length &&
+      compare(heap[rightIndex], heap[minimumIndex]) < 0
+    ) {
+      minimumIndex = rightIndex;
+    }
+    if (minimumIndex === index) {
+      break;
+    }
+    [heap[index], heap[minimumIndex]] = [heap[minimumIndex], heap[index]];
+    index = minimumIndex;
+  }
+  return minimum;
+}
+
+function compareActiveTimedLanes(
+  first: ActiveTimedCalendarLane,
+  second: ActiveTimedCalendarLane,
+) {
+  return (
+    first.endMinutes - second.endMinutes ||
+    first.laneIndex - second.laneIndex
+  );
+}
+
+function compareNumbers(first: number, second: number) {
+  return first - second;
+}
+
+function getTimedCalendarItemLayoutKey(date: string, itemId: string) {
+  return `${date}:${itemId}`;
+}
+
+function getTimedCalendarLaneStyle(layout: TimedCalendarItemLayout) {
+  if (layout.laneCount <= 1) {
+    return {
+      "--schedule-lane-left": "0%",
+      "--schedule-lane-width": "100%",
+    };
+  }
+  const gapPixels = 2;
+  const laneWidthPercent = 100 / layout.laneCount;
+  const widthGapPixels =
+    (gapPixels * (layout.laneCount - 1)) / layout.laneCount;
+  const leftGapPixels = (gapPixels * layout.laneIndex) / layout.laneCount;
+  return {
+    "--schedule-lane-left": `calc(${(
+      laneWidthPercent * layout.laneIndex
+    ).toFixed(6)}% + ${leftGapPixels.toFixed(3)}px)`,
+    "--schedule-lane-width": `calc(${laneWidthPercent.toFixed(
+      6,
+    )}% - ${widthGapPixels.toFixed(3)}px)`,
+  };
+}
+
 function CalendarItemButton({
   item,
   displayDate,
+  timedLayout,
   selectedTarget,
   draggedItem,
   isReschedulingItem,
@@ -1621,6 +1869,7 @@ function CalendarItemButton({
 }: {
   item: WeekCalendarItem;
   displayDate: string;
+  timedLayout?: TimedCalendarItemLayout;
   selectedTarget: WorkTargetRef | null;
   draggedItem: WeekCalendarItem | null;
   isReschedulingItem: boolean;
@@ -1675,10 +1924,14 @@ function CalendarItemButton({
   const timedSegment = isVerticalResize
     ? getTimedScheduleSegment(item, displayDate)
     : null;
+  const laneStyle = timedLayout
+    ? getTimedCalendarLaneStyle(timedLayout)
+    : null;
   const style = timedSegment
     ? ({
         "--schedule-offset": `${timedSegment.offsetMinutes * 0.9}px`,
         "--schedule-height": `${Math.max(timedSegment.durationMinutes * 0.9, 24)}px`,
+        ...laneStyle,
       } as CSSProperties)
     : undefined;
 
@@ -1698,6 +1951,8 @@ function CalendarItemButton({
         rangeSegment?.connectsBefore ? "connects-before" : ""
       } ${rangeSegment?.connectsAfter ? "connects-after" : ""}`}
       style={style}
+      data-calendar-lane-index={timedLayout?.laneIndex}
+      data-calendar-lane-count={timedLayout?.laneCount}
       aria-hidden={isCalendarPreview || undefined}
       data-calendar-preview={previewKind ?? undefined}
       onDoubleClick={(event) => event.stopPropagation()}
@@ -2507,7 +2762,8 @@ function getTimedScheduleSegment(item: WeekCalendarItem, date: string) {
 
   return {
     startHour: Math.floor(startMinutes / 60),
-    offsetMinutes: startMinutes % 60,
+    startMinutes,
+    offsetMinutes: startMinutes - businessStartMinutes,
     durationMinutes: endMinutes - startMinutes,
   };
 }
