@@ -4,7 +4,6 @@ import {
   CalendarDays,
   CircleDot,
   Columns3,
-  Hash,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -15,7 +14,6 @@ import {
   Trash2,
 } from "lucide-react";
 import type {
-  TagItem,
   TaskListColorToken,
   TaskListItem,
 } from "../../application/usecases/contracts";
@@ -38,11 +36,14 @@ type LeftNavigationProps = {
   todayCount: number;
   isOpen: boolean;
   taskLists: TaskListItem[];
-  tags: TagItem[];
   isMutating: boolean;
   onSelectView(view: AppView): void;
   onCreateTaskList(name: string): Promise<boolean>;
-  onRenameTaskList(listId: string, name: string): Promise<boolean>;
+  onUpdateTaskList(
+    listId: string,
+    name: string,
+    colorToken: TaskListColorToken,
+  ): Promise<boolean>;
   onDeleteTaskList(listId: string): Promise<boolean>;
   onToggle(): void;
 };
@@ -53,11 +54,10 @@ export function LeftNavigation({
   todayCount,
   isOpen,
   taskLists,
-  tags,
   isMutating,
   onSelectView,
   onCreateTaskList,
-  onRenameTaskList,
+  onUpdateTaskList,
   onDeleteTaskList,
   onToggle,
 }: LeftNavigationProps) {
@@ -66,6 +66,8 @@ export function LeftNavigation({
   const [newListName, setNewListName] = useState("");
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [editingListName, setEditingListName] = useState("");
+  const [editingListColor, setEditingListColor] =
+    useState<TaskListColorToken>("green");
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -80,17 +82,34 @@ export function LeftNavigation({
     }
   };
 
-  const handleRename = async (event: FormEvent<HTMLFormElement>, listId: string) => {
+  const handleEdit = async (
+    event: FormEvent<HTMLFormElement>,
+    listId: string,
+  ) => {
     event.preventDefault();
+    const list = taskLists.find((candidate) => candidate.id === listId);
     const name = editingListName.trim();
-    if (!name) {
+    if (!list || !name) {
       return;
     }
-    const renamed = await onRenameTaskList(listId, name);
-    if (renamed) {
-      setEditingListId(null);
-      setEditingListName("");
+
+    const nextName = list.id === DEFAULT_TASK_LIST_ID ? list.name : name;
+    if (
+      (nextName !== list.name || editingListColor !== list.colorToken) &&
+      !(await onUpdateTaskList(listId, nextName, editingListColor))
+    ) {
+      return;
     }
+
+    setEditingListId(null);
+    setEditingListName("");
+  };
+
+  const startEditing = (list: TaskListItem) => {
+    setIsCreateOpen(false);
+    setEditingListId(list.id);
+    setEditingListName(list.name);
+    setEditingListColor(list.colorToken);
   };
 
   const handleDelete = async (list: TaskListItem) => {
@@ -170,14 +189,16 @@ export function LeftNavigation({
             >
               {editingListId === list.id ? (
                 <form
-                  className="nav-list-form"
-                  onSubmit={(event) => void handleRename(event, list.id)}
+                  className="nav-list-form nav-list-editor"
+                  onSubmit={(event) => void handleEdit(event, list.id)}
                 >
                   <input
                     value={editingListName}
                     onChange={(event) => setEditingListName(event.target.value)}
                     maxLength={80}
                     disabled={isMutating}
+                    readOnly={list.id === DEFAULT_TASK_LIST_ID}
+                    aria-label={`${list.name}の名前`}
                     autoFocus
                   />
                   <button
@@ -196,6 +217,23 @@ export function LeftNavigation({
                   >
                     ×
                   </button>
+                  <div className="nav-list-color-field">
+                    <span>リストの色</span>
+                    <div className="nav-list-color-picker" aria-label="リストの色">
+                      {taskListColorOptions.map((colorToken) => (
+                        <button
+                          className={`nav-list-color-button color-${colorToken}`}
+                          type="button"
+                          key={colorToken}
+                          aria-label={`${taskListColorLabels[colorToken]}に変更`}
+                          aria-pressed={editingListColor === colorToken}
+                          title={taskListColorLabels[colorToken]}
+                          disabled={isMutating}
+                          onClick={() => setEditingListColor(colorToken)}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 </form>
               ) : (
                 <>
@@ -211,33 +249,27 @@ export function LeftNavigation({
                   />
                   {isOpen ? (
                     <div className="nav-list-actions">
+                      <button
+                        className="nav-mini-button"
+                        type="button"
+                        aria-label={`${list.name}を編集`}
+                        title="リストを編集"
+                        disabled={isMutating}
+                        onClick={() => startEditing(list)}
+                      >
+                        <Pencil aria-hidden="true" size={14} />
+                      </button>
                       {list.id !== DEFAULT_TASK_LIST_ID ? (
-                        <>
-                          <button
-                            className="nav-mini-button"
-                            type="button"
-                            aria-label={`${list.name}の名前を変更`}
-                            title="名前を変更"
-                            disabled={isMutating}
-                            onClick={() => {
-                              setIsCreateOpen(false);
-                              setEditingListId(list.id);
-                              setEditingListName(list.name);
-                            }}
-                          >
-                            <Pencil aria-hidden="true" size={14} />
-                          </button>
-                          <button
-                            className="nav-mini-button"
-                            type="button"
-                            aria-label={`${list.name}を削除`}
-                            title="削除"
-                            disabled={isMutating}
-                            onClick={() => void handleDelete(list)}
-                          >
-                            <Trash2 aria-hidden="true" size={14} />
-                          </button>
-                        </>
+                        <button
+                          className="nav-mini-button"
+                          type="button"
+                          aria-label={`${list.name}を削除`}
+                          title="削除"
+                          disabled={isMutating}
+                          onClick={() => void handleDelete(list)}
+                        >
+                          <Trash2 aria-hidden="true" size={14} />
+                        </button>
                       ) : null}
                     </div>
                   ) : null}
@@ -257,25 +289,6 @@ export function LeftNavigation({
               }
             />
           ) : null}
-        </div>
-
-        <div className="nav-section">
-          {isOpen ? (
-            <div className="nav-section-heading">
-              <span>タグ</span>
-            </div>
-          ) : null}
-          {tags.map((tag) => (
-            <NavButton
-              icon={<Hash aria-hidden="true" size={18} strokeWidth={1.8} />}
-              label={tag.name}
-              count={tag.taskCount}
-              isOpen={isOpen}
-              isActive={activeView.kind === "tag" && activeView.tagId === tag.id}
-              onClick={() => onSelectView({ kind: "tag", tagId: tag.id })}
-              key={tag.id}
-            />
-          ))}
         </div>
 
         <div className="nav-section">
@@ -372,3 +385,21 @@ function NavButton({
 function ColorSwatch({ colorToken }: { colorToken: TaskListColorToken }) {
   return <span className={`nav-list-color-swatch color-${colorToken}`} />;
 }
+
+const taskListColorOptions: TaskListColorToken[] = [
+  "green",
+  "blue",
+  "amber",
+  "rose",
+  "violet",
+  "gray",
+];
+
+const taskListColorLabels: Record<TaskListColorToken, string> = {
+  green: "緑",
+  blue: "青",
+  amber: "黄",
+  rose: "赤",
+  violet: "紫",
+  gray: "灰",
+};

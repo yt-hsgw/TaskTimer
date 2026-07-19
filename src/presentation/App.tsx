@@ -1065,38 +1065,19 @@ export function App() {
     [clearDetailSelection, runMutation],
   );
 
-  const handleRenameTaskList = useCallback(
-    (listId: string, name: string) =>
+  const handleUpdateTaskList = useCallback(
+    (listId: string, name: string, colorToken: TaskListColorToken) =>
       runMutation(async () => {
-        const currentList = taskLists.find((list) => list.id === listId);
         await tauriTaskTimerGateway.updateTaskList(listId, {
           name,
-          colorToken: currentList?.colorToken,
+          colorToken,
         });
       }, {
         scope: "navigation",
         refresh: { taskLists: true },
-      }),
-    [runMutation, taskLists],
-  );
-
-  const handleUpdateTaskListColor = useCallback(
-    (listId: string, colorToken: TaskListColorToken) =>
-      runMutation(async () => {
-        const currentList = taskLists.find((list) => list.id === listId);
-        if (!currentList) {
-          throw new Error("色を変更するリストが見つかりません。");
-        }
-        await tauriTaskTimerGateway.updateTaskList(listId, {
-          name: currentList.name,
-          colorToken,
-        });
-      }, {
-        scope: "detail",
-        refresh: { taskLists: true },
         invalidateCalendar: true,
       }),
-    [runMutation, taskLists],
+    [runMutation],
   );
 
   const handleDeleteTaskList = useCallback(
@@ -1868,11 +1849,10 @@ export function App() {
           todayCount={todayCount}
           isOpen={isNavigationOpen}
           taskLists={taskLists}
-          tags={tags}
           isMutating={isNavigationMutating}
           onSelectView={handleSelectView}
           onCreateTaskList={handleCreateTaskList}
-          onRenameTaskList={handleRenameTaskList}
+          onUpdateTaskList={handleUpdateTaskList}
           onDeleteTaskList={handleDeleteTaskList}
           onToggle={handleToggleNavigation}
         />
@@ -1940,7 +1920,6 @@ export function App() {
                   activePomodoro={activePomodoro}
                   taskLists={taskLists}
                   tags={tags}
-                  displayMode={displayMode}
                   isMutating={isDetailMutating}
                   onClose={closeDetailPane}
                   onUpdateTask={handleUpdateTask}
@@ -1956,7 +1935,6 @@ export function App() {
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
-                  onUpdateTaskListColor={handleUpdateTaskListColor}
                   onCreateTag={handleCreateTag}
                   onRenameTag={handleRenameTag}
                   onDeleteTag={handleDeleteTag}
@@ -2001,7 +1979,6 @@ export function App() {
                   activePomodoro={activePomodoro}
                   taskLists={taskLists}
                   tags={tags}
-                  displayMode={displayMode}
                   isMutating={isDetailMutating}
                   onClose={closeDetailPane}
                   onUpdateTask={handleUpdateTask}
@@ -2017,7 +1994,6 @@ export function App() {
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
-                  onUpdateTaskListColor={handleUpdateTaskListColor}
                   onCreateTag={handleCreateTag}
                   onRenameTag={handleRenameTag}
                   onDeleteTag={handleDeleteTag}
@@ -2062,7 +2038,6 @@ export function App() {
                   activePomodoro={activePomodoro}
                   taskLists={taskLists}
                   tags={tags}
-                  displayMode={displayMode}
                   isMutating={isDetailMutating}
                   onClose={closeDetailPane}
                   onUpdateTask={handleUpdateTask}
@@ -2078,7 +2053,6 @@ export function App() {
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
-                  onUpdateTaskListColor={handleUpdateTaskListColor}
                   onCreateTag={handleCreateTag}
                   onRenameTag={handleRenameTag}
                   onDeleteTag={handleDeleteTag}

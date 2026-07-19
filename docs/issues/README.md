@@ -68,6 +68,11 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [060 カレンダーの重複予定を横並び表示する](060-calendar-overlap-layout.md) / GitHub #147
 - [061 カレンダーの省略予定を一覧表示する](061-calendar-overflow-popover.md) / GitHub #148
 - [062 カレンダーの時間グリッド表示回帰を修正する](062-calendar-time-grid-regression.md) / GitHub #152
+- [063 ワークスペース表示切り替えとローカル検索を実装する](063-workspace-navigation-local-search.md) / GitHub #157
+- [064 親タスク作成を共通ダイアログへ統合する](064-unified-task-create-dialog.md) / GitHub #158
+- [065 タスク表示色をリスト色から分離する](065-task-display-color.md) / GitHub #159
+- [066 タイムライン表示を実装する](066-timeline-view.md) / GitHub #160
+- [067 詳細画面と左ペインの管理操作を整理する](067-detail-navigation-cleanup.md) / GitHub #161
 
 ## 運用
 
