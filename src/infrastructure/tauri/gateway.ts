@@ -31,6 +31,7 @@ import type {
   WeekCalendarItem,
   WorkItemDraft,
   WorkScheduleDraft,
+  WorkScheduleMoveDraft,
 } from "../../application/usecases/contracts";
 import type { ActiveTimer, TimerSession } from "../../domain/timer/types";
 import type { NotificationDisplayMode } from "../../domain/notification/types";
@@ -112,6 +113,13 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   ) =>
     invoke<void>("resize_scheduled_work_item", {
       request: { target, schedule },
+    }),
+  moveScheduledWorkItem: (
+    target: WorkTargetRef,
+    destination: WorkScheduleMoveDraft,
+  ) =>
+    invoke<void>("move_scheduled_work_item", {
+      request: { target, destination },
     }),
   startTimer: (target: WorkTargetRef) =>
     invoke<ActiveTimer>("start_timer", { request: { target } }),

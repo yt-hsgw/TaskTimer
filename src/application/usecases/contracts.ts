@@ -25,6 +25,11 @@ export type WorkScheduleDraft = {
   isAllDay: boolean;
 };
 
+export type WorkScheduleMoveDraft = {
+  startDate: string;
+  startTime: string | null;
+};
+
 export type ScheduledTaskDraft = {
   listId?: string | null;
   title: string;
@@ -356,6 +361,10 @@ export type TaskTimerGateway = {
   resizeScheduledWorkItem(
     target: WorkTargetRef,
     schedule: WorkScheduleDraft,
+  ): Promise<void>;
+  moveScheduledWorkItem(
+    target: WorkTargetRef,
+    destination: WorkScheduleMoveDraft,
   ): Promise<void>;
   startTimer(target: WorkTargetRef): Promise<ActiveTimer>;
   startPomodoro(target: WorkTargetRef): Promise<ActivePomodoro>;
