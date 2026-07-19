@@ -3,13 +3,11 @@ import { Pencil, Plus, Trash2, X } from "lucide-react";
 import type {
   ActivePomodoro,
   TagItem,
-  TaskListColorToken,
   TaskWithSubtasks,
   TaskListItem,
   WorkItemDraft,
   WorkItemUpdateDraft,
 } from "../../application/usecases/contracts";
-import type { NotificationDisplayMode } from "../../domain/notification/types";
 import type { RecurrenceFrequency } from "../../domain/recurrence/types";
 import type { ActiveTimer } from "../../domain/timer/types";
 import type {
@@ -27,7 +25,6 @@ type TaskDetailPaneProps = {
   activePomodoro: ActivePomodoro | null;
   taskLists: TaskListItem[];
   tags: TagItem[];
-  displayMode: NotificationDisplayMode;
   isMutating: boolean;
   onClose(): void;
   onUpdateTask(taskId: string, input: WorkItemUpdateDraft): Promise<boolean>;
@@ -46,10 +43,6 @@ type TaskDetailPaneProps = {
   onToggleSubtaskCompletion(subtask: Subtask): Promise<boolean>;
   onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
   onDeleteSubtask(subtask: Subtask): Promise<boolean>;
-  onUpdateTaskListColor(
-    listId: string,
-    colorToken: TaskListColorToken,
-  ): Promise<boolean>;
   onCreateTag(name: string): Promise<boolean>;
   onRenameTag(tagId: string, name: string): Promise<boolean>;
   onDeleteTag(tagId: string): Promise<boolean>;
@@ -76,18 +69,13 @@ type SubtaskCreateDraft = {
   memo: string;
 };
 
-type DetailSectionKey = "subtasks" | "timer" | "notifications";
+type DetailSectionKey = "subtasks";
 
 const statusLabels: Record<WorkStatus, string> = {
   todo: "未着手",
   in_progress: "進行中",
   done: "完了",
   archived: "アーカイブ",
-};
-
-const displayModeLabels: Record<NotificationDisplayMode, string> = {
-  title_only: "タイトルのみ",
-  generic: "汎用メッセージ",
 };
 
 const recurrenceLabels: Record<RecurrenceFrequency, string> = {
@@ -98,24 +86,6 @@ const recurrenceLabels: Record<RecurrenceFrequency, string> = {
 
 const timerTargetPresets = ["15", "25", "30", "45", "60", "90", "120"];
 
-const taskListColorOptions: TaskListColorToken[] = [
-  "green",
-  "blue",
-  "amber",
-  "rose",
-  "violet",
-  "gray",
-];
-
-const taskListColorLabels: Record<TaskListColorToken, string> = {
-  green: "緑",
-  blue: "青",
-  amber: "黄",
-  rose: "赤",
-  violet: "紫",
-  gray: "灰",
-};
-
 export function TaskDetailPane({
   task,
   selectedSubtaskId,
@@ -123,7 +93,6 @@ export function TaskDetailPane({
   activePomodoro,
   taskLists,
   tags,
-  displayMode,
   isMutating,
   onClose,
   onUpdateTask,
@@ -139,7 +108,6 @@ export function TaskDetailPane({
   onToggleSubtaskCompletion,
   onDeleteTask,
   onDeleteSubtask,
-  onUpdateTaskListColor,
   onCreateTag,
   onRenameTag,
   onDeleteTag,
@@ -156,13 +124,6 @@ export function TaskDetailPane({
     [selectedSubtaskId, task.subtasks],
   );
   const detailItem = selectedSubtask ?? task;
-  const detailTarget = useMemo<WorkTargetRef>(
-    () => ({
-      type: selectedSubtask ? "subtask" : "task",
-      id: detailItem.id,
-    }),
-    [detailItem.id, selectedSubtask],
-  );
   const isTaskDetail = !selectedSubtask;
   const hasSubtasks = task.subtasks.length > 0;
   const detailKey = `${selectedSubtask ? "subtask" : "task"}:${detailItem.id}`;
@@ -194,8 +155,6 @@ export function TaskDetailPane({
     Record<DetailSectionKey, boolean>
   >({
     subtasks: isTaskDetail && hasSubtasks,
-    timer: false,
-    notifications: false,
   });
   const completedSubtaskCount = useMemo(
     () => task.subtasks.filter((subtask) => subtask.status === "done").length,
@@ -222,8 +181,6 @@ export function TaskDetailPane({
     setIsDeleteConfirming(false);
     setOpenSections({
       subtasks: isTaskDetail && hasSubtasks,
-      timer: false,
-      notifications: false,
     });
   }, [detailKey, hasSubtasks, isTaskDetail]);
 
@@ -406,13 +363,6 @@ export function TaskDetailPane({
     void onDeleteTask(task);
   }
 
-  const isActive = isActiveTarget(activeTimer, detailTarget);
-  const timerBadge = isActive
-      ? activeTimer?.pausedAt
-        ? "一時停止中"
-        : "実行中"
-      : statusLabels[detailItem.status];
-
   return (
     <aside className="task-detail-pane" aria-labelledby="task-detail-title">
       <div className="detail-pane-header">
@@ -491,7 +441,7 @@ export function TaskDetailPane({
       </section>
 
       {isTaskDetail ? (
-        <section className="detail-list-card" aria-label="所属リストと表示色">
+        <section className="detail-list-card" aria-label="所属リスト">
           <label>
             <span>所属リスト</span>
             <select
@@ -506,25 +456,6 @@ export function TaskDetailPane({
               ))}
             </select>
           </label>
-          <div className="detail-list-color-field">
-            <span>リストの表示色</span>
-            <div className="detail-color-picker" aria-label="リストの表示色">
-              {taskListColorOptions.map((colorToken) => (
-                <button
-                  className={`detail-color-button color-${colorToken}`}
-                  type="button"
-                  key={colorToken}
-                  aria-label={`${taskListColorLabels[colorToken]}に変更`}
-                  aria-pressed={taskList?.colorToken === colorToken}
-                  title={taskListColorLabels[colorToken]}
-                  disabled={isMutating || taskList?.colorToken === colorToken}
-                  onClick={() =>
-                    void onUpdateTaskListColor(task.listId, colorToken)
-                  }
-                />
-              ))}
-            </div>
-          </div>
         </section>
       ) : null}
 
@@ -1033,58 +964,6 @@ export function TaskDetailPane({
         </DetailDisclosure>
       ) : null}
 
-      <DetailDisclosure
-        title="タイマー"
-        badge={timerBadge}
-        isOpen={openSections.timer}
-        onToggle={() => toggleSection("timer")}
-      >
-        <div className="detail-section-heading">
-          <h3>{selectedSubtask ? "サブタスクのタイマー" : "親タスクのタイマー"}</h3>
-          <TimerControls
-            target={detailTarget}
-            label={detailItem.title}
-            status={detailItem.status}
-            activeTimer={activeTimer}
-            activePomodoro={activePomodoro}
-            isMutating={isMutating}
-            onStartTimer={onStartTimer}
-            onPauseTimer={onPauseTimer}
-            onResumeTimer={onResumeTimer}
-            onStopTimer={onStopTimer}
-          />
-        </div>
-        <div className="detail-metrics">
-          <span>
-            {isActive
-              ? activeTimer?.pausedAt
-                ? "一時停止中"
-                : "実行中"
-              : statusLabels[detailItem.status]}
-          </span>
-          <span>{formatTimerTarget(detailItem.timerTargetSeconds)}</span>
-          <span>{formatRecurrenceFromItem(detailItem)}</span>
-        </div>
-      </DetailDisclosure>
-
-      <DetailDisclosure
-        title="通知"
-        badge={displayModeLabels[displayMode]}
-        isOpen={openSections.notifications}
-        onToggle={() => toggleSection("notifications")}
-      >
-        <p className="detail-section-description">
-          表示タイプ: {displayModeLabels[displayMode]}
-        </p>
-        <div className="notification-plan-grid">
-          <NotificationPlan
-            label="期限"
-            date={detailItem.dueDate}
-            time={detailItem.dueTime}
-          />
-        </div>
-      </DetailDisclosure>
-
       <div className="detail-danger-zone">
         <button
           className="danger-button"
@@ -1202,21 +1081,6 @@ function SubtaskSummaryRow({
         onStopTimer={onStopTimer}
       />
     </article>
-  );
-}
-
-type NotificationPlanProps = {
-  label: string;
-  date: string | null;
-  time: string | null;
-};
-
-function NotificationPlan({ label, date, time }: NotificationPlanProps) {
-  return (
-    <div className={`notification-plan ${date ? "is-enabled" : ""}`}>
-      <span>{label}</span>
-      <strong>{date ? formatDue(date, time) : "未設定"}</strong>
-    </div>
   );
 }
 

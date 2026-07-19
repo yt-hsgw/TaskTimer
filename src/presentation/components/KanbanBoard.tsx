@@ -21,7 +21,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Check, GripVertical, Pencil, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import type {
   BoardColumn,
@@ -460,6 +460,7 @@ function SortableKanbanColumn({
 }: SortableKanbanColumnProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(column.title);
+  const isRenameCommittingRef = useRef(false);
   const {
     attributes,
     listeners,
@@ -480,19 +481,44 @@ function SortableKanbanColumn({
   const activeRows = rows.filter((row) => row.status !== "done");
   const completedRows = rows.filter((row) => row.status === "done");
 
-  async function handleRename(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const normalizedTitle = title.trim();
-    if (!normalizedTitle) {
+  useEffect(() => {
+    if (!isEditing) {
+      setTitle(column.title);
+    }
+  }, [column.title, isEditing]);
+
+  async function commitRename() {
+    if (isRenameCommittingRef.current) {
       return;
     }
-    if (
-      normalizedTitle === column.title ||
-      (await onRenameColumn(column.id, normalizedTitle))
-    ) {
+
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) {
+      setTitle(column.title);
+      setIsEditing(false);
+      return;
+    }
+
+    if (normalizedTitle === column.title) {
       setTitle(normalizedTitle);
       setIsEditing(false);
+      return;
     }
+
+    isRenameCommittingRef.current = true;
+    try {
+      if (await onRenameColumn(column.id, normalizedTitle)) {
+        setTitle(normalizedTitle);
+        setIsEditing(false);
+      }
+    } finally {
+      isRenameCommittingRef.current = false;
+    }
+  }
+
+  function handleRename(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void commitRename();
   }
 
   return (
@@ -525,6 +551,7 @@ function SortableKanbanColumn({
               aria-label="状態名"
               disabled={isMutating}
               onChange={(event) => setTitle(event.target.value)}
+              onBlur={() => void commitRename()}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
                   setTitle(column.title);

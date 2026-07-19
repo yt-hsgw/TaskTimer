@@ -70,7 +70,13 @@ try {
   await waitForExpression(
     client,
     sessionId,
-    `Boolean(document.querySelector(".left-navigation") && document.querySelector(".task-row-content") && !document.querySelector(".app-alert"))`,
+    `Boolean(
+      document.querySelector(".left-navigation") &&
+      document.querySelector(".task-row-content") &&
+      ![...document.querySelectorAll(".nav-section-heading")]
+        .some((heading) => heading.textContent?.trim() === "タグ") &&
+      !document.querySelector(".app-alert")
+    )`,
   );
   await client.send(
     "Runtime.evaluate",
@@ -83,7 +89,13 @@ try {
   await waitForExpression(
     client,
     sessionId,
-    `Boolean(document.querySelector(".task-detail-pane") && !document.querySelector(".app-alert"))`,
+    `Boolean(
+      document.querySelector(".task-detail-pane") &&
+      !document.querySelector('.detail-section[aria-label="タイマー"]') &&
+      !document.querySelector('.detail-section[aria-label="通知"]') &&
+      !document.querySelector(".detail-color-button") &&
+      !document.querySelector(".app-alert")
+    )`,
   );
   await waitForExpression(
     client,
@@ -274,7 +286,6 @@ try {
         columns.length === 2 &&
         cards.length === 3 &&
         document.querySelectorAll(".kanban-drag-handle").length === 2 &&
-        document.querySelectorAll(".kanban-card-drag-handle").length === 3 &&
         document.querySelector(".kanban-card .task-check-button") &&
         !document.querySelector(".kanban-card-actions") &&
         columns.every((column) => column.scrollWidth <= column.clientWidth + 1) &&
@@ -727,6 +738,15 @@ function buildTauriInvokeMockSource() {
         list_calendar_items: () => clone(calendarItems),
         list_week_calendar_items: () => clone(calendarItems),
         get_active_timer: () => clone(activeTimer),
+        sync_expired_task_countdown: () => ({
+          expiredTimer: null,
+          notificationSummary: {
+            attempted: 0,
+            succeeded: 0,
+            failed: 0,
+            lastError: null
+          }
+        }),
         get_active_pomodoro: () => null,
         sync_expired_pomodoro: () => ({
           expiredPomodoro: null,
@@ -746,6 +766,11 @@ function buildTauriInvokeMockSource() {
           cyclesUntilLongBreak: 4,
           autoStartBreak: false,
           autoStartNextWork: false,
+          updatedAt: now
+        }),
+        get_task_timer_settings: () => ({
+          id: "default",
+          defaultTargetSeconds: 1800,
           updatedAt: now
         }),
         get_notification_display_mode: () => "title_only",

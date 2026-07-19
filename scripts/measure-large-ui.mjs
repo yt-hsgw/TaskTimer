@@ -30,11 +30,13 @@ const profile = options.profile === "standard"
     };
 const thresholds = {
   initial_task_list: 5000,
+  navigation_list_edit: 1000,
   task_countdown_controls: 3000,
   task_list_load_more: 1500,
   today: 1000,
   favorites: 1000,
   kanban: 1500,
+  kanban_rename_blur: 1000,
   kanban_drag: 1500,
   pomodoro: 1000,
   pomodoro_start: 1000,
@@ -132,6 +134,26 @@ try {
     ),
   );
 
+  const navigationListEditResult = await verifyNavigationListEdit(
+    client,
+    sessionId,
+  );
+  assertCommandScope(
+    "左ペインのリスト色編集",
+    navigationListEditResult.commands,
+    {
+      required: ["update_task_list", "list_task_lists"],
+      forbidden: ["update_task", "list_task_page", "list_board_columns"],
+    },
+  );
+  measurements.push(
+    createMeasurement(
+      "navigation_list_edit",
+      navigationListEditResult.durationMs,
+      thresholds.navigation_list_edit,
+    ),
+  );
+
   const taskCountdownStartedAt = performance.now();
   const taskCountdownResult = await verifyTaskCountdownControls(client, sessionId);
   assertCommandScope("タスク行カウントダウン", taskCountdownResult.commands, {
@@ -224,6 +246,33 @@ try {
       ready: `document.querySelector('button.nav-item[aria-label="かんばん"][aria-current="page"]') &&
         document.querySelectorAll(".kanban-card").length === ${initialTaskPageCount}`,
     }),
+  );
+  const kanbanRenameBlurResult = await verifyKanbanRenameOnBlur(
+    client,
+    sessionId,
+  );
+  assertCommandScope(
+    "かんばん状態名のフォーカス外保存",
+    kanbanRenameBlurResult.commands,
+    {
+      required: ["update_board_column", "list_board_columns"],
+      forbidden: ["list_task_page", "list_task_lists", "update_task"],
+    },
+  );
+  const renameCommandCount = kanbanRenameBlurResult.commands.filter(
+    (command) => command === "update_board_column",
+  ).length;
+  if (renameCommandCount !== 1) {
+    throw new Error(
+      `かんばん状態名の保存回数が不正です: ${renameCommandCount}`,
+    );
+  }
+  measurements.push(
+    createMeasurement(
+      "kanban_rename_blur",
+      kanbanRenameBlurResult.durationMs,
+      thresholds.kanban_rename_blur,
+    ),
   );
   const kanbanDragStartedAt = performance.now();
   const kanbanDragResult = await verifyKanbanCardDrag(client, sessionId);
@@ -729,6 +778,10 @@ try {
       action: `document.querySelector(".task-row-content")?.click()`,
       ready: `document.querySelector(".task-detail-pane") &&
         document.querySelector(".detail-subtask-list") &&
+        document.querySelector('.detail-list-card[aria-label="所属リスト"]') &&
+        !document.querySelector('.detail-section[aria-label="タイマー"]') &&
+        !document.querySelector('.detail-section[aria-label="通知"]') &&
+        !document.querySelector(".detail-color-button") &&
         !document.querySelector(".app-alert")`,
     }),
   );
@@ -1103,6 +1156,112 @@ async function verifyTaskDetailSave(client, sessionId) {
     )} &&
       !document.querySelector('.detail-section[aria-label="タスクを編集"] .detail-form button[type="submit"]')?.disabled &&
       !document.querySelector(".app-alert")`,
+  );
+  return {
+    commands: await takeInvokeLog(client, sessionId),
+    durationMs: performance.now() - startedAt,
+  };
+}
+
+async function verifyNavigationListEdit(client, sessionId) {
+  const hasTagNavigation = await evaluateValue(
+    client,
+    sessionId,
+    `[...document.querySelectorAll(".nav-section-heading")]
+      .some((heading) => heading.textContent?.trim() === "タグ")`,
+  );
+  if (hasTagNavigation) {
+    throw new Error("左ペインにタグ一覧が残っています");
+  }
+
+  await resetInvokeLog(client, sessionId);
+  const startedAt = performance.now();
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('button[aria-label="タスクを編集"]')?.click()`,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.nav-list-editor .nav-list-color-button.color-violet'))`,
+    5000,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector(
+      ".nav-list-editor .nav-list-color-button.color-violet"
+    )?.click()`,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `document.querySelector(
+      ".nav-list-editor .nav-list-color-button.color-violet"
+    )?.getAttribute("aria-pressed") === "true"`,
+    5000,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.nav-list-editor button[type="submit"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector('.nav-list-row .nav-list-color-swatch.color-violet') &&
+      !document.querySelector(".nav-list-editor") &&
+      !document.querySelector(".app-alert")`,
+  );
+  return {
+    commands: await takeInvokeLog(client, sessionId),
+    durationMs: performance.now() - startedAt,
+  };
+}
+
+async function verifyKanbanRenameOnBlur(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  const startedAt = performance.now();
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector(".kanban-column-title")?.click()`,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(".kanban-column-title-form input"))`,
+    5000,
+  );
+  const nextTitle = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const input = document.querySelector(".kanban-column-title-form input");
+      if (!input) {
+        return null;
+      }
+      const nextValue = input.value + " 編集";
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, nextValue);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.blur();
+      return nextValue;
+    })()`,
+  );
+  if (!nextTitle) {
+    throw new Error("かんばん状態名の検証対象がありません");
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector(".kanban-column-title span")?.textContent === ${JSON.stringify(
+      nextTitle,
+    )} && !document.querySelector(".app-alert")`,
   );
   return {
     commands: await takeInvokeLog(client, sessionId),
@@ -3321,6 +3480,29 @@ function buildTauriInvokeMockSource(profile) {
           row.timerTargetSeconds = task.timerTargetSeconds;
           row.updatedAt = now;
           return clone(task);
+        },
+        update_task_list: () => {
+          const list = taskLists.find(
+            (candidate) => candidate.id === args.request?.listId
+          );
+          if (!list) {
+            throw new Error("更新対象のリストが存在しません");
+          }
+          list.name = args.request.name ?? list.name;
+          list.colorToken = args.request.colorToken ?? list.colorToken;
+          list.updatedAt = now;
+          return clone(list);
+        },
+        update_board_column: () => {
+          const column = boardColumns.find(
+            (candidate) => candidate.id === args.request?.columnId
+          );
+          if (!column) {
+            throw new Error("更新対象の状態が存在しません");
+          }
+          column.title = args.request.title ?? column.title;
+          column.updatedAt = now;
+          return clone(column);
         },
         move_task_to_board_column: () => new Promise((resolve, reject) => {
           setTimeout(() => {
