@@ -241,6 +241,18 @@ try {
         })()`,
     }),
   );
+  const calendarWeekGridResult = await verifyCalendarTimeGrid(
+    client,
+    sessionId,
+    7,
+  );
+  if (calendarWeekGridResult.commands.length > 0) {
+    throw new Error(
+      `週カレンダーのグリッド確認中にcommandが呼ばれました: ${JSON.stringify(
+        calendarWeekGridResult.commands,
+      )}`,
+    );
+  }
   const calendarOverflowStartedAt = performance.now();
   const calendarOverflowResult = await verifyCalendarOverflowPopup(
     client,
@@ -369,6 +381,18 @@ try {
         })()`,
     }),
   );
+  const calendarDayGridResult = await verifyCalendarTimeGrid(
+    client,
+    sessionId,
+    1,
+  );
+  if (calendarDayGridResult.commands.length > 0) {
+    throw new Error(
+      `日カレンダーのグリッド確認中にcommandが呼ばれました: ${JSON.stringify(
+        calendarDayGridResult.commands,
+      )}`,
+    );
+  }
   const calendarDayOverlapLayoutResult = await verifyCalendarOverlapLayout(
     client,
     sessionId,
@@ -1218,6 +1242,93 @@ async function verifyCalendarOverflowPopup(
     sessionId,
     `!document.querySelector('.task-detail-pane')`,
   );
+  return { commands: await takeInvokeLog(client, sessionId) };
+}
+
+async function verifyCalendarTimeGrid(client, sessionId, expectedDayCount) {
+  await resetInvokeLog(client, sessionId);
+  const result = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const labels = [...document.querySelectorAll(
+        '.calendar-time-label:not(.is-time-zone)'
+      )];
+      const cells = [...document.querySelectorAll('.calendar-time-cell')];
+      const overlays = [...document.querySelectorAll('.calendar-timed-day-overlay')];
+      const hours = ${JSON.stringify(Array.from({ length: 15 }, (_, index) => 8 + index))};
+      const tolerance = 1;
+      const rows = hours.map((hour, hourIndex) => {
+        const expectedGridRow = String(hourIndex + 3);
+        const label = labels[hourIndex];
+        const rowCells = cells.filter(
+          (cell) => Number(cell.dataset.calendarHour) === hour
+        );
+        const labelStyle = label ? getComputedStyle(label) : null;
+        const labelBounds = label?.getBoundingClientRect();
+        return {
+          hour,
+          labelGridRow: labelStyle?.gridRowStart ?? null,
+          cellCount: rowCells.length,
+          cellsAligned: rowCells.every((cell, dayIndex) => {
+            const style = getComputedStyle(cell);
+            const bounds = cell.getBoundingClientRect();
+            return style.gridRowStart === expectedGridRow &&
+              style.gridColumnStart === String(dayIndex + 2) &&
+              style.borderBottomStyle === 'solid' &&
+              style.borderBottomWidth === '1px' &&
+              style.borderLeftStyle === 'solid' &&
+              style.borderLeftWidth === '1px' &&
+              Boolean(labelBounds && Math.abs(bounds.top - labelBounds.top) <= tolerance);
+          })
+        };
+      });
+      const firstCell = cells.find(
+        (cell) => Number(cell.dataset.calendarHour) === hours[0]
+      );
+      const lastCell = [...cells].reverse().find(
+        (cell) => Number(cell.dataset.calendarHour) === hours.at(-1)
+      );
+      const firstBounds = firstCell?.getBoundingClientRect();
+      const lastBounds = lastCell?.getBoundingClientRect();
+      return {
+        labelCount: labels.length,
+        cellCount: cells.length,
+        overlayCount: overlays.length,
+        rows,
+        overlaysCoverGrid: overlays.every((overlay) => {
+          const bounds = overlay.getBoundingClientRect();
+          return Boolean(
+            firstBounds && lastBounds &&
+            Math.abs(bounds.top - firstBounds.top) <= tolerance &&
+            Math.abs(bounds.bottom - lastBounds.bottom) <= tolerance
+          );
+        })
+      };
+    })()`,
+  );
+  const expectedHourCount = 15;
+  const invalidRow = result?.rows?.find(
+    (row, hourIndex) =>
+      row.labelGridRow !== String(hourIndex + 3) ||
+      row.cellCount !== expectedDayCount ||
+      !row.cellsAligned,
+  );
+  if (
+    result?.labelCount !== expectedHourCount ||
+    result?.cellCount !== expectedHourCount * expectedDayCount ||
+    result?.overlayCount !== expectedDayCount ||
+    invalidRow ||
+    !result?.overlaysCoverGrid
+  ) {
+    throw new Error(
+      `カレンダー時間グリッドの配置が不正です: ${JSON.stringify({
+        expectedDayCount,
+        result,
+        invalidRow,
+      })}`,
+    );
+  }
   return { commands: await takeInvokeLog(client, sessionId) };
 }
 

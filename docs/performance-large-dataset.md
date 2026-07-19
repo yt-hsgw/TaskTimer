@@ -250,6 +250,7 @@ Presentation描画計測結果:
 
 | 日時 | OS/ブラウザ | TaskTimer commit | プロファイル | コマンド | WARN件数 | メモ |
 | --- | --- | --- | --- | --- | ---: | --- |
+| 2026-07-19 | Darwin / headless Chrome | #152作業ブランチ | 401タスク / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 日・週表示の全時間ラベル/セルのGrid行列、上端、水平・垂直罫線、予定レイヤー範囲を検証。週表示40ms、日表示25ms、全項目閾値内。 |
 | 2026-07-19 | Darwin / headless Chrome | #148作業ブランチ | 401タスク / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 月・日/週上部の省略予定一覧、Esc・外側クリック・詳細選択・フォーカス復帰・中央ペイン内配置を含む。一覧開閉401ms、操作中command 0件、全項目閾値内。 |
 | 2026-07-19 | Darwin / headless Chrome | #147作業ブランチ | 401タスク / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 完全重複・境界一致・連鎖重複・サブタスク・複数時間カードを含む。重複レイアウト3ms、週表示48ms、全項目閾値内。 |
 | 2026-07-19 | Darwin / headless Chrome | #146作業ブランチ | 401タスク / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 空き時間軸と月表示のドラッグ範囲作成を含む。時間範囲作成334ms、月範囲作成149ms、既存の予定移動・端リサイズ・日付変更も全項目閾値内。 |
