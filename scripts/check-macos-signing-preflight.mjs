@@ -7,6 +7,11 @@ import { fileURLToPath } from "node:url";
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConfigPath = join(rootDir, "src-tauri", "tauri.conf.json");
 const entitlementsPath = join(rootDir, "src-tauri", "Entitlements.plist");
+const releaseWorkflowPath = join(rootDir, ".github", "workflows", "release.yml");
+const configurationOnly = process.argv.slice(2).includes("--configuration-only");
+const unknownArguments = process.argv
+  .slice(2)
+  .filter((argument) => argument !== "--configuration-only");
 
 const requiredSecrets = [
   "APPLE_CERTIFICATE",
@@ -87,10 +92,48 @@ function checkEntitlements() {
 
   const entitlements = readFileSync(entitlementsPath, "utf8");
 
+  if (entitlements.charCodeAt(0) === 0xfeff || /[^\x00-\x7f]/.test(entitlements)) {
+    fail("Entitlements.plist はBOMなしのASCIIで保存してください");
+  }
+
+  if (/<key(?:\s|>)/.test(entitlements)) {
+    fail("MVPのEntitlements.plistは空のdictを維持してください");
+  }
+
+  if (!/<dict\s*\/>/.test(entitlements) && !/<dict\s*>\s*<\/dict>/.test(entitlements)) {
+    fail("Entitlements.plist に空のdictがありません");
+  }
+
   for (const key of disallowedEntitlements) {
     if (entitlements.includes(key)) {
       fail(`Entitlements.plist に不要な権限 ${key} が含まれています`);
     }
+  }
+}
+
+function checkReleaseWorkflow() {
+  if (!existsSync(releaseWorkflowPath)) {
+    fail(".github/workflows/release.yml が見つかりません");
+    return;
+  }
+
+  const workflow = readFileSync(releaseWorkflowPath, "utf8");
+  const requiredSnippets = [
+    "id: tauri",
+    "steps.tauri.outputs.artifactPaths",
+    "npm run verify:macos-release-artifacts",
+    "releaseDraft: true",
+    ...requiredSecrets.map((name) => `secrets.${name}`),
+  ];
+
+  for (const snippet of requiredSnippets) {
+    if (!workflow.includes(snippet)) {
+      fail(`Release workflowに必要な設定がありません: ${snippet}`);
+    }
+  }
+
+  if (workflow.includes("--skip-stapling")) {
+    fail("Release workflowで --skip-stapling を使用してはいけません");
   }
 }
 
@@ -137,7 +180,6 @@ function checkLocalMacTools() {
 
   const commands = [
     ["xcrun", ["--find", "codesign"]],
-    ["security", ["find-identity", "-v", "-p", "codesigning"]],
     ["xcrun", ["--find", "notarytool"]],
     ["xcrun", ["--find", "stapler"]],
   ];
@@ -148,15 +190,32 @@ function checkLocalMacTools() {
       fail(`${command} ${args.join(" ")} を実行できません`);
     }
   }
+
+  const identities = run("security", ["find-identity", "-v", "-p", "codesigning"]);
+  if (identities.status !== 0) {
+    fail("security find-identity -v -p codesigning を実行できません");
+  } else if (!identities.stdout.includes("Developer ID Application:")) {
+    fail("ローカルKeychainに有効なDeveloper ID Application署名IDがありません");
+  }
+}
+
+if (unknownArguments.length > 0) {
+  fail(`未対応の引数です: ${unknownArguments.join(", ")}`);
 }
 
 checkTauriConfig();
 checkEntitlements();
-checkGitHubSecrets();
-checkLocalMacTools();
+checkReleaseWorkflow();
+
+if (!configurationOnly) {
+  checkGitHubSecrets();
+  checkLocalMacTools();
+}
 
 if (process.exitCode && process.exitCode !== 0) {
   console.error("macOS署名・公証のpreflightに失敗しました。Draft Releaseを公開しないでください。");
+} else if (configurationOnly) {
+  console.log("macOS署名・公証のリポジトリ設定チェックに成功しました。");
 } else {
   console.log("macOS署名・公証のpreflightに成功しました。Release workflow実行後、実機でGatekeeper確認を続けてください。");
 }

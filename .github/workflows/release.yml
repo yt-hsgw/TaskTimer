@@ -147,6 +147,7 @@ jobs:
           fi
 
       - name: TauriアプリをビルドしてDraft Releaseへ添付
+        id: tauri
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -190,3 +191,9 @@ jobs:
           tauriScript: npm run tauri
           args: ${{ matrix.args }}
           releaseAssetNamePattern: "TaskTimer_[version]_[platform]_[arch][setup][ext]"
+
+      - name: macOS署名・公証成果物を検証
+        if: runner.os == 'macOS'
+        env:
+          TAURI_ARTIFACT_PATHS: ${{ steps.tauri.outputs.artifactPaths }}
+        run: npm run verify:macos-release-artifacts
