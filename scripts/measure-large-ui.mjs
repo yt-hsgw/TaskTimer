@@ -43,6 +43,7 @@ const thresholds = {
   calendar_move: 1500,
   calendar_resize: 1500,
   calendar_day: 1500,
+  calendar_day_move: 1500,
   calendar_month: 2000,
   calendar_month_date_change: 1500,
   task_detail: 1000,
@@ -294,6 +295,33 @@ try {
         document.querySelectorAll(".calendar-item").length === ${profile.taskCount}`,
     }),
   );
+  const calendarDayMoveStartedAt = performance.now();
+  const calendarDayMoveResult = await verifyCalendarDayScheduledMove(
+    client,
+    sessionId,
+  );
+  assertCommandScope("日カレンダー予定移動", calendarDayMoveResult.commands, {
+    required: [
+      "move_scheduled_work_item",
+      "list_task_page",
+      "list_calendar_items",
+    ],
+    forbidden: [
+      "update_task",
+      "update_subtask",
+      "resize_scheduled_work_item",
+      "sync_notifications",
+      "process_notification_os_registrations",
+      "list_board_columns",
+    ],
+  });
+  measurements.push(
+    createMeasurement(
+      "calendar_day_move",
+      performance.now() - calendarDayMoveStartedAt,
+      thresholds.calendar_day_move,
+    ),
+  );
   measurements.push(
     await measureView({
       client,
@@ -341,7 +369,6 @@ try {
       thresholds.calendar_month_date_change,
     ),
   );
-
   await evaluate(client, sessionId, clickNavigation("タスク"));
   await waitForPaintedExpression(
     client,
@@ -924,6 +951,18 @@ async function verifyCalendarScheduledMove(client, sessionId) {
         clientY: destinationRect.top + destinationRect.height * 0.55,
         dataTransfer: transfer
       }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const movePreview = destination.querySelector(
+        '.calendar-item.marker-scheduled.is-timed.is-move-preview'
+      );
+      const original = document.querySelector(
+        '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
+      );
+      const previewState = {
+        originalMarker: original?.querySelector('small:last-child')?.textContent ?? null,
+        previewMarker: movePreview?.querySelector('small:last-child')?.textContent ?? null,
+        previewLabel: movePreview?.querySelector('.calendar-preview-label')?.textContent ?? null
+      };
       destination.dispatchEvent(new DragEvent('drop', {
         bubbles: true,
         cancelable: true,
@@ -936,16 +975,24 @@ async function verifyCalendarScheduledMove(client, sessionId) {
       }));
       await new Promise((resolve) => requestAnimationFrame(resolve));
       const moved = destination.querySelector(
-        '.calendar-item.marker-scheduled.is-timed'
+        '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
       );
       return {
         movedImmediately: Boolean(moved),
         marker: moved?.querySelector('small:last-child')?.textContent ?? null,
-        targetDate: destination.dataset.calendarDate ?? null
+        targetDate: destination.dataset.calendarDate ?? null,
+        previewState
       };
     })()`,
   );
-  if (!result?.movedImmediately || !result.marker?.includes("11:30")) {
+  if (
+    !result?.movedImmediately ||
+    !result.marker?.includes("11:30") ||
+    !result.previewState?.originalMarker?.includes("09:00") ||
+    !result.previewState?.previewMarker?.includes("11:30") ||
+    !result.previewState?.previewMarker?.includes("12:30") ||
+    result.previewState?.previewLabel !== "移動後"
+  ) {
     throw new Error(
       `カレンダードロップ直後の仮位置が不正です: ${JSON.stringify(result)}`,
     );
@@ -961,7 +1008,7 @@ async function verifyCalendarScheduledMove(client, sessionId) {
           cell.getAttribute('aria-label')?.includes('11:00')
         );
       const moved = destination?.querySelector(
-        '.calendar-item.marker-scheduled.is-timed'
+        '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
       );
       return Boolean(
         moved?.querySelector('small:last-child')?.textContent?.includes('11:30') &&
@@ -977,7 +1024,7 @@ async function verifyCalendarScheduledMove(client, sessionId) {
     sessionId,
     `(async () => {
       const item = document.querySelector(
-        '.calendar-item.marker-scheduled.is-timed .calendar-item-content'
+        '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview) .calendar-item-content'
       );
       if (!item) {
         return null;
@@ -990,7 +1037,7 @@ async function verifyCalendarScheduledMove(client, sessionId) {
       }));
       await new Promise((resolve) => requestAnimationFrame(resolve));
       return document.querySelector(
-        '.calendar-item.marker-scheduled.is-timed small:last-child'
+        '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview) small:last-child'
       )?.textContent ?? null;
     })()`,
   );
@@ -1002,7 +1049,7 @@ async function verifyCalendarScheduledMove(client, sessionId) {
     sessionId,
     `(() => {
       const moved = document.querySelector(
-        '.calendar-item.marker-scheduled.is-timed'
+        '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
       );
       return Boolean(
         moved?.querySelector('small:last-child')?.textContent?.includes('11:45') &&
@@ -1089,7 +1136,7 @@ async function verifyCalendarTimedResizePreview(client, sessionId) {
             );
             return Boolean(
               original?.querySelector('small:last-child')?.textContent?.includes('12:45') &&
-              preview?.querySelector('.calendar-resize-preview-label')?.textContent === '変更後' &&
+              preview?.querySelector('.calendar-preview-label')?.textContent === '変更後' &&
               preview?.querySelector('small:last-child')?.textContent?.includes('13:15')
             );
           })()`,
@@ -1135,6 +1182,106 @@ async function verifyCalendarTimedResizePreview(client, sessionId) {
   return { commands: await takeInvokeLog(client, sessionId) };
 }
 
+async function verifyCalendarDayScheduledMove(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  const result = await evaluateValue(
+    client,
+    sessionId,
+    `(async () => {
+      const source = document.querySelector(
+        '.calendar-time-grid.is-day-mode ' +
+        '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview) ' +
+        '.calendar-item-content'
+      );
+      const sourceDate = source?.closest('.calendar-time-cell')?.dataset.calendarDate;
+      const destination = [...document.querySelectorAll(
+        '.calendar-time-grid.is-day-mode .calendar-time-cell'
+      )].find((cell) =>
+        cell.dataset.calendarDate === sourceDate &&
+        cell.getAttribute('aria-label')?.includes('14:00')
+      );
+      if (!source || !destination) {
+        return null;
+      }
+      const transfer = new DataTransfer();
+      const bounds = destination.getBoundingClientRect();
+      source.dispatchEvent(new DragEvent('dragstart', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer
+      }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      destination.dispatchEvent(new DragEvent('dragover', {
+        bubbles: true,
+        cancelable: true,
+        clientY: bounds.top + bounds.height * 0.3,
+        dataTransfer: transfer
+      }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const original = document.querySelector(
+        '.calendar-time-grid.is-day-mode ' +
+        '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
+      );
+      const preview = destination.querySelector(
+        '.calendar-item.marker-scheduled.is-timed.is-move-preview'
+      );
+      const previewState = {
+        originalMarker: original?.querySelector('small:last-child')?.textContent ?? null,
+        previewMarker: preview?.querySelector('small:last-child')?.textContent ?? null,
+        previewLabel: preview?.querySelector('.calendar-preview-label')?.textContent ?? null
+      };
+      destination.dispatchEvent(new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        clientY: bounds.top + bounds.height * 0.3,
+        dataTransfer: transfer
+      }));
+      source.dispatchEvent(new DragEvent('dragend', {
+        bubbles: true,
+        dataTransfer: transfer
+      }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const moved = destination.querySelector(
+        '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
+      );
+      return {
+        targetDate: destination.dataset.calendarDate ?? null,
+        marker: moved?.querySelector('small:last-child')?.textContent ?? null,
+        previewState
+      };
+    })()`,
+  );
+  if (
+    !result?.previewState?.originalMarker?.includes("11:45") ||
+    !result.previewState.originalMarker.includes("13:15") ||
+    result.previewState.previewLabel !== "移動後" ||
+    !result.previewState.previewMarker?.includes("14:15") ||
+    !result.previewState.previewMarker.includes("15:45") ||
+    !result.marker?.includes("14:15") ||
+    !result.marker.includes("15:45")
+  ) {
+    throw new Error(`日表示の期間維持D&Dが不正です: ${JSON.stringify(result)}`);
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const moved = document.querySelector(
+        '.calendar-time-grid.is-day-mode ' +
+        '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
+      );
+      return Boolean(
+        moved?.querySelector('small:last-child')?.textContent?.includes('14:15') &&
+        moved?.querySelector('small:last-child')?.textContent?.includes('15:45') &&
+        window.__taskTimerInvokeLog?.includes('list_task_page') &&
+        window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
+        !document.querySelector('.app-alert')
+      );
+    })()`,
+  );
+  return { commands: await takeInvokeLog(client, sessionId) };
+}
+
 async function verifyCalendarMonthDateChange(client, sessionId) {
   await resetInvokeLog(client, sessionId);
   const resizeGeometry = await evaluateValue(
@@ -1142,19 +1289,19 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
     sessionId,
     `(() => {
       const item = document.querySelector(
-        '.calendar-month-day .calendar-item.marker-scheduled:not(.is-resize-preview)'
+        '.calendar-month-day .calendar-item.marker-scheduled:not(.is-calendar-preview)'
       );
       const sourceCell = item?.closest('.calendar-month-day');
       const sourceDate = sourceCell?.dataset.calendarDate;
       const handle = item?.querySelector(
-        '.calendar-resize-handle.is-end.is-horizontal'
+        '.calendar-resize-handle.is-start.is-horizontal'
       );
       if (!item || !sourceDate || !handle) {
         return null;
       }
       const [year, month, day] = sourceDate.split('-').map(Number);
       const target = new Date(year, month - 1, day);
-      target.setDate(target.getDate() + 1);
+      target.setDate(target.getDate() - 1);
       const targetDate = [
         target.getFullYear(),
         String(target.getMonth() + 1).padStart(2, '0'),
@@ -1191,27 +1338,84 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
     resizeGeometry.endY,
     {
       beforeRelease: async () => {
-        await waitForPaintedExpression(
-          client,
-          sessionId,
-          `(() => {
+        try {
+          await waitForPaintedExpression(
+            client,
+            sessionId,
+            `(() => {
             const source = document.querySelector(
               '.calendar-month-day[data-calendar-date=${JSON.stringify(
                 resizeGeometry.sourceDate,
-              )}] .calendar-item.marker-scheduled:not(.is-resize-preview)'
+              )}] .calendar-item.marker-scheduled:not(.is-calendar-preview)'
             );
-            const preview = document.querySelector(
+            const previewStart = document.querySelector(
               '.calendar-month-day[data-calendar-date=${JSON.stringify(
                 resizeGeometry.targetDate,
               )}] .calendar-item.marker-scheduled.is-resize-preview'
             );
+            const previewEnd = document.querySelector(
+              '.calendar-month-day[data-calendar-date=${JSON.stringify(
+                resizeGeometry.sourceDate,
+              )}] .calendar-item.marker-scheduled.is-resize-preview'
+            );
+            const startBounds = previewStart?.getBoundingClientRect();
+            const endBounds = previewEnd?.getBoundingClientRect();
             return Boolean(
               source &&
-              preview?.querySelector('.calendar-resize-preview-label')?.textContent === '変更後' &&
-              preview?.querySelector('small:last-child')?.textContent?.includes('13:15')
+              previewStart?.querySelector('.calendar-preview-label')?.textContent === '変更後' &&
+              previewStart?.querySelector('.calendar-month-range-time')?.textContent === '14:15' &&
+              previewStart?.classList.contains('connects-after') &&
+              previewEnd?.classList.contains('connects-before') &&
+              startBounds &&
+              endBounds &&
+              Math.abs(startBounds.right - endBounds.left) <= 2
             );
           })()`,
-        );
+          );
+        } catch (error) {
+          const diagnostics = await evaluateValue(
+            client,
+            sessionId,
+            `(() => {
+              const start = document.querySelector(
+                '.calendar-month-day[data-calendar-date=${JSON.stringify(
+                  resizeGeometry.targetDate,
+                )}] .calendar-item.marker-scheduled.is-resize-preview'
+              );
+              const end = document.querySelector(
+                '.calendar-month-day[data-calendar-date=${JSON.stringify(
+                  resizeGeometry.sourceDate,
+                )}] .calendar-item.marker-scheduled.is-resize-preview'
+              );
+              const startBounds = start?.getBoundingClientRect();
+              const endBounds = end?.getBoundingClientRect();
+              return {
+                previewCount: document.querySelectorAll('.calendar-item.is-resize-preview').length,
+                startClass: start?.className ?? null,
+                endClass: end?.className ?? null,
+                label: start?.querySelector('.calendar-preview-label')?.textContent ?? null,
+                time: start?.querySelector('.calendar-month-range-time')?.textContent ?? null,
+                startBounds: startBounds ? {
+                  left: startBounds.left,
+                  right: startBounds.right,
+                  top: startBounds.top
+                } : null,
+                endBounds: endBounds ? {
+                  left: endBounds.left,
+                  right: endBounds.right,
+                  top: endBounds.top
+                } : null,
+                gap: startBounds && endBounds
+                  ? Math.abs(startBounds.right - endBounds.left)
+                  : null
+              };
+            })()`,
+          );
+          throw new Error(
+            `月表示の期間予測が連続していません: ${JSON.stringify(diagnostics)}`,
+            { cause: error },
+          );
+        }
       },
     },
   );
@@ -1223,10 +1427,21 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
       const target = document.querySelector(
         '.calendar-month-day[data-calendar-date=${JSON.stringify(
           resizeGeometry.targetDate,
-        )}] .calendar-item.marker-scheduled:not(.is-resize-preview)'
+        )}] .calendar-item.marker-scheduled:not(.is-calendar-preview)'
       );
+      const source = document.querySelector(
+        '.calendar-month-day[data-calendar-date=${JSON.stringify(
+          resizeGeometry.sourceDate,
+        )}] .calendar-item.marker-scheduled:not(.is-calendar-preview)'
+      );
+      const sourceBounds = source?.getBoundingClientRect();
+      const targetBounds = target?.getBoundingClientRect();
       return Boolean(
-        target?.querySelector('small:last-child')?.textContent?.includes('13:15') &&
+        target?.classList.contains('connects-after') &&
+        source?.classList.contains('connects-before') &&
+        sourceBounds &&
+        targetBounds &&
+        Math.abs(targetBounds.right - sourceBounds.left) <= 2 &&
         !document.querySelector('.calendar-item.is-resize-preview') &&
         window.__taskTimerInvokeLog?.includes('resize_scheduled_work_item') &&
         window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
@@ -1251,7 +1466,7 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
       ].join('-');
       const source = document.querySelector(
         '.calendar-month-day[data-calendar-date="' + sourceDate + '"] ' +
-        '.calendar-item.marker-scheduled:not(.is-resize-preview) .calendar-item-content'
+        '.calendar-item.marker-scheduled:not(.is-calendar-preview) .calendar-item-content'
       );
       const destinationCell = document.querySelector(
         '.calendar-month-day[data-calendar-date="' + destinationDate + '"]'
@@ -1271,6 +1486,33 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
         cancelable: true,
         dataTransfer: transfer
       }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const destinationEnd = new Date(destination);
+      destinationEnd.setDate(destinationEnd.getDate() + 1);
+      const destinationEndDate = [
+        destinationEnd.getFullYear(),
+        String(destinationEnd.getMonth() + 1).padStart(2, '0'),
+        String(destinationEnd.getDate()).padStart(2, '0')
+      ].join('-');
+      const previewStart = destinationCell.querySelector(
+        '.calendar-item.marker-scheduled.is-move-preview'
+      );
+      const previewEnd = document.querySelector(
+        '.calendar-month-day[data-calendar-date="' + destinationEndDate + '"] ' +
+        '.calendar-item.marker-scheduled.is-move-preview'
+      );
+      const previewStartBounds = previewStart?.getBoundingClientRect();
+      const previewEndBounds = previewEnd?.getBoundingClientRect();
+      const previewState = {
+        label: previewStart?.querySelector('.calendar-preview-label')?.textContent ?? null,
+        hasTwoDayRange: Boolean(
+          previewStart?.classList.contains('connects-after') &&
+          previewEnd?.classList.contains('connects-before')
+        ),
+        gap: previewStartBounds && previewEndBounds
+          ? Math.abs(previewStartBounds.right - previewEndBounds.left)
+          : null
+      };
       destinationCell.dispatchEvent(new DragEvent('drop', {
         bubbles: true,
         cancelable: true,
@@ -1283,13 +1525,21 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
       await new Promise((resolve) => requestAnimationFrame(resolve));
       return {
         destinationDate,
+        destinationEndDate,
+        previewState,
         movedImmediately: Boolean(destinationCell.querySelector(
-          '.calendar-item.marker-scheduled:not(.is-resize-preview)'
+          '.calendar-item.marker-scheduled:not(.is-calendar-preview)'
         ))
       };
     })()`,
   );
-  if (!moveResult?.movedImmediately) {
+  if (
+    !moveResult?.movedImmediately ||
+    moveResult.previewState?.label !== "移動後" ||
+    !moveResult.previewState?.hasTwoDayRange ||
+    moveResult.previewState?.gap === null ||
+    moveResult.previewState.gap > 2
+  ) {
     throw new Error(
       `月表示のドロップ直後の日付が不正です: ${JSON.stringify(moveResult)}`,
     );
@@ -1301,10 +1551,16 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
       const destination = document.querySelector(
         '.calendar-month-day[data-calendar-date=${JSON.stringify(
           moveResult.destinationDate,
-        )}] .calendar-item.marker-scheduled:not(.is-resize-preview)'
+        )}] .calendar-item.marker-scheduled:not(.is-calendar-preview)'
+      );
+      const destinationEnd = document.querySelector(
+        '.calendar-month-day[data-calendar-date=${JSON.stringify(
+          moveResult.destinationEndDate,
+        )}] .calendar-item.marker-scheduled:not(.is-calendar-preview)'
       );
       return Boolean(
-        destination &&
+        destination?.classList.contains('connects-after') &&
+        destinationEnd?.classList.contains('connects-before') &&
         window.__taskTimerInvokeLog?.includes('move_scheduled_work_item') &&
         window.__taskTimerInvokeLog?.includes('list_task_page') &&
         window.__taskTimerInvokeLog?.includes('list_calendar_items') &&

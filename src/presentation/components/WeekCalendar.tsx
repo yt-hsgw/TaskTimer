@@ -90,6 +90,8 @@ type PendingCalendarMove = {
 
 type CalendarItemVariant = "all-day" | "timed" | "month";
 const RESIZE_PREVIEW_ID_SUFFIX = ":resize-preview";
+const MOVE_PREVIEW_ID_SUFFIX = ":move-preview";
+const MONTH_VISIBLE_ITEM_LIMIT = 3;
 
 export function WeekCalendar({
   viewMode,
@@ -125,23 +127,38 @@ export function WeekCalendar({
             item.id === pendingMove.item.id ? pendingMove.item : item,
           )
         : items;
-      return resizePreview
-        ? [
-            ...committedItems,
-            {
+      const movePreview =
+        draggedItem && dropTarget
+          ? moveCalendarItemPreview(draggedItem, dropTarget)
+          : null;
+      const previewItems = [
+        resizePreview
+          ? {
               ...resizePreview,
               id: `${resizePreview.id}${RESIZE_PREVIEW_ID_SUFFIX}`,
-            },
-          ]
+            }
+          : null,
+        movePreview
+          ? {
+              ...movePreview,
+              id: `${movePreview.id}${MOVE_PREVIEW_ID_SUFFIX}`,
+            }
+          : null,
+      ].filter((item): item is WeekCalendarItem => item !== null);
+      return previewItems.length > 0
+        ? [...committedItems, ...previewItems]
         : committedItems;
     },
-    [items, pendingMove, resizePreview],
+    [draggedItem, dropTarget, items, pendingMove, resizePreview],
   );
-  const rangeDays =
-    viewMode === "day"
-      ? [buildDay(anchorDate)]
-      : buildWeekDays(getWeekStartDate(anchorDate));
-  const monthDays = buildMonthDays(anchorDate);
+  const rangeDays = useMemo(
+    () =>
+      viewMode === "day"
+        ? [buildDay(anchorDate)]
+        : buildWeekDays(getWeekStartDate(anchorDate)),
+    [anchorDate, viewMode],
+  );
+  const monthDays = useMemo(() => buildMonthDays(anchorDate), [anchorDate]);
   const headingLabel = formatCalendarHeading(viewMode, anchorDate);
   const weekBadge =
     viewMode === "week" ? `第${getIsoWeekNumber(anchorDate)}週` : null;
@@ -226,7 +243,12 @@ export function WeekCalendar({
 
     event.preventDefault();
     event.dataTransfer.dropEffect = "move";
-    setDropTarget(resolveCalendarDropTarget(draggedItem, target, event));
+    const resolvedTarget = resolveCalendarDropTarget(draggedItem, target, event);
+    setDropTarget((current) =>
+      isSameCalendarDestination(current, resolvedTarget)
+        ? current
+        : resolvedTarget,
+    );
   }
 
   function handleDragLeave(
@@ -1057,6 +1079,10 @@ function MonthCalendar({
 }) {
   const anchor = parseDateInputValue(anchorDate);
   const currentMonth = anchor.getMonth();
+  const dayLayouts = useMemo(
+    () => buildMonthDayLayouts(days, items),
+    [days, items],
+  );
 
   return (
     <div className="calendar-month-shell">
@@ -1067,15 +1093,10 @@ function MonthCalendar({
       </div>
       <div className="calendar-month-grid">
         {days.map((day) => {
-          const dayItems = items
-            .filter((item) =>
-              item.marker === "scheduled"
-                ? isDateWithinSchedule(item, day.date)
-                : item.date === day.date,
-            )
-            .sort(sortCalendarItems);
-          const visibleItems = dayItems.slice(0, 3);
-          const hiddenCount = dayItems.length - visibleItems.length;
+          const dayLayout = dayLayouts.get(day.date) ?? {
+            slots: [],
+            hiddenCount: 0,
+          };
           const isOutsideMonth =
             parseDateInputValue(day.date).getMonth() !== currentMonth;
           const dropTargetForDay = { dueDate: day.date, dueTime: null };
@@ -1116,25 +1137,35 @@ function MonthCalendar({
                 <p className="calendar-empty">読み込み中</p>
               ) : (
                 <div className="calendar-month-day-items">
-                  {visibleItems.map((item) => (
-                    <CalendarItemButton
-                      item={item}
-                      key={`${item.id}:${day.date}`}
-                      displayDate={day.date}
-                      selectedTarget={selectedTarget}
-                      draggedItem={draggedItem}
-                      isReschedulingItem={isReschedulingItem}
-                      variant="month"
-                      onSelectItem={onSelectItem}
-                      onDragStart={onDragStart}
-                      onDragEnd={onDragEnd}
-                      onResizeItem={onResizeItem}
-                      onResizePreview={onResizePreview}
-                      onMoveItemKeyDown={onMoveItemKeyDown}
-                    />
-                  ))}
-                  {hiddenCount > 0 ? (
-                    <span className="calendar-more">他 {hiddenCount} 件</span>
+                  {dayLayout.slots.map((item, slotIndex) =>
+                    item ? (
+                      <CalendarItemButton
+                        item={item}
+                        key={`${item.id}:${day.date}`}
+                        displayDate={day.date}
+                        selectedTarget={selectedTarget}
+                        draggedItem={draggedItem}
+                        isReschedulingItem={isReschedulingItem}
+                        variant="month"
+                        onSelectItem={onSelectItem}
+                        onDragStart={onDragStart}
+                        onDragEnd={onDragEnd}
+                        onResizeItem={onResizeItem}
+                        onResizePreview={onResizePreview}
+                        onMoveItemKeyDown={onMoveItemKeyDown}
+                      />
+                    ) : (
+                      <span
+                        className="calendar-month-item-placeholder"
+                        aria-hidden="true"
+                        key={`empty:${day.date}:${slotIndex}`}
+                      />
+                    ),
+                  )}
+                  {dayLayout.hiddenCount > 0 ? (
+                    <span className="calendar-more">
+                      他 {dayLayout.hiddenCount} 件
+                    </span>
                   ) : null}
                 </div>
               )}
@@ -1144,6 +1175,104 @@ function MonthCalendar({
       </div>
     </div>
   );
+}
+
+type MonthDayLayout = {
+  slots: Array<WeekCalendarItem | null>;
+  hiddenCount: number;
+};
+
+function buildMonthDayLayouts(
+  days: CalendarDay[],
+  items: WeekCalendarItem[],
+) {
+  const layouts = new Map<string, MonthDayLayout>();
+  for (let weekIndex = 0; weekIndex < days.length; weekIndex += 7) {
+    const weekDays = days.slice(weekIndex, weekIndex + 7);
+    const weekStart = weekDays[0]?.date;
+    const weekEnd = weekDays.at(-1)?.date;
+    if (!weekStart || !weekEnd) {
+      continue;
+    }
+
+    const laneEndDates: string[] = [];
+    const scheduledLanes = new Map<string, number>();
+    const scheduledItems = items
+      .filter(
+        (item) =>
+          item.marker === "scheduled" &&
+          item.endDate !== null &&
+          item.date <= weekEnd &&
+          item.endDate >= weekStart,
+      )
+      .sort((first, second) => {
+        const firstStart = first.date < weekStart ? weekStart : first.date;
+        const secondStart = second.date < weekStart ? weekStart : second.date;
+        return (
+          firstStart.localeCompare(secondStart) ||
+          (second.endDate ?? "").localeCompare(first.endDate ?? "") ||
+          sortCalendarItems(first, second)
+        );
+      });
+
+    for (const item of scheduledItems) {
+      const clippedStart = item.date < weekStart ? weekStart : item.date;
+      const clippedEnd =
+        item.endDate && item.endDate < weekEnd ? item.endDate : weekEnd;
+      const reusableLane = laneEndDates.findIndex(
+        (laneEndDate) => laneEndDate < clippedStart,
+      );
+      const lane = reusableLane >= 0 ? reusableLane : laneEndDates.length;
+      laneEndDates[lane] = clippedEnd;
+      scheduledLanes.set(item.id, lane);
+    }
+
+    for (const day of weekDays) {
+      const slots: Array<WeekCalendarItem | null> = Array.from(
+        { length: MONTH_VISIBLE_ITEM_LIMIT },
+        () => null,
+      );
+      const activeScheduledItems = scheduledItems.filter((item) =>
+        isDateWithinSchedule(item, day.date),
+      );
+      let hiddenCount = 0;
+      for (const item of activeScheduledItems) {
+        const lane = scheduledLanes.get(item.id);
+        if (lane === undefined || lane >= MONTH_VISIBLE_ITEM_LIMIT) {
+          hiddenCount += 1;
+          continue;
+        }
+        slots[lane] = item;
+      }
+
+      const pointItems = items
+        .filter(
+          (item) => item.marker !== "scheduled" && item.date === day.date,
+        )
+        .sort(sortCalendarItems);
+      for (const item of pointItems) {
+        const emptySlot = slots.findIndex((slot) => slot === null);
+        if (emptySlot < 0) {
+          hiddenCount += 1;
+          continue;
+        }
+        slots[emptySlot] = item;
+      }
+
+      let lastOccupiedSlot = -1;
+      for (let slotIndex = slots.length - 1; slotIndex >= 0; slotIndex -= 1) {
+        if (slots[slotIndex] !== null) {
+          lastOccupiedSlot = slotIndex;
+          break;
+        }
+      }
+      layouts.set(day.date, {
+        slots: slots.slice(0, lastOccupiedSlot + 1),
+        hiddenCount,
+      });
+    }
+  }
+  return layouts;
 }
 
 function CalendarItemButton({
@@ -1183,18 +1312,26 @@ function CalendarItemButton({
     event: ReactKeyboardEvent<HTMLButtonElement>,
   ): void;
 }) {
-  const isResizePreview = item.id.endsWith(RESIZE_PREVIEW_ID_SUFFIX);
-  const isSelected = !isResizePreview && isSameTarget(item.target, selectedTarget);
+  const previewKind = getCalendarPreviewKind(item.id);
+  const isCalendarPreview = previewKind !== null;
+  const isResizePreview = previewKind === "resize";
+  const isMovePreview = previewKind === "move";
+  const isSelected =
+    !isCalendarPreview && isSameTarget(item.target, selectedTarget);
   const isDraggable =
-    !isResizePreview && canMoveCalendarItem(item) && !isReschedulingItem;
+    !isCalendarPreview && canMoveCalendarItem(item) && !isReschedulingItem;
   const isDragging = draggedItem?.id === item.id;
   const relationLabel = item.parentTitle ? `親: ${item.parentTitle}` : null;
   const markerText = formatCalendarItemMarker(item);
   const isScheduled = item.marker === "scheduled";
+  const monthRangeSegment =
+    variant === "month" && isScheduled
+      ? getMonthRangeSegment(item, displayDate)
+      : null;
   const hasStartHandle =
-    !isResizePreview && isScheduled && displayDate === item.date;
+    !isCalendarPreview && isScheduled && displayDate === item.date;
   const hasEndHandle =
-    !isResizePreview && isScheduled && displayDate === item.endDate;
+    !isCalendarPreview && isScheduled && displayDate === item.endDate;
   const isVerticalResize = variant === "timed" && !item.isAllDay;
   const timedSegment = isVerticalResize
     ? getTimedScheduleSegment(item, displayDate)
@@ -1214,9 +1351,16 @@ function CalendarItemButton({
         isSelected ? "is-selected" : ""
       } ${isDraggable ? "is-draggable" : ""} ${
         isDragging ? "is-dragging" : ""
-      } ${isResizePreview ? "is-resize-preview" : ""}`}
+      } ${isCalendarPreview ? "is-calendar-preview" : ""} ${
+        isResizePreview ? "is-resize-preview" : ""
+      } ${isMovePreview ? "is-move-preview" : ""} ${
+        monthRangeSegment ? "is-scheduled-range" : ""
+      } ${
+        monthRangeSegment?.connectsBefore ? "connects-before" : ""
+      } ${monthRangeSegment?.connectsAfter ? "connects-after" : ""}`}
       style={style}
-      aria-hidden={isResizePreview || undefined}
+      aria-hidden={isCalendarPreview || undefined}
+      data-calendar-preview={previewKind ?? undefined}
       onDoubleClick={(event) => event.stopPropagation()}
     >
       {hasStartHandle ? (
@@ -1234,7 +1378,7 @@ function CalendarItemButton({
         className="calendar-item-content"
         type="button"
         draggable={isDraggable}
-        tabIndex={isResizePreview ? -1 : undefined}
+        tabIndex={isCalendarPreview ? -1 : undefined}
         aria-pressed={isSelected}
         aria-label={`${relationLabel ? `${relationLabel}、` : ""}${item.title}の${markerText}を開く${isDraggable ? `。ドラッグまたは矢印キーで${isScheduled ? "予定期間" : "期限"}を移動できます` : ""}`}
         title={
@@ -1245,23 +1389,40 @@ function CalendarItemButton({
         onDragStart={(event) => onDragStart(item, event)}
         onDragEnd={onDragEnd}
         onKeyDown={(event) =>
-          !isResizePreview && onMoveItemKeyDown(item, variant, event)
+          !isCalendarPreview && onMoveItemKeyDown(item, variant, event)
         }
         onClick={(event) => {
           event.stopPropagation();
-          if (!isResizePreview) {
+          if (!isCalendarPreview) {
             onSelectItem(item);
           }
         }}
       >
-        {isResizePreview ? (
-          <span className="calendar-resize-preview-label">変更後</span>
+        {isCalendarPreview &&
+        (!monthRangeSegment || monthRangeSegment.showsContent) ? (
+          <span className="calendar-preview-label">
+            {isMovePreview ? "移動後" : "変更後"}
+          </span>
         ) : null}
-        <span className="calendar-item-title">{item.title}</span>
-        {relationLabel ? (
+        {monthRangeSegment ? (
+          monthRangeSegment.showsContent ? (
+            <>
+              {item.time ? (
+                <small className="calendar-month-range-time">{item.time}</small>
+              ) : null}
+              <span className="calendar-item-title">{item.title}</span>
+            </>
+          ) : null
+        ) : (
+          <span className="calendar-item-title">{item.title}</span>
+        )}
+        {relationLabel && !monthRangeSegment ? (
           <small className="calendar-item-parent">{relationLabel}</small>
         ) : null}
-        {variant === "timed" || variant === "month" || isResizePreview ? (
+        {!monthRangeSegment &&
+        (variant === "timed" ||
+          variant === "month" ||
+          isCalendarPreview) ? (
           <small>{markerText}</small>
         ) : null}
       </button>
@@ -1278,6 +1439,34 @@ function CalendarItemButton({
       ) : null}
     </div>
   );
+}
+
+function getCalendarPreviewKind(itemId: string): "resize" | "move" | null {
+  if (itemId.endsWith(RESIZE_PREVIEW_ID_SUFFIX)) {
+    return "resize";
+  }
+  if (itemId.endsWith(MOVE_PREVIEW_ID_SUFFIX)) {
+    return "move";
+  }
+  return null;
+}
+
+function getMonthRangeSegment(item: WeekCalendarItem, displayDate: string) {
+  if (
+    item.marker !== "scheduled" ||
+    !item.endDate ||
+    !isDateWithinSchedule(item, displayDate)
+  ) {
+    return null;
+  }
+  const weekday = (parseDateInputValue(displayDate).getDay() + 6) % 7;
+  const connectsBefore = displayDate > item.date && weekday > 0;
+  const connectsAfter = displayDate < item.endDate && weekday < 6;
+  return {
+    connectsBefore,
+    connectsAfter,
+    showsContent: !connectsBefore,
+  };
 }
 
 function ScheduleResizeHandle({
@@ -1831,6 +2020,16 @@ function isSameDropTarget(
     return first === second;
   }
   return (first.zoneId ?? getDropZoneId(first)) === getDropZoneId(second);
+}
+
+function isSameCalendarDestination(
+  first: CalendarDropTarget | null,
+  second: CalendarDropTarget,
+) {
+  return (
+    first?.dueDate === second.dueDate &&
+    (first.dueTime ?? null) === (second.dueTime ?? null)
+  );
 }
 
 function getDropZoneId(target: CalendarDropTarget) {
