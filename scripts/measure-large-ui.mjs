@@ -259,6 +259,8 @@ try {
         document.querySelector(".pomodoro-focus-countdown")?.textContent === "25:00"`,
     }),
   );
+  const idlePomodoroLayout = await inspectPomodoroLayout(client, sessionId);
+  assertPomodoroControlLayout("未開始", idlePomodoroLayout);
   measurements.push(
     await measureView({
       client,
@@ -269,6 +271,9 @@ try {
       ready: `document.querySelector(".pomodoro-focus-actions .icon-button")`,
     }),
   );
+  const runningPomodoroLayout = await inspectPomodoroLayout(client, sessionId);
+  assertPomodoroControlLayout("作業中", runningPomodoroLayout);
+  assertPomodoroLayoutStable(idlePomodoroLayout, runningPomodoroLayout);
   measurements.push(
     await measureView({
       client,
@@ -832,6 +837,67 @@ async function evaluateValue(client, sessionId, expression) {
     sessionId,
   );
   return result.result?.value;
+}
+
+async function inspectPomodoroLayout(client, sessionId) {
+  return evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const progress = document.querySelector(".pomodoro-progress");
+      const controls = document.querySelector(".pomodoro-control-grid");
+      const secondary = document.querySelector(".pomodoro-secondary-actions");
+      const primary = document.querySelector(".pomodoro-primary-action");
+      if (!progress || !controls || !secondary || !primary) return null;
+      const rect = (element) => {
+        const value = element.getBoundingClientRect();
+        return {
+          x: value.x,
+          y: value.y,
+          width: value.width,
+          height: value.height
+        };
+      };
+      return {
+        progress: rect(progress),
+        controls: rect(controls),
+        secondary: rect(secondary),
+        primary: rect(primary),
+        controlCount: controls.children.length,
+        secondaryCount: secondary.children.length,
+        remainingPercent: Number(progress.getAttribute("aria-valuenow"))
+      };
+    })()`,
+  );
+}
+
+function assertPomodoroControlLayout(state, layout) {
+  if (!layout) {
+    throw new Error(`ポモドーロ${state}のレイアウトを取得できませんでした`);
+  }
+  if (layout.controlCount !== 3 || layout.secondaryCount !== 2) {
+    throw new Error(
+      `ポモドーロ${state}の操作スロット数が不正です: ${JSON.stringify(layout)}`,
+    );
+  }
+  if (layout.remainingPercent < 0 || layout.remainingPercent > 100) {
+    throw new Error(
+      `ポモドーロ${state}の残り時間率が範囲外です: ${layout.remainingPercent}`,
+    );
+  }
+}
+
+function assertPomodoroLayoutStable(before, after) {
+  for (const target of ["progress", "controls", "secondary", "primary"]) {
+    for (const key of ["x", "y", "width", "height"]) {
+      if (Math.abs(before[target][key] - after[target][key]) > 1) {
+        throw new Error(
+          `ポモドーロ開始時に${target}.${key}が移動しました: ` +
+            `${before[target][key]} -> ${after[target][key]}`,
+        );
+      }
+    }
+  }
 }
 
 async function resetInvokeLog(client, sessionId) {
@@ -2390,15 +2456,30 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
             );
             const startBounds = previewStart?.getBoundingClientRect();
             const endBounds = previewEnd?.getBoundingClientRect();
+            const isSameWeekRow = Boolean(
+              startBounds &&
+              endBounds &&
+              Math.abs(startBounds.top - endBounds.top) <= 2 &&
+              Math.abs(startBounds.right - endBounds.left) <= 2
+            );
+            const wrapsToNextWeekRow = Boolean(
+              startBounds &&
+              endBounds &&
+              startBounds.top < endBounds.top &&
+              startBounds.left > endBounds.left
+            );
             return Boolean(
               source &&
               previewStart?.querySelector('.calendar-preview-label')?.textContent === '変更後' &&
               previewStart?.querySelector('.calendar-month-range-time')?.textContent === '14:15' &&
-              previewStart?.classList.contains('connects-after') &&
-              previewEnd?.classList.contains('connects-before') &&
-              startBounds &&
-              endBounds &&
-              Math.abs(startBounds.right - endBounds.left) <= 2
+              (
+                (
+                  isSameWeekRow &&
+                  previewStart?.classList.contains('connects-after') &&
+                  previewEnd?.classList.contains('connects-before')
+                ) ||
+                wrapsToNextWeekRow
+              )
             );
           })()`,
           );
@@ -2466,12 +2547,27 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
       );
       const sourceBounds = source?.getBoundingClientRect();
       const targetBounds = target?.getBoundingClientRect();
-      return Boolean(
-        target?.classList.contains('connects-after') &&
-        source?.classList.contains('connects-before') &&
+      const isSameWeekRow = Boolean(
         sourceBounds &&
         targetBounds &&
-        Math.abs(targetBounds.right - sourceBounds.left) <= 2 &&
+        Math.abs(targetBounds.top - sourceBounds.top) <= 2 &&
+        Math.abs(targetBounds.right - sourceBounds.left) <= 2
+      );
+      const wrapsToNextWeekRow = Boolean(
+        sourceBounds &&
+        targetBounds &&
+        targetBounds.top < sourceBounds.top &&
+        targetBounds.left > sourceBounds.left
+      );
+      return Boolean(
+        (
+          (
+            isSameWeekRow &&
+            target?.classList.contains('connects-after') &&
+            source?.classList.contains('connects-before')
+          ) ||
+          wrapsToNextWeekRow
+        ) &&
         !document.querySelector('.calendar-item.is-resize-preview') &&
         !document.querySelector('.task-detail-pane') &&
         window.__taskTimerInvokeLog?.includes('resize_scheduled_work_item') &&

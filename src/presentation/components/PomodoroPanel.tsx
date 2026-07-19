@@ -1,4 +1,11 @@
-import { Pause, Play, RotateCcw, SkipForward, Square } from "lucide-react";
+import {
+  Coffee,
+  Pause,
+  Play,
+  RotateCcw,
+  SkipForward,
+  Square,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import type {
   ActivePomodoro,
@@ -55,6 +62,21 @@ export function PomodoroPanel({
   const remainingSeconds = activePomodoro
     ? getRemainingSeconds(activePomodoro, now)
     : settings?.workSeconds ?? 25 * 60;
+  const durationSeconds = activePomodoro?.phaseDurationSeconds ?? remainingSeconds;
+  const remainingPercent = getRemainingPercent(durationSeconds, remainingSeconds);
+  const phaseLabel = formatPhase(phase);
+  const primaryActionLabel = !activePomodoro
+    ? "開始"
+    : phase === "work"
+      ? "休憩を開始"
+      : "次の作業";
+  const primaryActionDisabled = isMutating || (!activePomodoro && Boolean(activeTimer));
+
+  const runPrimaryAction = () => {
+    if (!activePomodoro) return onStart();
+    if (phase === "work") return onCompleteWorkAndStartBreak();
+    return onCompleteBreakAndStartNext();
+  };
 
   return (
     <section className="pomodoro-panel" aria-labelledby="pomodoro-title">
@@ -68,103 +90,166 @@ export function PomodoroPanel({
         ) : null}
       </header>
 
-      <div className={`pomodoro-focus is-${phase}`}>
-        <p className="pomodoro-phase-label">{formatPhase(phase)}</p>
-        <strong className="pomodoro-focus-countdown" aria-live="polite">
-          {formatDuration(remainingSeconds)}
-        </strong>
-        <p className="pomodoro-cycle-label">
-          {activePomodoro
-            ? `${activePomodoro.cycleCount}セット完了`
-            : `作業 ${formatMinutes(settings?.workSeconds ?? 25 * 60)}分`}
-        </p>
+      <div className={`pomodoro-focus is-${phase}${isPaused ? " is-paused" : ""}`}>
+        <div
+          className="pomodoro-progress"
+          role="progressbar"
+          aria-label={`${phaseLabel}の時間進捗`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(remainingPercent)}
+          aria-valuetext={`${phaseLabel} 残り${formatDuration(remainingSeconds)}`}
+        >
+          <svg
+            className="pomodoro-progress-ring"
+            viewBox="0 0 240 240"
+            aria-hidden="true"
+          >
+            <circle className="pomodoro-progress-track" cx="120" cy="120" r="104" />
+            <circle
+              className="pomodoro-progress-value"
+              cx="120"
+              cy="120"
+              r="104"
+              pathLength="100"
+              strokeDasharray="100"
+              strokeDashoffset={100 - remainingPercent}
+            />
+          </svg>
+          <div className="pomodoro-progress-content">
+            <p className="pomodoro-phase-label">
+              {phaseLabel}
+              <span
+                className={isPaused ? "" : "is-hidden"}
+                aria-hidden={!isPaused}
+              >
+                一時停止
+              </span>
+            </p>
+            <strong className="pomodoro-focus-countdown" aria-live="polite">
+              {formatDuration(remainingSeconds)}
+            </strong>
+            <p className="pomodoro-cycle-label">
+              {activePomodoro
+                ? `${activePomodoro.cycleCount}セット完了`
+                : `作業 ${formatMinutes(settings?.workSeconds ?? 25 * 60)}分`}
+            </p>
+          </div>
+        </div>
 
         <div className="pomodoro-focus-actions">
-          {!activePomodoro ? (
-            <button
-              className="primary-button pomodoro-primary-action"
-              type="button"
-              disabled={Boolean(activeTimer) || isMutating}
-              title={activeTimer ? "通常タイマーを終了してから開始してください" : "開始"}
-              onClick={() => void onStart()}
-            >
-              <Play aria-hidden="true" size={18} />
-              開始
-            </button>
-          ) : (
-            <>
+          <div className="pomodoro-control-grid" aria-label="ポモドーロの主要操作">
+            {activePomodoro ? (
               <button
-                className="icon-button"
+                className="icon-button pomodoro-control-button"
                 type="button"
                 aria-label={isPaused ? "再開" : "一時停止"}
                 title={isPaused ? "再開" : "一時停止"}
                 disabled={isMutating}
                 onClick={() => void (isPaused ? onResume() : onPause())}
               >
-                {isPaused ? <Play aria-hidden="true" size={18} /> : <Pause aria-hidden="true" size={18} />}
+                {isPaused ? (
+                  <Play aria-hidden="true" size={18} />
+                ) : (
+                  <Pause aria-hidden="true" size={18} />
+                )}
               </button>
+            ) : (
+              <span className="pomodoro-control-placeholder" aria-hidden="true" />
+            )}
 
-              {phase === "work" ? (
-                <>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={isMutating}
-                    onClick={() => void onCompleteWorkAndStartBreak()}
-                  >
-                    休憩を開始
-                  </button>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={isMutating}
-                    onClick={() => void onCompleteWork()}
-                  >
-                    作業を完了
-                  </button>
-                </>
+            <button
+              className="primary-button pomodoro-primary-action"
+              type="button"
+              disabled={primaryActionDisabled}
+              title={
+                activeTimer && !activePomodoro
+                  ? "通常タイマーを終了してから開始してください"
+                  : primaryActionLabel
+              }
+              aria-describedby={
+                activeTimer && !activePomodoro
+                  ? "pomodoro-start-disabled-reason"
+                  : undefined
+              }
+              onClick={() => void runPrimaryAction()}
+            >
+              {!activePomodoro ? (
+                <Play aria-hidden="true" size={18} />
+              ) : phase === "work" ? (
+                <Coffee aria-hidden="true" size={18} />
               ) : (
-                <>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={isMutating}
-                    onClick={() => void onCompleteBreakAndStartNext()}
-                  >
-                    <RotateCcw aria-hidden="true" size={16} />
-                    次の作業
-                  </button>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={isMutating}
-                    onClick={() => void onCompleteBreak()}
-                  >
-                    休憩を完了
-                  </button>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    disabled={isMutating}
-                    onClick={() => void onSkipBreak(activePomodoro.id)}
-                  >
-                    <SkipForward aria-hidden="true" size={16} />
-                    スキップ
-                  </button>
-                </>
+                <RotateCcw aria-hidden="true" size={18} />
               )}
+              {primaryActionLabel}
+            </button>
 
+            {activePomodoro ? (
               <button
-                className="stop-button"
+                className="stop-button pomodoro-control-button"
                 type="button"
+                aria-label="終了"
+                title="終了"
                 disabled={isMutating}
                 onClick={() => void onCancel()}
               >
                 <Square aria-hidden="true" size={15} />
-                終了
               </button>
-            </>
-          )}
+            ) : (
+              <span className="pomodoro-control-placeholder" aria-hidden="true" />
+            )}
+          </div>
+
+          <div className="pomodoro-secondary-actions" aria-label="ポモドーロの補助操作">
+            {phase === "work" && activePomodoro ? (
+              <>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={isMutating}
+                  onClick={() => void onCompleteWork()}
+                >
+                  作業を完了
+                </button>
+                <span className="pomodoro-secondary-placeholder" aria-hidden="true" />
+              </>
+            ) : null}
+
+            {phase !== "work" && activePomodoro ? (
+              <>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={isMutating}
+                  onClick={() => void onCompleteBreak()}
+                >
+                  休憩を完了
+                </button>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={isMutating}
+                  onClick={() => void onSkipBreak(activePomodoro.id)}
+                >
+                  <SkipForward aria-hidden="true" size={16} />
+                  スキップ
+                </button>
+              </>
+            ) : null}
+
+            {!activePomodoro ? (
+              <>
+                <span className="pomodoro-secondary-placeholder" aria-hidden="true" />
+                <span className="pomodoro-secondary-placeholder" aria-hidden="true" />
+              </>
+            ) : null}
+          </div>
+
+          {activeTimer && !activePomodoro ? (
+            <span id="pomodoro-start-disabled-reason" className="visually-hidden">
+              通常タイマーを終了してから開始してください
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -190,6 +275,15 @@ function getRemainingSeconds(active: ActivePomodoro, now: number) {
     Math.floor((effectiveNow - startedAt) / 1_000) - active.pausedTotalSeconds,
   );
   return Math.max(0, active.phaseDurationSeconds - elapsed);
+}
+
+function getRemainingPercent(durationSeconds: number, remainingSeconds: number) {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return 0;
+  const boundedRemainingSeconds = Math.min(
+    durationSeconds,
+    Math.max(0, remainingSeconds),
+  );
+  return (boundedRemainingSeconds / durationSeconds) * 100;
 }
 
 function formatPhase(phase: ActivePomodoro["phase"]) {
