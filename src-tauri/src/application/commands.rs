@@ -453,6 +453,20 @@ pub fn resize_scheduled_work_item(
 }
 
 #[tauri::command]
+pub fn move_scheduled_work_item(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::MoveScheduledWorkItemRequestDto,
+) -> Result<(), String> {
+    super::usecases::move_scheduled_work_item(
+        database.inner(),
+        clock.inner(),
+        request.target.try_into()?,
+        request.destination.into(),
+    )
+}
+
+#[tauri::command]
 pub fn start_timer(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,

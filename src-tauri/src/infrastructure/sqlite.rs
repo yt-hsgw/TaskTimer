@@ -36,7 +36,8 @@ use crate::{
         TaskReadRepository, TaskRecord, TaskRowRecord, TaskStatusUpdate, TaskTagRecord,
         TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
         UiPreferenceRepository, UiPreferencesRecord, UiPreferencesUpdate, WeekCalendarItem,
-        WorkItemCreate, WorkItemUpdate, WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        WorkItemCreate, WorkItemUpdate, WorkScheduleMove, WorkScheduleUpdate,
+        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
     domain::{
         notification::{
@@ -52,9 +53,9 @@ use crate::{
         },
         recurrence::RecurrenceFrequency,
         task::{
-            assert_completable, assert_timer_startable, WorkStatus, DEFAULT_BOARD_COLUMN_ID,
-            DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID, DEFAULT_TASK_LIST_NAME,
-            IN_PROGRESS_BOARD_COLUMN_ID,
+            assert_completable, assert_timer_startable, WorkSchedule, WorkStatus,
+            DEFAULT_BOARD_COLUMN_ID, DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID,
+            DEFAULT_TASK_LIST_NAME, IN_PROGRESS_BOARD_COLUMN_ID,
         },
         timer::{WorkTargetRef, WorkTargetType},
     },
@@ -1500,6 +1501,25 @@ impl TaskTimerCommandRepository for SqliteDatabase {
         self.with_transaction(|transaction| update_work_schedule_row(transaction, &target, input))
     }
 
+    fn move_scheduled_work_item(
+        &self,
+        target: WorkTargetRef,
+        input: WorkScheduleMove,
+    ) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| {
+            let current = select_work_schedule_for_move(transaction, &target)?;
+            let moved = current.move_to(&input.destination)?;
+            update_work_schedule_row(
+                transaction,
+                &target,
+                WorkScheduleUpdate {
+                    schedule: moved,
+                    now: input.now,
+                },
+            )
+        })
+    }
+
     fn start_timer(&self, target: WorkTargetRef, now: String) -> RepositoryResult<ActiveTimer> {
         self.with_transaction(|transaction| {
             let status = find_target_status(transaction, &target)?.ok_or_else(|| {
@@ -2894,6 +2914,53 @@ fn update_work_schedule_row(
         return Err(format!("更新対象の{target_label}が存在しません"));
     }
     Ok(())
+}
+
+fn select_work_schedule_for_move(
+    transaction: &Transaction<'_>,
+    target: &WorkTargetRef,
+) -> RepositoryResult<WorkSchedule> {
+    let (table_name, target_label) = match target.target_type {
+        WorkTargetType::Task => ("tasks", "タスク"),
+        WorkTargetType::Subtask => ("subtasks", "サブタスク"),
+    };
+    let sql = format!(
+        "
+        SELECT scheduled_start_date,
+               scheduled_start_time,
+               scheduled_end_date,
+               scheduled_end_time,
+               scheduled_is_all_day
+        FROM {table_name}
+        WHERE id = ?1
+          AND deleted_at IS NULL
+          AND status <> 'archived'
+        "
+    );
+    let schedule = transaction
+        .query_row(&sql, params![target.id], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })
+        .optional()
+        .map_err(|error| format!("{target_label}の予定期間を取得できません: {error}"))?
+        .ok_or_else(|| format!("更新対象の{target_label}が存在しません"))?;
+
+    let (start_date, start_time, end_date, end_time, is_all_day) = schedule;
+    let start_date = start_date.ok_or_else(|| format!("{target_label}に予定期間がありません"))?;
+    let end_date = end_date.ok_or_else(|| format!("{target_label}の予定期間データが不正です"))?;
+    WorkSchedule::parse(
+        &start_date,
+        start_time.as_deref(),
+        &end_date,
+        end_time.as_deref(),
+        is_all_day != 0,
+    )
 }
 
 fn insert_notification_rules_for_target(
@@ -14016,21 +14083,63 @@ mod tests {
         )
         .expect("schedule subtask");
 
+        let notification_before_move: (String, String) = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT kind, notify_at FROM notification_rules LIMIT 1",
+                        [],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .map_err(|error| format!("notification before move: {error}"))
+            })
+            .expect("notification before move");
+
+        usecases::move_scheduled_work_item(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id.clone(),
+            },
+            usecases::WorkScheduleMoveDraft {
+                start_date: "2026-07-21".to_string(),
+                start_time: Some("09:30".to_string()),
+            },
+        )
+        .expect("move timed task");
+        usecases::move_scheduled_work_item(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Subtask,
+                id: subtask.id.clone(),
+            },
+            usecases::WorkScheduleMoveDraft {
+                start_date: "2026-07-23".to_string(),
+                start_time: None,
+            },
+        )
+        .expect("move all-day subtask");
+
         let items = database
-            .list_calendar_items("2026-07-20", "2026-07-21")
+            .list_calendar_items("2026-07-21", "2026-07-25")
             .expect("calendar items");
         let scheduled_task = items
             .iter()
             .find(|item| item.id == format!("task:{}:scheduled", task.id))
             .expect("scheduled task item");
-        assert_eq!(scheduled_task.date, "2026-07-19");
-        assert_eq!(scheduled_task.end_date.as_deref(), Some("2026-07-20"));
-        assert_eq!(scheduled_task.end_time.as_deref(), Some("10:00"));
+        assert_eq!(scheduled_task.date, "2026-07-21");
+        assert_eq!(scheduled_task.time.as_deref(), Some("09:30"));
+        assert_eq!(scheduled_task.end_date.as_deref(), Some("2026-07-21"));
+        assert_eq!(scheduled_task.end_time.as_deref(), Some("21:30"));
         let scheduled_subtask = items
             .iter()
             .find(|item| item.id == format!("subtask:{}:scheduled", subtask.id))
             .expect("scheduled subtask item");
         assert!(scheduled_subtask.is_all_day);
+        assert_eq!(scheduled_subtask.date, "2026-07-23");
+        assert_eq!(scheduled_subtask.end_date.as_deref(), Some("2026-07-25"));
         assert_eq!(
             scheduled_subtask.parent_title.as_deref(),
             Some("期間付きタスク")
@@ -14053,6 +14162,32 @@ mod tests {
             notification_count, 1,
             "planned-start notification is unchanged"
         );
+        let notification_after_move: (String, String) = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT kind, notify_at FROM notification_rules LIMIT 1",
+                        [],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .map_err(|error| format!("notification after move: {error}"))
+            })
+            .expect("notification after move");
+        assert_eq!(notification_after_move, notification_before_move);
+
+        let invalid_move = usecases::move_scheduled_work_item(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id.clone(),
+            },
+            usecases::WorkScheduleMoveDraft {
+                start_date: "2026-07-22".to_string(),
+                start_time: Some("09:10".to_string()),
+            },
+        );
+        assert!(invalid_move.expect_err("invalid move").contains("15分"));
 
         let invalid = usecases::resize_scheduled_work_item(
             &database,
@@ -14081,7 +14216,32 @@ mod tests {
                     .map_err(|error| format!("saved schedule: {error}"))
             })
             .expect("saved schedule");
-        assert_eq!(saved_end_time, "10:00");
+        assert_eq!(saved_end_time, "21:30");
+    }
+
+    #[test]
+    fn moving_work_item_without_schedule_is_rejected() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-18T00:00:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &clock, draft("予定なしタスク")).expect("create task");
+
+        let result = usecases::move_scheduled_work_item(
+            &database,
+            &clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+            usecases::WorkScheduleMoveDraft {
+                start_date: "2026-07-21".to_string(),
+                start_time: Some("09:00".to_string()),
+            },
+        );
+
+        assert!(result.expect_err("schedule required").contains("予定期間"));
     }
 
     #[test]

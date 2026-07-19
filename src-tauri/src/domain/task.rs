@@ -29,6 +29,31 @@ pub struct WorkSchedule {
     pub is_all_day: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkScheduleDestination {
+    pub start_date: String,
+    pub start_time: Option<String>,
+}
+
+impl WorkScheduleDestination {
+    pub fn parse(start_date: &str, start_time: Option<&str>) -> Result<Self, String> {
+        parse_schedule_date(start_date, "移動先日")?;
+        let start_time = match start_time {
+            Some(value) => {
+                let parsed = parse_schedule_time(value, "移動先時刻")?;
+                validate_schedule_minute_step(parsed, "移動先時刻")?;
+                Some(value.to_string())
+            }
+            None => None,
+        };
+
+        Ok(Self {
+            start_date: start_date.to_string(),
+            start_time,
+        })
+    }
+}
+
 impl WorkSchedule {
     pub fn parse(
         start_date: &str,
@@ -81,6 +106,87 @@ impl WorkSchedule {
             is_all_day: false,
         })
     }
+
+    pub fn move_to(&self, destination: &WorkScheduleDestination) -> Result<Self, String> {
+        let current = Self::parse(
+            &self.start_date,
+            self.start_time.as_deref(),
+            &self.end_date,
+            self.end_time.as_deref(),
+            self.is_all_day,
+        )?;
+        let destination_date = parse_schedule_date(&destination.start_date, "移動先日")?;
+
+        if current.is_all_day {
+            if destination.start_time.is_some() {
+                return Err("終日予定の移動先に時刻は設定できません".to_string());
+            }
+            let current_start = parse_schedule_date(&current.start_date, "予定開始日")?;
+            let current_end = parse_schedule_date(&current.end_date, "予定終了日")?;
+            let day_offset = current_end - current_start;
+            let destination_end = destination_date
+                .checked_add(day_offset)
+                .ok_or_else(|| "移動先の予定終了日を計算できません".to_string())?;
+            return Self::parse(
+                &destination.start_date,
+                None,
+                &format_schedule_date(destination_end)?,
+                None,
+                true,
+            );
+        }
+
+        let destination_time = destination
+            .start_time
+            .as_deref()
+            .ok_or_else(|| "時刻あり予定の移動先時刻は必須です".to_string())?;
+        let parsed_destination_time = parse_schedule_time(destination_time, "移動先時刻")?;
+        validate_schedule_minute_step(parsed_destination_time, "移動先時刻")?;
+        let current_start = PrimitiveDateTime::new(
+            parse_schedule_date(&current.start_date, "予定開始日")?,
+            parse_schedule_time(
+                current
+                    .start_time
+                    .as_deref()
+                    .ok_or_else(|| "予定開始時刻が設定されていません".to_string())?,
+                "予定開始時刻",
+            )?,
+        );
+        let current_end = PrimitiveDateTime::new(
+            parse_schedule_date(&current.end_date, "予定終了日")?,
+            parse_schedule_time(
+                current
+                    .end_time
+                    .as_deref()
+                    .ok_or_else(|| "予定終了時刻が設定されていません".to_string())?,
+                "予定終了時刻",
+            )?,
+        );
+        let destination_start = PrimitiveDateTime::new(destination_date, parsed_destination_time);
+        let destination_end = destination_start
+            .checked_add(current_end - current_start)
+            .ok_or_else(|| "移動先の予定終了日時を計算できません".to_string())?;
+
+        Self::parse(
+            &format_schedule_date(destination_start.date())?,
+            Some(&format_schedule_time(destination_start.time())?),
+            &format_schedule_date(destination_end.date())?,
+            Some(&format_schedule_time(destination_end.time())?),
+            false,
+        )
+    }
+}
+
+fn format_schedule_date(value: Date) -> Result<String, String> {
+    value
+        .format(DATE_FORMAT)
+        .map_err(|_| "予定日をYYYY-MM-DD形式へ変換できません".to_string())
+}
+
+fn format_schedule_time(value: Time) -> Result<String, String> {
+    value
+        .format(TIME_FORMAT)
+        .map_err(|_| "予定時刻をHH:mm形式へ変換できません".to_string())
 }
 
 fn parse_schedule_date(value: &str, field_label: &str) -> Result<Date, String> {
@@ -320,5 +426,66 @@ mod tests {
     fn work_schedule_rejects_times_on_all_day_range() {
         let result = WorkSchedule::parse("2026-07-20", Some("00:00"), "2026-07-20", None, true);
         assert!(result.expect_err("all day time").contains("終日"));
+    }
+
+    #[test]
+    fn work_schedule_move_preserves_timed_duration_across_month_boundary() {
+        let schedule = WorkSchedule::parse(
+            "2026-07-31",
+            Some("23:15"),
+            "2026-08-01",
+            Some("01:00"),
+            false,
+        )
+        .expect("current schedule");
+        let destination =
+            WorkScheduleDestination::parse("2026-12-31", Some("22:30")).expect("destination");
+
+        let moved = schedule.move_to(&destination).expect("moved schedule");
+
+        assert_eq!(moved.start_date, "2026-12-31");
+        assert_eq!(moved.start_time.as_deref(), Some("22:30"));
+        assert_eq!(moved.end_date, "2027-01-01");
+        assert_eq!(moved.end_time.as_deref(), Some("00:15"));
+        assert!(!moved.is_all_day);
+    }
+
+    #[test]
+    fn work_schedule_move_preserves_all_day_span() {
+        let schedule = WorkSchedule::parse("2026-07-30", None, "2026-08-01", None, true)
+            .expect("current schedule");
+        let destination = WorkScheduleDestination::parse("2026-12-31", None).expect("destination");
+
+        let moved = schedule.move_to(&destination).expect("moved schedule");
+
+        assert_eq!(moved.start_date, "2026-12-31");
+        assert_eq!(moved.end_date, "2027-01-02");
+        assert!(moved.is_all_day);
+    }
+
+    #[test]
+    fn work_schedule_move_rejects_destination_type_mismatch() {
+        let timed = WorkSchedule::parse(
+            "2026-07-20",
+            Some("09:00"),
+            "2026-07-20",
+            Some("10:00"),
+            false,
+        )
+        .expect("timed schedule");
+        let no_time = WorkScheduleDestination::parse("2026-07-21", None).expect("destination");
+        assert!(timed
+            .move_to(&no_time)
+            .expect_err("time required")
+            .contains("必須"));
+
+        let all_day = WorkSchedule::parse("2026-07-20", None, "2026-07-20", None, true)
+            .expect("all day schedule");
+        let with_time =
+            WorkScheduleDestination::parse("2026-07-21", Some("09:00")).expect("destination");
+        assert!(all_day
+            .move_to(&with_time)
+            .expect_err("time forbidden")
+            .contains("終日"));
     }
 }

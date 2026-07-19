@@ -22,9 +22,54 @@ GitHub Issue: #139
 - 予定期間の長さと終日状態を維持する。
 - UIの仮位置はPresentation状態とし、保存成功後のRead Modelを正とする。
 
+### 入力単位と表示別の規則
+
+| 表示/予定種別 | ポインター移動先 | キーボード |
+| --- | --- | --- |
+| 週/日・時刻あり | ドロップ位置を15分刻みに丸める | `ArrowUp` / `ArrowDown` で15分、`ArrowLeft` / `ArrowRight` で1日 |
+| 週/日・終日 | 移動先の日付 | `ArrowLeft` / `ArrowRight` で1日 |
+| 月・時刻あり | 移動先の日付。開始時刻は維持する | `ArrowLeft` / `ArrowRight` で1日 |
+| 月・終日 | 移動先の日付 | `ArrowLeft` / `ArrowRight` で1日 |
+
+予定ブロック本体だけを移動開始領域にする。開始端・終了端のボタンは既存のリサイズ操作を継続し、本体のドラッグ開始を伝播させない。
+
+### Application契約
+
+UIからは期間長や終了日時を送らず、対象と移動先だけを送る。
+
+```text
+MoveScheduledWorkItem(target, destinationStartDate, destinationStartTime)
+```
+
+- 時刻あり予定では移動先時刻を必須とし、15分刻みで検証する。
+- 終日予定では移動先時刻を受け付けない。
+- 月表示で時刻あり予定を移動する場合は、保存済みの開始時刻を移動先時刻として送る。
+- 保存済み期間がない対象、削除済みまたはアーカイブ済み対象は更新しない。
+
 ## トランザクション境界
 
-`MoveScheduledWorkItem` Use Caseを追加し、対象、移動先、期間長、最大366日を検証してタスクまたはサブタスクの予定期間を1トランザクションで更新する。期限移動は既存の期限更新Use Caseを使う。
+`MoveScheduledWorkItem` Use Caseを追加する。Use Caseは対象と移動先形式を検証し、Repositoryへ検証済み入力を渡す。Repositoryは同一トランザクション内で現在の予定期間を読み、Domainの移動計算で期間長と終日状態を維持して、タスクまたはサブタスクを更新する。UIから送られた期間長を信用しない。
+
+```mermaid
+sequenceDiagram
+  participant UI as Calendar UI
+  participant UC as MoveScheduledWorkItem
+  participant Repo as TaskTimerCommandRepository
+  participant Domain as WorkSchedule
+  participant DB as SQLite
+
+  UI->>UC: target + destination start
+  UC->>UC: ID・日付・15分刻みを検証
+  UC->>Repo: validated destination
+  Repo->>DB: BEGIN / 現在期間を取得
+  Repo->>Domain: move_to(destination)
+  Domain-->>Repo: 長さ・終日状態を維持した期間
+  Repo->>DB: 予定期間列だけを更新 / COMMIT
+  Repo-->>UI: success
+  UI->>UI: Read Model再取得を正として仮位置を解除
+```
+
+期限、開始予定、通知ルールはこのトランザクションで読み書きしない。期限移動は既存の期限更新Use Caseを使う。
 
 ## 設計理由
 
@@ -49,6 +94,9 @@ GitHub Issue: #139
 - リサイズハンドル操作が本体移動として開始される。
 - 表示範囲外へドロップして366日上限を超える。
 - 保存失敗後に仮位置だけが残る。
+- UIが改ざんされ、保存済み期間と異なる終了日時や終日状態が送られる。
+- 月末・年末をまたぐ期間の移動で終了日計算が破綻する。
+- 時刻あり予定を月表示で移動したときに開始時刻が失われる。
 
 ## 受け入れ条件
 
@@ -57,7 +105,28 @@ GitHub Issue: #139
 - 端のリサイズと本体移動が競合しない。
 - 保存失敗時はDB上の位置へ戻る。
 - 期限通知は予定期間移動では変更されない。
+- 週/日では15分、月/終日では1日単位でキーボード移動できる。
+- 月表示で時刻あり予定を移動しても時刻と期間長を維持する。
+
+## テスト計画
+
+- Domain: 時刻あり・終日、日/月/年またぎ、15分刻み、期間長と終日状態の維持。
+- Application: 対象ID、日付、時刻形式の拒否と専用Repository commandの呼び出し。
+- Infrastructure: タスク/サブタスク、予定なし、削除/アーカイブ、期限・通知ルール非変更、ロールバック。
+- Presentation: 週/日/月の本体D&D、端リサイズとの競合防止、キーボード移動、保存中の仮位置、失敗時復元。
+- Performance: 移動後にタスクページとカレンダーだけを再取得し、通知同期と全Snapshot再取得を行わない。
 
 ## 設計レビュー
 
 - [2026-07-19 操作・タイマー改善設計レビュー](../review/2026-07-19-interaction-timer-improvements-review.md)
+- [2026-07-19 カレンダー予定ブロック移動設計レビュー](../review/2026-07-19-calendar-block-move-review.md)
+
+## 実装結果
+
+- 期限移動と分離した `MoveScheduledWorkItem` を追加した。
+- SQLite Repositoryが現在期間の取得、長さを維持したDomain計算、予定期間列の更新を1トランザクションで行う。
+- 週/日の予定ブロック本体を15分刻みでD&Dでき、月/終日では日単位で移動できる。
+- 時刻あり予定を月/終日領域へ移動しても開始時刻と期間長を維持する。
+- 矢印キーでも同じ規則で移動できる。
+- 保存後のRead Modelが届くまで対象1件の仮位置を保持し、旧位置のちらつきを防ぐ。
+- 予定移動後はタスクページとカレンダーだけを再取得し、通知同期を実行しない。

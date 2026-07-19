@@ -19,7 +19,7 @@ use super::{
         BoardColumnDraft, DataExportCreateDraft, PomodoroSettingsDraft, RecurrenceRuleDraft,
         SqliteBackupCreateDraft, SqliteBackupRestoreDraft, TagDraft, TaskListDraft,
         TaskPageCursorDraft, TaskPageDraft, TaskPageScopeDraft, UiPreferencesDraft, WorkItemDraft,
-        WorkItemUpdateDraft, WorkScheduleDraft,
+        WorkItemUpdateDraft, WorkScheduleDraft, WorkScheduleMoveDraft,
     },
 };
 
@@ -76,6 +76,20 @@ pub struct CreateScheduledTaskRequestDto {
 pub struct ResizeScheduledWorkItemRequestDto {
     pub target: WorkTargetRefDto,
     pub schedule: WorkScheduleRequestDto,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkScheduleMoveRequestDto {
+    pub start_date: String,
+    pub start_time: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveScheduledWorkItemRequestDto {
+    pub target: WorkTargetRefDto,
+    pub destination: WorkScheduleMoveRequestDto,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -783,6 +797,15 @@ impl From<WorkScheduleRequestDto> for WorkScheduleDraft {
             end_date: value.end_date,
             end_time: value.end_time,
             is_all_day: value.is_all_day,
+        }
+    }
+}
+
+impl From<WorkScheduleMoveRequestDto> for WorkScheduleMoveDraft {
+    fn from(value: WorkScheduleMoveRequestDto) -> Self {
+        Self {
+            start_date: value.start_date,
+            start_time: value.start_time,
         }
     }
 }

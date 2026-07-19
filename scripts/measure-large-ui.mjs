@@ -40,6 +40,7 @@ const thresholds = {
   completion_refresh: 1200,
   task_detail_save: 1200,
   calendar_week: 1500,
+  calendar_move: 1500,
   calendar_day: 1500,
   calendar_month: 2000,
   task_detail: 1000,
@@ -226,6 +227,30 @@ try {
         document.querySelector(".calendar-time-grid:not(.is-day-mode)") &&
         document.querySelectorAll(".calendar-item").length === ${profile.taskCount}`,
     }),
+  );
+  const calendarMoveStartedAt = performance.now();
+  const calendarMoveResult = await verifyCalendarScheduledMove(client, sessionId);
+  assertCommandScope("カレンダー予定移動", calendarMoveResult.commands, {
+    required: [
+      "move_scheduled_work_item",
+      "list_task_page",
+      "list_calendar_items",
+    ],
+    forbidden: [
+      "update_task",
+      "update_subtask",
+      "resize_scheduled_work_item",
+      "sync_notifications",
+      "process_notification_os_registrations",
+      "list_board_columns",
+    ],
+  });
+  measurements.push(
+    createMeasurement(
+      "calendar_move",
+      performance.now() - calendarMoveStartedAt,
+      thresholds.calendar_move,
+    ),
   );
   measurements.push(
     await measureView({
@@ -809,6 +834,131 @@ async function verifyKanbanCardDrag(client, sessionId) {
   };
 }
 
+async function verifyCalendarScheduledMove(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  const result = await evaluateValue(
+    client,
+    sessionId,
+    `(async () => {
+      const source = document.querySelector(
+        '.calendar-item.marker-scheduled.is-timed .calendar-item-content'
+      );
+      const sourceDate = source?.closest('.calendar-time-cell')?.dataset.calendarDate;
+      const destination = [...document.querySelectorAll('.calendar-time-cell')]
+        .find((cell) =>
+          cell.dataset.calendarDate === sourceDate &&
+          cell.getAttribute('aria-label')?.includes('11:00')
+        );
+      if (!source || !destination) {
+        return null;
+      }
+      const transfer = new DataTransfer();
+      const destinationRect = destination.getBoundingClientRect();
+      source.dispatchEvent(new DragEvent('dragstart', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer
+      }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      destination.dispatchEvent(new DragEvent('dragover', {
+        bubbles: true,
+        cancelable: true,
+        clientY: destinationRect.top + destinationRect.height * 0.55,
+        dataTransfer: transfer
+      }));
+      destination.dispatchEvent(new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        clientY: destinationRect.top + destinationRect.height * 0.55,
+        dataTransfer: transfer
+      }));
+      source.dispatchEvent(new DragEvent('dragend', {
+        bubbles: true,
+        dataTransfer: transfer
+      }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const moved = destination.querySelector(
+        '.calendar-item.marker-scheduled.is-timed'
+      );
+      return {
+        movedImmediately: Boolean(moved),
+        marker: moved?.querySelector('small:last-child')?.textContent ?? null,
+        targetDate: destination.dataset.calendarDate ?? null
+      };
+    })()`,
+  );
+  if (!result?.movedImmediately || !result.marker?.includes("11:30")) {
+    throw new Error(
+      `カレンダードロップ直後の仮位置が不正です: ${JSON.stringify(result)}`,
+    );
+  }
+
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const destination = [...document.querySelectorAll('.calendar-time-cell')]
+        .find((cell) =>
+          cell.dataset.calendarDate === ${JSON.stringify(result.targetDate)} &&
+          cell.getAttribute('aria-label')?.includes('11:00')
+        );
+      const moved = destination?.querySelector(
+        '.calendar-item.marker-scheduled.is-timed'
+      );
+      return Boolean(
+        moved?.querySelector('small:last-child')?.textContent?.includes('11:30') &&
+        window.__taskTimerInvokeLog?.includes('list_task_page') &&
+        window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
+        !document.querySelector('.app-alert')
+      );
+    })()`,
+  );
+  const dragCommands = await takeInvokeLog(client, sessionId);
+  const keyboardResult = await evaluateValue(
+    client,
+    sessionId,
+    `(async () => {
+      const item = document.querySelector(
+        '.calendar-item.marker-scheduled.is-timed .calendar-item-content'
+      );
+      if (!item) {
+        return null;
+      }
+      item.focus();
+      item.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'ArrowDown',
+        bubbles: true,
+        cancelable: true
+      }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return document.querySelector(
+        '.calendar-item.marker-scheduled.is-timed small:last-child'
+      )?.textContent ?? null;
+    })()`,
+  );
+  if (!keyboardResult?.includes("11:45")) {
+    throw new Error(`カレンダーのキーボード仮移動が不正です: ${keyboardResult}`);
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const moved = document.querySelector(
+        '.calendar-item.marker-scheduled.is-timed'
+      );
+      return Boolean(
+        moved?.querySelector('small:last-child')?.textContent?.includes('11:45') &&
+        window.__taskTimerInvokeLog?.includes('list_task_page') &&
+        window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
+        !document.querySelector('.app-alert')
+      );
+    })()`,
+  );
+  return {
+    commands: [...dragCommands, ...(await takeInvokeLog(client, sessionId))],
+  };
+}
+
 async function inspectPage(client, sessionId) {
   const result = await client.send(
     "Runtime.evaluate",
@@ -894,6 +1044,17 @@ function buildTauriInvokeMockSource(profile) {
     const end = new Date(endDate + "T00:00:00");
     return Math.max(1, Math.round((end - start) / 86400000) + 1);
   };
+  const addMinutes = (dateText, timeText, minutes) => {
+    const [year, month, day] = dateText.split("-").map(Number);
+    const [hour, minute] = timeText.split(":").map(Number);
+    const date = new Date(year, month - 1, day, hour, minute);
+    date.setMinutes(date.getMinutes() + minutes);
+    return {
+      date: localDate(date),
+      time: String(date.getHours()).padStart(2, "0") + ":" +
+        String(date.getMinutes()).padStart(2, "0")
+    };
+  };
   const subtasksFor = (taskId, index) => Array.from(
     { length: profile.subtasksPerTask },
     (_, subtaskIndex) => ({
@@ -937,6 +1098,10 @@ function buildTauriInvokeMockSource(profile) {
       subtasks: subtasksFor(id, index)
     };
   });
+  let scheduledStartDate = today;
+  let scheduledStartTime = "09:00";
+  let scheduledEndDate = today;
+  let scheduledEndTime = "10:00";
   const taskRows = tasks.map((task, index) => ({
     id: task.id,
     listId: task.listId,
@@ -1045,7 +1210,20 @@ function buildTauriInvokeMockSource(profile) {
       const rangeStart = args.startDate ?? args.weekStartDate ?? today;
       const rangeEnd = args.endDate ?? addDays(rangeStart, 6);
       const span = daySpan(rangeStart, rangeEnd);
-      const calendarItems = tasks.map((task, index) => ({
+      const calendarItems = tasks.map((task, index) => index === 0 ? {
+        id: "calendar-perf-scheduled",
+        target: { type: "task", id: task.id },
+        title: task.title,
+        parentTitle: null,
+        date: scheduledStartDate,
+        time: scheduledStartTime,
+        endDate: scheduledEndDate,
+        endTime: scheduledEndTime,
+        isAllDay: false,
+        marker: "scheduled",
+        status: task.status,
+        colorToken: "blue"
+      } : {
         id: "calendar-perf-" + pad(index),
         target: { type: "task", id: task.id },
         title: task.title,
@@ -1058,7 +1236,7 @@ function buildTauriInvokeMockSource(profile) {
         marker: "due",
         status: task.status,
         colorToken: "green"
-      }));
+      });
       const commands = {
         health_check: () => "tauri-ready",
         list_tasks: () => clone(tasks),
@@ -1141,6 +1319,28 @@ function buildTauriInvokeMockSource(profile) {
               return;
             }
             row.boardColumnId = args.request.boardColumnId;
+            resolve(null);
+          }, 120);
+        }),
+        move_scheduled_work_item: () => new Promise((resolve, reject) => {
+          setTimeout(() => {
+            const destination = args.request?.destination;
+            if (!destination?.startDate || !destination?.startTime) {
+              reject(new Error("移動先日時が不正です"));
+              return;
+            }
+            const durationMinutes =
+              (new Date(scheduledEndDate + "T" + scheduledEndTime) -
+                new Date(scheduledStartDate + "T" + scheduledStartTime)) / 60000;
+            const nextEnd = addMinutes(
+              destination.startDate,
+              destination.startTime,
+              durationMinutes
+            );
+            scheduledStartDate = destination.startDate;
+            scheduledStartTime = destination.startTime;
+            scheduledEndDate = nextEnd.date;
+            scheduledEndTime = nextEnd.time;
             resolve(null);
           }, 120);
         }),

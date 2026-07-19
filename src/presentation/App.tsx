@@ -22,6 +22,7 @@ import type {
   WorkItemDraft,
   WorkItemUpdateDraft,
   WorkScheduleDraft,
+  WorkScheduleMoveDraft,
 } from "../application/usecases/contracts";
 import type { NotificationDisplayMode } from "../domain/notification/types";
 import type { ActiveTimer, TimerSession } from "../domain/timer/types";
@@ -1733,7 +1734,35 @@ export function App() {
         refresh: {
           taskPage: true,
           calendar: true,
-          notifications: true,
+        },
+      });
+    },
+    [runMutation, tasks],
+  );
+
+  const handleMoveScheduledCalendarItem = useCallback(
+    (item: WeekCalendarItem, destination: WorkScheduleMoveDraft) => {
+      if (item.marker !== "scheduled") {
+        setErrorMessage("移動できるのは予定ブロックだけです。");
+        return Promise.resolve(false);
+      }
+      if (
+        item.date === destination.startDate &&
+        (item.time ?? null) === (destination.startTime ?? null)
+      ) {
+        return Promise.resolve(true);
+      }
+      return runMutation(async () => {
+        await tauriTaskTimerGateway.moveScheduledWorkItem(
+          item.target,
+          destination,
+        );
+        return resolveTaskIdForTarget(tasks, item.target) ?? undefined;
+      }, {
+        scope: "calendar",
+        refresh: {
+          taskPage: true,
+          calendar: true,
         },
       });
     },
@@ -2019,6 +2048,7 @@ export function App() {
                 onCreateTask={handleCreateScheduledTask}
                 onRescheduleItem={handleRescheduleCalendarItem}
                 onResizeItem={handleResizeCalendarItem}
+                onMoveScheduledItem={handleMoveScheduledCalendarItem}
               />
               {selectedTask ? (
                 <MemoizedTaskDetailPane

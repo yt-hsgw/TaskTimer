@@ -6,7 +6,7 @@ use crate::domain::{
     },
     pomodoro::{PomodoroPhase, PomodoroStatus},
     recurrence::RecurrenceFrequency,
-    task::{WorkSchedule, WorkStatus},
+    task::{WorkSchedule, WorkScheduleDestination, WorkStatus},
     timer::{WorkTargetRef, WorkTargetType},
 };
 
@@ -133,6 +133,12 @@ pub struct WorkItemUpdate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkScheduleUpdate {
     pub schedule: WorkSchedule,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkScheduleMove {
+    pub destination: WorkScheduleDestination,
     pub now: String,
 }
 
@@ -693,6 +699,12 @@ pub trait TaskTimerCommandRepository {
         &self,
         target: WorkTargetRef,
         input: WorkScheduleUpdate,
+    ) -> RepositoryResult<()>;
+
+    fn move_scheduled_work_item(
+        &self,
+        target: WorkTargetRef,
+        input: WorkScheduleMove,
     ) -> RepositoryResult<()>;
 
     fn start_timer(&self, target: WorkTargetRef, now: String) -> RepositoryResult<ActiveTimer>;

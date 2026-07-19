@@ -11,7 +11,7 @@ use crate::domain::{
         validate_board_column_name, validate_date_range, validate_due_time_requires_due_date,
         validate_memo, validate_optional_date, validate_optional_time, validate_tag_name,
         validate_task_list_color_token, validate_task_list_name, validate_title, WorkSchedule,
-        WorkStatus, DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID,
+        WorkScheduleDestination, WorkStatus, DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID,
     },
     timer::WorkTargetRef,
 };
@@ -38,7 +38,7 @@ use super::{
         TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskPageCursor,
         TaskPageQuery, TaskPageRecord, TaskPageScope, TaskReadRepository, TaskRecord,
         TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository,
-        UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate,
+        UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate, WorkScheduleMove,
         WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
@@ -93,6 +93,12 @@ pub struct WorkScheduleDraft {
     pub end_date: String,
     pub end_time: Option<String>,
     pub is_all_day: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkScheduleMoveDraft {
+    pub start_date: String,
+    pub start_time: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -483,6 +489,25 @@ pub fn resize_scheduled_work_item(
     repository.resize_scheduled_work_item(
         target,
         validate_work_schedule_draft(schedule, clock.now_utc_iso8601())?,
+    )
+}
+
+pub fn move_scheduled_work_item(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    target: WorkTargetRef,
+    destination: WorkScheduleMoveDraft,
+) -> RepositoryResult<()> {
+    let target = validate_work_target_ref(target)?;
+    repository.move_scheduled_work_item(
+        target,
+        WorkScheduleMove {
+            destination: WorkScheduleDestination::parse(
+                destination.start_date.trim(),
+                destination.start_time.as_deref().map(str::trim),
+            )?,
+            now: clock.now_utc_iso8601(),
+        },
     )
 }
 
