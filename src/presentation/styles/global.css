@@ -749,8 +749,7 @@ button {
   min-width: 0;
 }
 
-.kanban-column.is-dragging,
-.kanban-card.is-dragging {
+.kanban-column.is-dragging {
   opacity: 0.58;
   z-index: 4;
 }
@@ -765,8 +764,7 @@ button {
 }
 
 .kanban-drag-handle,
-.kanban-column-delete,
-.kanban-card-drag-handle {
+.kanban-column-delete {
   align-items: center;
   background: transparent;
   border: 0;
@@ -883,11 +881,14 @@ button {
   background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 6px;
+  box-sizing: border-box;
+  cursor: grab;
   display: grid;
   gap: 7px;
-  grid-template-columns: 18px 28px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr);
   min-width: 0;
-  padding: 9px 9px 9px 5px;
+  padding: 9px;
+  touch-action: none;
 }
 
 .kanban-card.is-selected {
@@ -899,26 +900,38 @@ button {
   opacity: 0.68;
 }
 
-.kanban-card.is-done .kanban-card-title {
-  text-decoration: line-through;
+.kanban-card.is-dragging {
+  opacity: 0.18;
 }
 
-.kanban-card-drag-handle {
-  align-self: start;
-  cursor: grab;
-  height: 28px;
-  width: 18px;
+.kanban-card-overlay,
+.kanban-card-overlay.is-done {
+  box-shadow: 0 14px 32px rgb(23 32 38 / 24%);
+  cursor: grabbing;
+  opacity: 0.98;
+  pointer-events: none;
+  width: 100%;
+}
+
+.kanban-card.is-done .kanban-card-title {
+  text-decoration: line-through;
 }
 
 .kanban-card-main {
   background: transparent;
   border: 0;
   color: var(--ink);
+  cursor: grab;
   display: grid;
   gap: 7px;
   min-width: 0;
   padding: 0;
   text-align: left;
+}
+
+.kanban-card.is-dragging .kanban-card-main,
+.kanban-card-overlay .kanban-card-main {
+  cursor: grabbing;
 }
 
 .kanban-card-title {

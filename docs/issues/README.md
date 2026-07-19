@@ -59,6 +59,11 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [051 かんばんをドラッグ操作とカスタム状態へ拡張する](051-kanban-custom-workflow.md) / GitHub #126
 - [052 カレンダー項目を期間表示し端のドラッグで調整する](052-calendar-duration-resize.md) / GitHub #127
 - [053 タスク一覧の200件上限をページングで解消する](053-task-list-pagination.md) / GitHub #131（完了）
+- [054 かんばんカード全面のドラッグ操作と前面表示を改善する](054-kanban-full-card-drag-overlay.md) / GitHub #138
+- [055 カレンダーの予定ブロック移動と期限調整操作を統合する](055-calendar-block-move-and-due-edit.md) / GitHub #139
+- [056 操作後の全画面再取得と再描画を表示範囲単位へ分割する](056-scoped-ui-refresh.md) / GitHub #140
+- [057 ポモドーロをタスクから独立した集中機能へ再設計する](057-standalone-pomodoro.md) / GitHub #141
+- [058 タスク行へカウントダウンタイマーと完了通知を追加する](058-task-countdown-timer.md) / GitHub #142
 
 ## 運用
 

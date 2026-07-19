@@ -145,7 +145,7 @@ npm run perf:ui -- --profile standard --fail-on-warning
 | 初期タスク一覧 | 5,000ms |
 | 追加200件の読み込み | 1,500ms |
 | 今日、お気に入り、右詳細 | 1,000ms |
-| かんばん、週/日カレンダー | 1,500ms |
+| かんばん表示、カードD&D、週/日カレンダー | 1,500ms |
 | 月カレンダー | 2,000ms |
 
 標準UIプロファイルは401件を用意し、初期200件と追加200件を分けて描画する。追加読み込み後も選択中タスク、サブタスク展開、詳細表示が維持されることを完了条件に含める。SQLite側は別計測で5,000件を最後までカーソル巡回し、UI側はDOM負荷を1回200件に制限する。
@@ -250,6 +250,7 @@ Presentation描画計測結果:
 
 | 日時 | OS/ブラウザ | TaskTimer commit | プロファイル | コマンド | WARN件数 | メモ |
 | --- | --- | --- | --- | --- | ---: | --- |
+| 2026-07-19 | Darwin / headless Chrome | #138作業ブランチ | 50タスク / 200サブタスク / 4リスト | `npm run perf:ui -- --profile smoke --fail-on-warning` | 0 | カード本文D&D、前面オーバーレイ、移動先列強調、120ms保存遅延中の楽観表示、保存後移動を含む。D&D 428ms、全項目閾値内。 |
 | 2026-07-18 | Darwin 25.5.0 arm64 / headless Chrome | #131作業ブランチ | ページ対象401タスク / 初期200 + 追加200 / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 最大1,337ms。追加読み込み971ms、選択・展開・詳細・スクロール位置を維持。 |
 | 2026-07-18 | GitHub-hosted Windows runner / headless Chrome | `7def678` | 一覧集計5,000件 / 描画200タスク / 800サブタスク / 12リスト | `大量データ性能検証` workflow / run `29647070007` / `profile=standard` / `fail_on_warning=true` | 0 | 最大1,893ms。初期一覧1,893ms、かんばん284ms、週カレンダー233ms、右詳細353ms。 |
 | 2026-07-18 | GitHub-hosted Windows runner / headless Chrome | PR #132 | 一覧集計・描画50タスク / 200サブタスク / 4リスト | `大量データ性能検証` PR trigger | 0 | 最大3,078ms。`initial_task_list` が最大。かんばん192ms、週カレンダー142ms、右詳細200ms。 |
