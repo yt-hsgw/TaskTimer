@@ -59,7 +59,7 @@ TaskTimer-backup-YYYYMMDD-HHMMSS/
   "format": "tasktimer-sqlite-backup",
   "formatVersion": 1,
   "appVersion": "0.1.0",
-  "schemaVersion": 7,
+  "schemaVersion": 9,
   "createdAt": "2026-07-15T00:00:00+09:00",
   "platform": "windows",
   "databaseFile": "tasktimer.sqlite3",
@@ -101,7 +101,7 @@ TaskTimer-export-YYYYMMDD-HHMMSS.json
 ```json
 {
   "format": "tasktimer-json-export",
-  "formatVersion": 4,
+  "formatVersion": 5,
   "appVersion": "0.1.0",
   "createdAt": "2026-07-15T00:00:00+09:00",
   "platform": "windows",
@@ -137,7 +137,7 @@ TaskTimer-export-YYYYMMDD-HHMMSS-csv/
 - `timer_pauses.csv`
 - `task_timer_settings.csv`: 通常タイマーの既定目標秒数を含む
 - `pomodoro_settings.csv`
-- `pomodoro_sessions.csv`
+- `pomodoro_sessions.csv`: `scope`、nullableな対象、フェーズ、状態、時間を含む。既存履歴は `task_linked`、独立機能の履歴は `standalone` として出力する
 - `notification_rules.csv`
 - `notification_os_registrations.csv`
 - `recurrence_rules.csv`

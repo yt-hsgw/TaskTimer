@@ -121,12 +121,12 @@ flowchart LR
 | GetPomodoroSettings | ポモドーロ既定値を取得する。読み取り専用。 |
 | UpdatePomodoroSettings | 作業/休憩秒数と長休憩までの回数を検証し、設定を保存する。 |
 | GetActivePomodoro | 進行中または一時停止中のポモドーロを1件取得する。読み取り専用。 |
-| StartPomodoro | 対象存在確認、開始可能性確認、アクティブタイマー/アクティブポモドーロ不存在確認、作業フェーズ用 `timer_sessions` と `pomodoro_sessions` を同一トランザクションで作成し、対象状態を `in_progress` に更新する。 |
-| PausePomodoro | アクティブポモドーロを取得し、作業フェーズでは `timer_pauses`、休憩フェーズでは `pomodoro_sessions.paused_at` を更新する。 |
-| ResumePomodoro | 一時停止中のポモドーロを取得し、作業フェーズでは `timer_pauses`、休憩フェーズでは `paused_total_seconds` を更新して `running` に戻す。 |
-| CompletePomodoroWorkPhase | 作業フェーズ用 `timer_sessions.elapsed_seconds` を確定し、`pomodoro_sessions` を `completed` にして `cycle_count` を加算する。 |
+| StartStandalonePomodoro | アクティブタイマー/アクティブポモドーロ不存在確認後、対象なしの `standalone` 作業フェーズを `pomodoro_sessions` に作成する。タスク状態と `timer_sessions` は変更しない。 |
+| PausePomodoro | アクティブポモドーロを取得し、独立scopeは `pomodoro_sessions.paused_at` を更新する。旧タスク連携作業だけ `timer_pauses` も同期する。 |
+| ResumePomodoro | 一時停止中のポモドーロを取得し、独立scopeは `paused_total_seconds` を更新する。旧タスク連携作業だけ `timer_pauses` も同期する。 |
+| CompletePomodoroWorkPhase | `pomodoro_sessions` を `completed` にして `cycle_count` を加算する。旧タスク連携作業だけ `timer_sessions.elapsed_seconds` も確定する。 |
 | StartPomodoroBreak | 完了済み作業フェーズを検証し、設定値から短休憩/長休憩を判定して休憩フェーズを開始する。 |
-| SkipPomodoroBreak | 開始中休憩をキャンセルし、次の作業フェーズ用 `timer_sessions` と `pomodoro_sessions` を作成する。 |
+| SkipPomodoroBreak | 開始中休憩をキャンセルし、同じscopeの次作業フェーズを作成する。独立scopeでは `timer_sessions` を作成しない。 |
 | CompletePomodoroBreak | 休憩フェーズを `completed` にする。休憩は `timer_sessions` へ保存しない。 |
 | CancelPomodoro | 作業フェーズなら作業タイマーも停止し、休憩フェーズなら休憩セッションだけを `cancelled` にする。 |
 | PauseActiveTimer | アクティブタイマーを取得し、未再開の一時停止区間がないことを確認して一時停止区間を開始する。ポモドーロ作業フェーズに紐づく場合はポモドーロも `paused` にする。 |

@@ -51,7 +51,7 @@
 - Subtaskドメインモデル。
 - TimerSessionドメインモデル。
 - SQLite Repository。
-- Application Use Case。初回実装スライスで `GetPomodoroSettings`、`UpdatePomodoroSettings`、`GetActivePomodoro`、`StartPomodoro` まで追加済み。
+- Application Use Case。`GetPomodoroSettings`、`UpdatePomodoroSettings`、`GetActivePomodoro`、`StartStandalonePomodoro` を実装済み。旧 `StartPomodoro` は新規公開せず、既存タスク連携履歴の状態遷移だけ互換維持する。
 
 完了条件:
 
@@ -229,14 +229,14 @@ UI専用にすべてのタスク、サブタスク、タイマー履歴を一括
 - ポモドーロセッションのドメインモデル。
 - SQLite Repositoryとマイグレーション。
 - Application Use Case。
-- 右詳細ペインの通常タイマー/ポモドーロ切替。
+- 左ナビゲーション配下の独立ポモドーロ画面。
 - 作業終了/休憩終了通知。
 - バックアップ、JSON、CSVエクスポート対応。
 
 完了条件:
 
 - 通常タイマーは既存どおり使える。
-- ポモドーロの作業フェーズが実作業時間として保存される。
+- 独立ポモドーロの作業フェーズが `pomodoro_sessions` に保存され、タスク別実績へ混ざらない。
 - 休憩フェーズは作業時間履歴に含まれない。
 - 通常タイマーとポモドーロを合わせてアプリ全体で同時に1件だけ進行する。
 - アプリ再起動後に進行中フェーズを復元できる。
@@ -245,19 +245,19 @@ UI専用にすべてのタスク、サブタスク、タイマー履歴を一括
 
 設計判断:
 
-- `timer_sessions` は作業時間履歴の正として維持する。
-- 休憩フェーズは `timer_sessions` へ保存せず、ポモドーロ用の状態として扱う。
-- DB更新はApplication Use Caseを入口とし、作業フェーズ完了時は `timer_sessions` 確定とポモドーロ状態更新を同一トランザクションで扱う。
+- `timer_sessions` はタスク別タイマー履歴の正として維持する。
+- 新規ポモドーロは作業・休憩とも `pomodoro_sessions` だけへ保存する。旧タスク連携履歴は互換表示・操作のため保持する。
+- DB更新はApplication Use Caseを入口とし、通常タイマーとの単一アクティブ制約を同一トランザクションで扱う。
 
 推奨分割:
 
 1. データモデル、Use Case、Repository境界を追加する。完了。
 2. SQLiteマイグレーションとRustテストを追加する。完了。
-3. 右詳細ペインに通常/ポモドーロ切替と進行中表示を追加する。
+3. 左ナビゲーションと中央ペインに独立ポモドーロ画面を追加する。完了。
 4. 設定画面にポモドーロ既定値を追加する。
 5. 作業終了/休憩終了通知と復帰時再同期を追加する。
 6. バックアップ、JSON、CSVエクスポートを更新する。完了。
-7. 大量データ計測を更新する。
+7. 大量データ計測を更新する。完了。
 
 危険ケース:
 

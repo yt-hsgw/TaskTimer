@@ -36,6 +36,8 @@ const thresholds = {
   favorites: 1000,
   kanban: 1500,
   kanban_drag: 1500,
+  pomodoro: 1000,
+  pomodoro_start: 1000,
   same_navigation: 250,
   favorite_refresh: 1000,
   completion_refresh: 1200,
@@ -244,6 +246,28 @@ try {
       performance.now() - kanbanDragStartedAt,
       thresholds.kanban_drag,
     ),
+  );
+  measurements.push(
+    await measureView({
+      client,
+      sessionId,
+      name: "pomodoro",
+      thresholdMs: thresholds.pomodoro,
+      action: clickNavigation("ポモドーロ"),
+      ready: `document.querySelector('button.nav-item[aria-label="ポモドーロ"][aria-current="page"]') &&
+        document.querySelector(".pomodoro-panel") &&
+        document.querySelector(".pomodoro-focus-countdown")?.textContent === "25:00"`,
+    }),
+  );
+  measurements.push(
+    await measureView({
+      client,
+      sessionId,
+      name: "pomodoro_start",
+      thresholdMs: thresholds.pomodoro_start,
+      action: `document.querySelector(".pomodoro-primary-action")?.click()`,
+      ready: `document.querySelector(".pomodoro-focus-actions .icon-button")`,
+    }),
   );
   measurements.push(
     await measureView({
@@ -2957,6 +2981,7 @@ function buildTauriInvokeMockSource(profile) {
     };
   });
   let activeTimer = null;
+  let activePomodoro = null;
   let scheduledStartDate = today;
   let scheduledStartTime = "09:00";
   let scheduledEndDate = today;
@@ -3309,7 +3334,28 @@ function buildTauriInvokeMockSource(profile) {
           expiredTimer: null,
           notificationSummary: { attempted: 0, succeeded: 0, failed: 0, lastError: null }
         }),
-        get_active_pomodoro: () => null,
+        get_active_pomodoro: () => clone(activePomodoro),
+        start_standalone_pomodoro: () => {
+          activePomodoro = {
+            id: "pomodoro-standalone",
+            scope: "standalone",
+            target: null,
+            timerSessionId: null,
+            phase: "work",
+            status: "running",
+            cycleCount: 0,
+            phaseStartedAt: new Date().toISOString(),
+            phaseDurationSeconds: 1500,
+            pausedAt: null,
+            pausedTotalSeconds: 0,
+            completedAt: null,
+            cancelledAt: null,
+            deletedAt: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
+          return clone(activePomodoro);
+        },
         sync_expired_pomodoro: () => ({
           expiredPomodoro: null,
           activePomodoro: null,

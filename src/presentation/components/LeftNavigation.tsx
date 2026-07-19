@@ -11,6 +11,7 @@ import {
   Plus,
   Settings,
   Star,
+  Timer,
   Trash2,
 } from "lucide-react";
 import type {
@@ -28,6 +29,7 @@ export type AppView =
   | { kind: "tag"; tagId: string }
   | { kind: "board" }
   | { kind: "calendar" }
+  | { kind: "pomodoro" }
   | { kind: "settings" };
 
 type LeftNavigationProps = {
@@ -306,6 +308,13 @@ export function LeftNavigation({
             isOpen={isOpen}
             isActive={activeView.kind === "calendar"}
             onClick={() => onSelectView({ kind: "calendar" })}
+          />
+          <NavButton
+            icon={<Timer aria-hidden="true" size={18} strokeWidth={1.8} />}
+            label="ポモドーロ"
+            isOpen={isOpen}
+            isActive={activeView.kind === "pomodoro"}
+            onClick={() => onSelectView({ kind: "pomodoro" })}
           />
         </div>
       </nav>

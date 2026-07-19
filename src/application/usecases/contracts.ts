@@ -156,10 +156,12 @@ export type TaskTimerSettingsDraft = {
 
 export type PomodoroPhase = "work" | "short_break" | "long_break";
 export type PomodoroStatus = "running" | "paused" | "completed" | "cancelled";
+export type PomodoroScope = "task_linked" | "standalone";
 
 export type ActivePomodoro = {
   id: string;
-  target: WorkTargetRef;
+  scope: PomodoroScope;
+  target: WorkTargetRef | null;
   timerSessionId: string | null;
   phase: PomodoroPhase;
   status: PomodoroStatus;
@@ -234,6 +236,7 @@ export type AppViewKind =
   | "tag"
   | "board"
   | "calendar"
+  | "pomodoro"
   | "settings";
 
 export type CalendarViewModePreference = "week" | "day" | "month";
@@ -385,7 +388,7 @@ export type TaskTimerGateway = {
     destination: WorkScheduleMoveDraft,
   ): Promise<void>;
   startTimer(target: WorkTargetRef): Promise<ActiveTimer>;
-  startPomodoro(target: WorkTargetRef): Promise<ActivePomodoro>;
+  startStandalonePomodoro(): Promise<ActivePomodoro>;
   pausePomodoro(): Promise<ActivePomodoro>;
   resumePomodoro(): Promise<ActivePomodoro>;
   completePomodoroWorkPhase(): Promise<ActivePomodoro>;

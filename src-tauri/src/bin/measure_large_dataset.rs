@@ -665,11 +665,17 @@ fn measure_active_pomodoro(
         WHERE pomodoro_sessions.status IN ('running', 'paused')
           AND pomodoro_sessions.deleted_at IS NULL
           AND (
+            pomodoro_sessions.scope = 'standalone'
+            OR
             (
+              pomodoro_sessions.scope = 'task_linked'
+              AND
               pomodoro_sessions.target_type = 'task'
               AND task_targets.id IS NOT NULL
             )
             OR (
+              pomodoro_sessions.scope = 'task_linked'
+              AND
               pomodoro_sessions.target_type = 'subtask'
               AND subtask_targets.id IS NOT NULL
               AND parent_tasks.id IS NOT NULL
