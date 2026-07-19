@@ -1,12 +1,15 @@
 import {
   closestCenter,
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import {
   arrayMove,
@@ -19,6 +22,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Check, GripVertical, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import type {
   BoardColumn,
   TaskRow,
@@ -76,6 +80,8 @@ export function KanbanBoard({
     string | null
   >(null);
   const [deleteDestinationId, setDeleteDestinationId] = useState("");
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -99,11 +105,33 @@ export function KanbanBoard({
   }, [columns, taskRows]);
   const pendingDeleteColumn =
     columns.find((column) => column.id === pendingDeleteColumnId) ?? null;
+  const activeTaskRow = activeTaskId
+    ? taskRows.find((row) => row.id === activeTaskId) ?? null
+    : null;
   const deletionDestinations = columns.filter(
     (column) => column.id !== pendingDeleteColumnId,
   );
 
+  function handleDragStart(event: DragStartEvent) {
+    setDragOverColumnId(null);
+    setActiveTaskId(
+      event.active.data.current?.type === "task"
+        ? (event.active.data.current.taskId as string)
+        : null,
+    );
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    setDragOverColumnId(
+      event.active.data.current?.type === "task"
+        ? ((event.over?.data.current?.columnId as string | undefined) ?? null)
+        : null,
+    );
+  }
+
   function handleDragEnd(event: DragEndEvent) {
+    setActiveTaskId(null);
+    setDragOverColumnId(null);
     const { active, over } = event;
     if (!over || active.id === over.id) {
       return;
@@ -234,6 +262,12 @@ export function KanbanBoard({
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragCancel={() => {
+          setActiveTaskId(null);
+          setDragOverColumnId(null);
+        }}
         onDragEnd={handleDragEnd}
       >
         <SortableContext
@@ -255,6 +289,7 @@ export function KanbanBoard({
                     rows={rowsByColumn.get(column.id) ?? []}
                     taskById={taskById}
                     selectedTaskId={selectedTaskId}
+                    isTaskDragOver={dragOverColumnId === column.id}
                     isMutating={isMutating}
                     canDelete={columns.length > 1}
                     pendingTaskActionIds={pendingTaskActionIds}
@@ -267,6 +302,17 @@ export function KanbanBoard({
               : null}
           </div>
         </SortableContext>
+        {createPortal(
+          <DragOverlay dropAnimation={null} zIndex={1000}>
+            {activeTaskRow ? (
+              <KanbanCardOverlay
+                row={activeTaskRow}
+                task={taskById.get(activeTaskRow.id) ?? null}
+              />
+            ) : null}
+          </DragOverlay>,
+          document.body,
+        )}
       </DndContext>
 
       {hasMoreTasks ? (
@@ -340,6 +386,7 @@ type SortableKanbanColumnProps = {
   rows: TaskRow[];
   taskById: ReadonlyMap<string, TaskWithSubtasks>;
   selectedTaskId: string | null;
+  isTaskDragOver: boolean;
   isMutating: boolean;
   canDelete: boolean;
   pendingTaskActionIds: ReadonlySet<string>;
@@ -354,6 +401,7 @@ function SortableKanbanColumn({
   rows,
   taskById,
   selectedTaskId,
+  isTaskDragOver,
   isMutating,
   canDelete,
   pendingTaskActionIds,
@@ -390,7 +438,10 @@ function SortableKanbanColumn({
     if (!normalizedTitle) {
       return;
     }
-    if (normalizedTitle === column.title || (await onRenameColumn(column.id, normalizedTitle))) {
+    if (
+      normalizedTitle === column.title ||
+      (await onRenameColumn(column.id, normalizedTitle))
+    ) {
       setTitle(normalizedTitle);
       setIsEditing(false);
     }
@@ -466,7 +517,9 @@ function SortableKanbanColumn({
 
       <div
         ref={setDropRef}
-        className={`kanban-column-scroll ${isOver ? "is-over" : ""}`}
+        className={`kanban-column-scroll ${
+          isOver || isTaskDragOver ? "is-over" : ""
+        }`}
       >
         <SortableContext
           items={rows.map((row) => taskDragId(row.id))}
@@ -541,7 +594,6 @@ function SortableKanbanCard({
   onToggleTaskCompletion,
 }: SortableKanbanCardProps) {
   const {
-    attributes,
     listeners,
     setNodeRef,
     transform,
@@ -564,28 +616,22 @@ function SortableKanbanCard({
       className={`kanban-card ${isSelected ? "is-selected" : ""} ${
         row.status === "done" ? "is-done" : ""
       } ${isDragging ? "is-dragging" : ""}`}
+      data-task-id={row.id}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
       }}
+      tabIndex={isMutating ? -1 : 0}
+      aria-roledescription="移動可能なタスク"
+      {...listeners}
     >
-      <button
-        className="kanban-card-drag-handle"
-        type="button"
-        aria-label={`${row.title}を移動`}
-        title="タスクを移動"
-        disabled={isMutating}
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical aria-hidden="true" size={15} />
-      </button>
       <button
         className={`task-check-button ${row.status === "done" ? "is-done" : ""}`}
         type="button"
         aria-label={row.status === "done" ? "未完了に戻す" : "タスクを完了"}
         title={row.status === "done" ? "未完了に戻す" : "完了"}
         disabled={isMutating || !task}
+        onKeyDown={(event) => event.stopPropagation()}
         onClick={() => {
           if (task) {
             void onToggleTaskCompletion(task);
@@ -598,40 +644,102 @@ function SortableKanbanCard({
         className="kanban-card-main"
         type="button"
         aria-label={`${row.title}の詳細を開く`}
+        onKeyDown={(event) => event.stopPropagation()}
         onClick={() => onSelectTask(row.id)}
       >
-        <span className="kanban-card-title">{row.title}</span>
-        <span className="kanban-card-meta">
-          {row.dueDate ? (
-            <span className="task-due-label">
-              期限 {formatDateLabel(row.dueDate)}
-              {row.dueTime ? ` ${row.dueTime}` : ""}
-            </span>
-          ) : null}
-          {row.isTimerActive ? <span>実行中</span> : null}
-        </span>
-        {memoPreview ? <span className="kanban-card-memo">{memoPreview}</span> : null}
-        {row.tags.length > 0 ? (
-          <span className="kanban-card-tags" aria-label="タグ">
-            {row.tags.map((tag) => (
-              <span className="task-tag-chip" key={tag.id}>
-                {tag.name}
-              </span>
-            ))}
-          </span>
-        ) : null}
-        {hasProgress ? (
-          <span className="task-progress">
-            <span className="task-progress-bar">
-              <span style={{ width: `${progressPercent}%` }} />
-            </span>
-            <span className="task-progress-label">
-              {row.completedSubtaskCount}/{row.subtaskTotalCount}
-            </span>
-          </span>
-        ) : null}
+        <KanbanCardDetails
+          row={row}
+          memoPreview={memoPreview}
+          hasProgress={hasProgress}
+          progressPercent={progressPercent}
+        />
       </button>
     </article>
+  );
+}
+
+type KanbanCardOverlayProps = {
+  row: TaskRow;
+  task: TaskWithSubtasks | null;
+};
+
+function KanbanCardOverlay({ row, task }: KanbanCardOverlayProps) {
+  const hasProgress = row.subtaskTotalCount > 0;
+  const progressPercent = hasProgress
+    ? Math.round((row.completedSubtaskCount / row.subtaskTotalCount) * 100)
+    : 0;
+
+  return (
+    <article
+      className={`kanban-card kanban-card-overlay ${
+        row.status === "done" ? "is-done" : ""
+      }`}
+      data-task-id={row.id}
+      aria-hidden="true"
+    >
+      <span
+        className={`task-check-button ${row.status === "done" ? "is-done" : ""}`}
+      >
+        {row.status === "done" ? <Check aria-hidden="true" size={15} /> : null}
+      </span>
+      <span className="kanban-card-main">
+        <KanbanCardDetails
+          row={row}
+          memoPreview={formatMemoPreview(task?.memo ?? "")}
+          hasProgress={hasProgress}
+          progressPercent={progressPercent}
+        />
+      </span>
+    </article>
+  );
+}
+
+type KanbanCardDetailsProps = {
+  row: TaskRow;
+  memoPreview: string;
+  hasProgress: boolean;
+  progressPercent: number;
+};
+
+function KanbanCardDetails({
+  row,
+  memoPreview,
+  hasProgress,
+  progressPercent,
+}: KanbanCardDetailsProps) {
+  return (
+    <>
+      <span className="kanban-card-title">{row.title}</span>
+      <span className="kanban-card-meta">
+        {row.dueDate ? (
+          <span className="task-due-label">
+            期限 {formatDateLabel(row.dueDate)}
+            {row.dueTime ? ` ${row.dueTime}` : ""}
+          </span>
+        ) : null}
+        {row.isTimerActive ? <span>実行中</span> : null}
+      </span>
+      {memoPreview ? <span className="kanban-card-memo">{memoPreview}</span> : null}
+      {row.tags.length > 0 ? (
+        <span className="kanban-card-tags" aria-label="タグ">
+          {row.tags.map((tag) => (
+            <span className="task-tag-chip" key={tag.id}>
+              {tag.name}
+            </span>
+          ))}
+        </span>
+      ) : null}
+      {hasProgress ? (
+        <span className="task-progress">
+          <span className="task-progress-bar">
+            <span style={{ width: `${progressPercent}%` }} />
+          </span>
+          <span className="task-progress-label">
+            {row.completedSubtaskCount}/{row.subtaskTotalCount}
+          </span>
+        </span>
+      ) : null}
+    </>
   );
 }
 

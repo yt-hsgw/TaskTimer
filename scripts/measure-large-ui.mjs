@@ -34,6 +34,7 @@ const thresholds = {
   today: 1000,
   favorites: 1000,
   kanban: 1500,
+  kanban_drag: 1500,
   calendar_week: 1500,
   calendar_day: 1500,
   calendar_month: 2000,
@@ -179,6 +180,15 @@ try {
         document.querySelectorAll(".kanban-card").length === ${initialTaskPageCount}`,
     }),
   );
+  const kanbanDragStartedAt = performance.now();
+  await verifyKanbanCardDrag(client, sessionId);
+  measurements.push(
+    createMeasurement(
+      "kanban_drag",
+      performance.now() - kanbanDragStartedAt,
+      thresholds.kanban_drag,
+    ),
+  );
   measurements.push(
     await measureView({
       client,
@@ -319,6 +329,146 @@ async function evaluate(client, sessionId, expression) {
     "Runtime.evaluate",
     { expression, awaitPromise: true },
     sessionId,
+  );
+}
+
+async function evaluateValue(client, sessionId, expression) {
+  const result = await client.send(
+    "Runtime.evaluate",
+    { expression, awaitPromise: true, returnByValue: true },
+    sessionId,
+  );
+  return result.result?.value;
+}
+
+async function verifyKanbanCardDrag(client, sessionId) {
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector(".kanban-card-main")?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(".task-detail-pane"))`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector(".kanban-card-main")?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector(".task-detail-pane")`,
+  );
+
+  const geometry = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const columns = [...document.querySelectorAll(".kanban-column")];
+      const source = columns[0]?.querySelector(".kanban-card");
+      const destination = columns[1]?.querySelector(".kanban-column-scroll");
+      if (!source || !destination || !source.dataset.taskId) {
+        return null;
+      }
+      const sourceRect = source.getBoundingClientRect();
+      const destinationRect = destination.getBoundingClientRect();
+      return {
+        taskId: source.dataset.taskId,
+        sourceX: sourceRect.left + sourceRect.width * 0.75,
+        sourceY: sourceRect.top + Math.min(sourceRect.height / 2, 36),
+        destinationX: destinationRect.left + destinationRect.width / 2,
+        destinationY: destinationRect.top + Math.min(destinationRect.height / 2, 72)
+      };
+    })()`,
+  );
+  if (!geometry) {
+    throw new Error("かんばんD&D検証に必要なカードまたは移動先がありません");
+  }
+
+  await client.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseMoved", x: geometry.sourceX, y: geometry.sourceY },
+    sessionId,
+  );
+  await client.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mousePressed",
+      x: geometry.sourceX,
+      y: geometry.sourceY,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  await client.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseMoved",
+      x: geometry.sourceX + 12,
+      y: geometry.sourceY + 8,
+      button: "left",
+      buttons: 1,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `(() => {
+      const overlay = document.querySelector(".kanban-card-overlay");
+      return Boolean(
+        overlay &&
+        overlay.dataset.taskId === ${JSON.stringify(geometry.taskId)} &&
+        overlay.parentElement?.parentElement === document.body &&
+        Number(getComputedStyle(overlay.parentElement).zIndex) >= 1000
+      );
+    })()`,
+    5000,
+  );
+  await client.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseMoved",
+      x: geometry.destinationX,
+      y: geometry.destinationY,
+      button: "left",
+      buttons: 1,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `document.querySelectorAll(".kanban-column")[1]
+      ?.querySelector(".kanban-column-scroll")
+      ?.classList.contains("is-over") === true`,
+    5000,
+  );
+  await client.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseReleased",
+      x: geometry.destinationX,
+      y: geometry.destinationY,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelectorAll(".kanban-column")[1]
+      ?.querySelector('[data-task-id=${JSON.stringify(geometry.taskId)}]') &&
+      !document.querySelector(".kanban-card-overlay") &&
+      !document.querySelector(".task-detail-pane") &&
+      !document.querySelector(".app-alert")`,
   );
 }
 
@@ -579,6 +729,14 @@ function buildTauriInvokeMockSource(profile) {
         list_task_rows: () => clone(taskRows),
         list_calendar_items: () => clone(calendarItems),
         list_week_calendar_items: () => clone(calendarItems),
+        move_task_to_board_column: () => {
+          const row = taskRows.find((candidate) => candidate.id === args.request?.taskId);
+          if (!row) {
+            throw new Error("移動対象のタスクが存在しません");
+          }
+          row.boardColumnId = args.request.boardColumnId;
+          return null;
+        },
         get_active_timer: () => null,
         get_active_pomodoro: () => null,
         sync_expired_pomodoro: () => ({
