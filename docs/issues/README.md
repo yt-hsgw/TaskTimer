@@ -73,6 +73,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [065 タスク表示色をリスト色から分離する](065-task-display-color.md) / GitHub #159
 - [066 タイムライン表示を実装する](066-timeline-view.md) / GitHub #160
 - [067 詳細画面と左ペインの管理操作を整理する](067-detail-navigation-cleanup.md) / GitHub #161
+- [068 左ペインのリスト管理操作を縦三点メニューへ集約する](068-list-actions-overflow-menu.md) / GitHub #163
 
 ## 運用
 

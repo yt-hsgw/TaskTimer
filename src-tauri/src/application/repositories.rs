@@ -422,6 +422,26 @@ pub struct TaskPageRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkItemSearchQuery {
+    pub query: String,
+    pub limit: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkItemSearchResultRecord {
+    pub target: WorkTargetRef,
+    pub task_id: String,
+    pub title: String,
+    pub parent_title: Option<String>,
+    pub list_id: String,
+    pub list_name: String,
+    pub status: WorkStatus,
+    pub due_date: Option<String>,
+    pub due_time: Option<String>,
+    pub tags: Vec<TaskTagRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NotificationJob {
     pub id: String,
     pub target: WorkTargetRef,
@@ -599,6 +619,14 @@ pub trait CalendarRepository {
         end_date: &str,
     ) -> RepositoryResult<Vec<WeekCalendarItem>>;
 
+    fn list_calendar_items_for_scope(
+        &self,
+        start_date: &str,
+        end_date: &str,
+        scope: &TaskPageScope,
+        today_date: &str,
+    ) -> RepositoryResult<Vec<WeekCalendarItem>>;
+
     fn list_week_calendar_items(
         &self,
         week_start_date: &str,
@@ -673,6 +701,13 @@ pub trait PomodoroRepository {
 
 pub trait TaskReadRepository {
     fn list_task_page(&self, query: TaskPageQuery) -> RepositoryResult<TaskPageRecord>;
+
+    fn get_task_with_subtasks(&self, task_id: &str) -> RepositoryResult<TaskWithSubtasksRecord>;
+
+    fn search_work_items(
+        &self,
+        query: WorkItemSearchQuery,
+    ) -> RepositoryResult<Vec<WorkItemSearchResultRecord>>;
 
     fn list_tasks_with_subtasks(&self, limit: i64)
         -> RepositoryResult<Vec<TaskWithSubtasksRecord>>;

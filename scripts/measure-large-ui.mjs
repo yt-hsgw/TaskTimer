@@ -221,6 +221,12 @@ try {
         )}`,
     }),
   );
+  await evaluate(client, sessionId, clickNavigation("タスク"));
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector('#task-panel-title')?.textContent === "タスク"`,
+  );
   measurements.push(
     await measureView({
       client,
@@ -236,14 +242,20 @@ try {
         )}`,
     }),
   );
+  await evaluate(client, sessionId, clickNavigation("タスク"));
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector('#task-panel-title')?.textContent === "タスク"`,
+  );
   measurements.push(
     await measureView({
       client,
       sessionId,
       name: "kanban",
       thresholdMs: thresholds.kanban,
-      action: clickNavigation("かんばん"),
-      ready: `document.querySelector('button.nav-item[aria-label="かんばん"][aria-current="page"]') &&
+      action: clickWorkspaceMode("かんばん"),
+      ready: `document.querySelector('.workspace-mode-switcher [role="tab"][aria-selected="true"]')?.textContent === "かんばん" &&
         document.querySelectorAll(".kanban-card").length === ${initialTaskPageCount}`,
     }),
   );
@@ -302,8 +314,8 @@ try {
       sessionId,
       name: "pomodoro",
       thresholdMs: thresholds.pomodoro,
-      action: clickNavigation("ポモドーロ"),
-      ready: `document.querySelector('button.nav-item[aria-label="ポモドーロ"][aria-current="page"]') &&
+      action: `document.querySelector('.top-bar-icon-button[aria-label="ポモドーロ"]')?.click()`,
+      ready: `document.querySelector('.top-bar-icon-button[aria-label="ポモドーロ"][aria-pressed="true"]') &&
         document.querySelector(".pomodoro-panel") &&
         document.querySelector(".pomodoro-focus-countdown")?.textContent === "25:00"`,
     }),
@@ -323,14 +335,20 @@ try {
   const runningPomodoroLayout = await inspectPomodoroLayout(client, sessionId);
   assertPomodoroControlLayout("作業中", runningPomodoroLayout);
   assertPomodoroLayoutStable(idlePomodoroLayout, runningPomodoroLayout);
+  await evaluate(client, sessionId, clickNavigation("タスク"));
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.workspace-mode-switcher [role="tab"]'))`,
+  );
   measurements.push(
     await measureView({
       client,
       sessionId,
       name: "calendar_week",
       thresholdMs: thresholds.calendar_week,
-      action: clickNavigation("カレンダー"),
-      ready: `document.querySelector('button.nav-item[aria-label="カレンダー"][aria-current="page"]') &&
+      action: clickWorkspaceMode("カレンダー"),
+      ready: `document.querySelector('.workspace-mode-switcher [role="tab"][aria-selected="true"]')?.textContent === "カレンダー" &&
         document.querySelector(".calendar-time-grid:not(.is-day-mode)") &&
         (() => {
           const visibleCount = document.querySelectorAll(".calendar-item").length;
@@ -639,6 +657,7 @@ try {
     ),
   );
   await evaluate(client, sessionId, clickNavigation("タスク"));
+  await evaluate(client, sessionId, clickWorkspaceMode("リスト"));
   await waitForPaintedExpression(
     client,
     sessionId,
@@ -3134,6 +3153,11 @@ function clickNavigation(label) {
   return `document.querySelector('button.nav-item[aria-label=${JSON.stringify(label)}]')?.click()`;
 }
 
+function clickWorkspaceMode(label) {
+  return `[...document.querySelectorAll('.workspace-mode-switcher [role="tab"]')]
+    .find((button) => button.textContent === ${JSON.stringify(label)})?.click()`;
+}
+
 function clickCalendarMode(label) {
   return `[...document.querySelectorAll(".calendar-view-switch button")]
     .find((button) => button.textContent === ${JSON.stringify(label)})?.click()`;
@@ -3346,8 +3370,9 @@ function buildTauriInvokeMockSource(profile) {
   window.__TAURI_INTERNALS__ = {
     invoke(command, args = {}) {
       window.__taskTimerInvokeLog.push(command);
-      const rangeStart = args.startDate ?? args.weekStartDate ?? today;
-      const rangeEnd = args.endDate ?? addDays(rangeStart, 6);
+      const rangeStart =
+        args.request?.startDate ?? args.startDate ?? args.weekStartDate ?? today;
+      const rangeEnd = args.request?.endDate ?? args.endDate ?? addDays(rangeStart, 6);
       const span = daySpan(rangeStart, rangeEnd);
       const overlapSchedules = new Map([
         [1, { id: "calendar-overlap-a", title: "重複予定 A", start: "18:00", end: "19:00" }],

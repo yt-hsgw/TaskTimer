@@ -14,14 +14,14 @@ use super::{
         SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord, TagRecord, TaskListRecord,
         TaskNavigationCountsRecord, TaskPageCursor, TaskPageRecord, TaskRecord, TaskRowRecord,
         TaskTagRecord, TaskTimerSettingsRecord, TaskWithSubtasksRecord, UiPreferencesRecord,
-        WeekCalendarItem,
+        WeekCalendarItem, WorkItemSearchResultRecord,
     },
     usecases::{
-        BoardColumnDraft, DataExportCreateDraft, PomodoroSettingsDraft, RecurrenceRuleDraft,
-        SqliteBackupCreateDraft, SqliteBackupRestoreDraft, TagDraft, TaskListDraft,
-        TaskPageCursorDraft, TaskPageDraft, TaskPageScopeDraft, TaskTimerSettingsDraft,
-        UiPreferencesDraft, WorkItemDraft, WorkItemUpdateDraft, WorkScheduleDraft,
-        WorkScheduleMoveDraft,
+        BoardColumnDraft, CalendarItemsDraft, DataExportCreateDraft, PomodoroSettingsDraft,
+        RecurrenceRuleDraft, SqliteBackupCreateDraft, SqliteBackupRestoreDraft, TagDraft,
+        TaskListDraft, TaskPageCursorDraft, TaskPageDraft, TaskPageScopeDraft,
+        TaskTimerSettingsDraft, UiPreferencesDraft, WorkItemDraft, WorkItemSearchDraft,
+        WorkItemUpdateDraft, WorkScheduleDraft, WorkScheduleMoveDraft,
     },
 };
 
@@ -563,6 +563,15 @@ pub enum TaskPageScopeRequestDto {
     Board,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListCalendarItemsRequestDto {
+    pub start_date: String,
+    pub end_date: String,
+    pub scope: TaskPageScopeRequestDto,
+    pub today_date: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskPageCursorDto {
@@ -579,6 +588,28 @@ pub struct ListTaskPageRequestDto {
     pub today_date: String,
     pub cursor: Option<TaskPageCursorDto>,
     pub limit: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchWorkItemsRequestDto {
+    pub query: String,
+    pub limit: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkItemSearchResultDto {
+    pub target: WorkTargetRefDto,
+    pub task_id: String,
+    pub title: String,
+    pub parent_title: Option<String>,
+    pub list_id: String,
+    pub list_name: String,
+    pub status: String,
+    pub due_date: Option<String>,
+    pub due_time: Option<String>,
+    pub tags: Vec<TaskTagDto>,
 }
 
 #[derive(Serialize)]
@@ -745,13 +776,7 @@ pub struct BoardColumnDto {
 
 impl From<ListTaskPageRequestDto> for TaskPageDraft {
     fn from(value: ListTaskPageRequestDto) -> Self {
-        let scope = match value.scope {
-            TaskPageScopeRequestDto::List { list_id } => TaskPageScopeDraft::List { list_id },
-            TaskPageScopeRequestDto::Today => TaskPageScopeDraft::Today,
-            TaskPageScopeRequestDto::Favorites => TaskPageScopeDraft::Favorites,
-            TaskPageScopeRequestDto::Tag { tag_id } => TaskPageScopeDraft::Tag { tag_id },
-            TaskPageScopeRequestDto::Board => TaskPageScopeDraft::Board,
-        };
+        let scope = value.scope.into();
         Self {
             scope,
             today_date: value.today_date,
@@ -761,6 +786,38 @@ impl From<ListTaskPageRequestDto> for TaskPageDraft {
                 created_at: cursor.created_at,
                 id: cursor.id,
             }),
+            limit: value.limit,
+        }
+    }
+}
+
+impl From<TaskPageScopeRequestDto> for TaskPageScopeDraft {
+    fn from(value: TaskPageScopeRequestDto) -> Self {
+        match value {
+            TaskPageScopeRequestDto::List { list_id } => Self::List { list_id },
+            TaskPageScopeRequestDto::Today => Self::Today,
+            TaskPageScopeRequestDto::Favorites => Self::Favorites,
+            TaskPageScopeRequestDto::Tag { tag_id } => Self::Tag { tag_id },
+            TaskPageScopeRequestDto::Board => Self::Board,
+        }
+    }
+}
+
+impl From<ListCalendarItemsRequestDto> for CalendarItemsDraft {
+    fn from(value: ListCalendarItemsRequestDto) -> Self {
+        Self {
+            start_date: value.start_date,
+            end_date: value.end_date,
+            scope: value.scope.into(),
+            today_date: value.today_date,
+        }
+    }
+}
+
+impl From<SearchWorkItemsRequestDto> for WorkItemSearchDraft {
+    fn from(value: SearchWorkItemsRequestDto) -> Self {
+        Self {
+            query: value.query,
             limit: value.limit,
         }
     }
@@ -1176,6 +1233,26 @@ impl From<TaskPageRecord> for TaskPageDto {
             total_count: value.total_count,
             next_cursor: value.next_cursor.map(Into::into),
             navigation_counts: value.navigation_counts.into(),
+        }
+    }
+}
+
+impl From<WorkItemSearchResultRecord> for WorkItemSearchResultDto {
+    fn from(value: WorkItemSearchResultRecord) -> Self {
+        Self {
+            target: WorkTargetRefDto {
+                r#type: value.target.target_type.as_str().to_string(),
+                id: value.target.id,
+            },
+            task_id: value.task_id,
+            title: value.title,
+            parent_title: value.parent_title,
+            list_id: value.list_id,
+            list_name: value.list_name,
+            status: value.status.as_str().to_string(),
+            due_date: value.due_date,
+            due_time: value.due_time,
+            tags: value.tags.into_iter().map(Into::into).collect(),
         }
     }
 }

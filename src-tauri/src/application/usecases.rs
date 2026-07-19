@@ -26,7 +26,7 @@ use super::{
     repositories::{
         ActivePomodoro, ActiveTimer, BoardColumnCreate, BoardColumnDelete, BoardColumnRecord,
         BoardColumnReorder, BoardColumnRepository, BoardColumnUpdate, BoardTaskMove,
-        DataExportCreate, DataExportRecord, DataExportRepository,
+        CalendarRepository, DataExportCreate, DataExportRecord, DataExportRepository,
         NativeNotificationOsRegistrationRepository, NativeNotificationRegistrationSummary,
         NextNotificationSchedule, NotificationCommandRepository, NotificationDeliveryAttemptRecord,
         NotificationDispatchSummary, NotificationHistoryRepository, NotificationOsRegistrationJob,
@@ -39,8 +39,8 @@ use super::{
         TaskPageQuery, TaskPageRecord, TaskPageScope, TaskReadRepository, TaskRecord,
         TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, TaskTimerSettingsRecord,
         TaskTimerSettingsUpdate, TimerRepository, UiPreferenceRepository, UiPreferencesRecord,
-        UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate, WorkScheduleMove, WorkScheduleUpdate,
-        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        UiPreferencesUpdate, WorkItemCreate, WorkItemSearchQuery, WorkItemSearchResultRecord,
+        WorkItemUpdate, WorkScheduleMove, WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
 
@@ -53,6 +53,8 @@ const OS_REGISTRATION_ID_MAX_CHARS: usize = 256;
 const RECURRENCE_INTERVAL_MAX: i64 = 365;
 const LOCAL_PATH_MAX_CHARS: usize = 4096;
 const TASK_PAGE_MAX_LIMIT: i64 = 200;
+const WORK_ITEM_SEARCH_MAX_CHARS: usize = 120;
+const WORK_ITEM_SEARCH_MAX_LIMIT: i64 = 50;
 
 const UI_VIEW_LIST: &str = "list";
 const UI_VIEW_TODAY: &str = "today";
@@ -125,6 +127,20 @@ pub struct TaskPageDraft {
     pub today_date: String,
     pub cursor: Option<TaskPageCursorDraft>,
     pub limit: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkItemSearchDraft {
+    pub query: String,
+    pub limit: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CalendarItemsDraft {
+    pub start_date: String,
+    pub end_date: String,
+    pub scope: TaskPageScopeDraft,
+    pub today_date: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,17 +236,7 @@ pub fn list_task_page(
 
     let today_date = validate_optional_date(Some(&draft.today_date), "今日の日付")?
         .ok_or_else(|| "今日の日付は必須です".to_string())?;
-    let scope = match draft.scope {
-        TaskPageScopeDraft::List { list_id } => {
-            TaskPageScope::List(validate_identifier(&list_id, "リストID")?)
-        }
-        TaskPageScopeDraft::Today => TaskPageScope::Today,
-        TaskPageScopeDraft::Favorites => TaskPageScope::Favorites,
-        TaskPageScopeDraft::Tag { tag_id } => {
-            TaskPageScope::Tag(validate_identifier(&tag_id, "タグID")?)
-        }
-        TaskPageScopeDraft::Board => TaskPageScope::Board,
-    };
+    let scope = validate_task_page_scope(draft.scope)?;
     let cursor = draft.cursor.map(validate_task_page_cursor).transpose()?;
 
     repository.list_task_page(TaskPageQuery {
@@ -239,6 +245,53 @@ pub fn list_task_page(
         cursor,
         limit: draft.limit,
     })
+}
+
+pub fn get_task_detail(
+    repository: &impl TaskReadRepository,
+    task_id: String,
+) -> RepositoryResult<super::repositories::TaskWithSubtasksRecord> {
+    repository.get_task_with_subtasks(&validate_identifier(&task_id, "タスクID")?)
+}
+
+pub fn search_work_items(
+    repository: &impl TaskReadRepository,
+    draft: WorkItemSearchDraft,
+) -> RepositoryResult<Vec<WorkItemSearchResultRecord>> {
+    let query = draft.query.trim();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    if query.chars().count() > WORK_ITEM_SEARCH_MAX_CHARS {
+        return Err(format!(
+            "検索語は{WORK_ITEM_SEARCH_MAX_CHARS}文字以内で入力してください"
+        ));
+    }
+    if !(1..=WORK_ITEM_SEARCH_MAX_LIMIT).contains(&draft.limit) {
+        return Err(format!(
+            "検索件数は1以上{WORK_ITEM_SEARCH_MAX_LIMIT}以下で指定してください"
+        ));
+    }
+
+    repository.search_work_items(WorkItemSearchQuery {
+        query: query.to_string(),
+        limit: draft.limit,
+    })
+}
+
+pub fn list_calendar_items(
+    repository: &impl CalendarRepository,
+    draft: CalendarItemsDraft,
+) -> RepositoryResult<Vec<super::repositories::WeekCalendarItem>> {
+    let today_date = validate_optional_date(Some(&draft.today_date), "今日の日付")?
+        .ok_or_else(|| "今日の日付は必須です".to_string())?;
+    let scope = validate_task_page_scope(draft.scope)?;
+    repository.list_calendar_items_for_scope(
+        draft.start_date.trim(),
+        draft.end_date.trim(),
+        &scope,
+        &today_date,
+    )
 }
 
 pub fn create_scheduled_task(
@@ -1396,6 +1449,21 @@ fn validate_task_page_cursor(draft: TaskPageCursorDraft) -> RepositoryResult<Tas
         created_at: created_at.to_string(),
         id: validate_identifier(&draft.id, "カーソルのタスクID")?,
     })
+}
+
+fn validate_task_page_scope(draft: TaskPageScopeDraft) -> RepositoryResult<TaskPageScope> {
+    match draft {
+        TaskPageScopeDraft::List { list_id } => Ok(TaskPageScope::List(validate_identifier(
+            &list_id,
+            "リストID",
+        )?)),
+        TaskPageScopeDraft::Today => Ok(TaskPageScope::Today),
+        TaskPageScopeDraft::Favorites => Ok(TaskPageScope::Favorites),
+        TaskPageScopeDraft::Tag { tag_id } => {
+            Ok(TaskPageScope::Tag(validate_identifier(&tag_id, "タグID")?))
+        }
+        TaskPageScopeDraft::Board => Ok(TaskPageScope::Board),
+    }
 }
 
 fn validate_work_target_ref(target: WorkTargetRef) -> RepositoryResult<WorkTargetRef> {

@@ -33,11 +33,12 @@ use crate::{
         SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord,
         TagRepository, TagUpdate, TaskCountdownExpiry, TaskListCommandRepository, TaskListCreate,
         TaskListRecord, TaskListUpdate, TaskNavigationCountsRecord, TaskPageCursor, TaskPageQuery,
-        TaskPageRecord, TaskReadRepository, TaskRecord, TaskRowRecord, TaskStatusUpdate,
-        TaskTagRecord, TaskTimerCommandRepository, TaskTimerSettingsRecord,
+        TaskPageRecord, TaskPageScope, TaskReadRepository, TaskRecord, TaskRowRecord,
+        TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, TaskTimerSettingsRecord,
         TaskTimerSettingsUpdate, TaskWithSubtasksRecord, TimerRepository, UiPreferenceRepository,
-        UiPreferencesRecord, UiPreferencesUpdate, WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
-        WorkScheduleMove, WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        UiPreferencesRecord, UiPreferencesUpdate, WeekCalendarItem, WorkItemCreate,
+        WorkItemSearchQuery, WorkItemSearchResultRecord, WorkItemUpdate, WorkScheduleMove,
+        WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
     domain::{
         notification::{
@@ -465,8 +466,19 @@ impl CalendarRepository for SqliteDatabase {
         start_date: &str,
         end_date: &str,
     ) -> RepositoryResult<Vec<WeekCalendarItem>> {
+        self.list_calendar_items_for_scope(start_date, end_date, &TaskPageScope::Board, start_date)
+    }
+
+    fn list_calendar_items_for_scope(
+        &self,
+        start_date: &str,
+        end_date: &str,
+        scope: &TaskPageScope,
+        today_date: &str,
+    ) -> RepositoryResult<Vec<WeekCalendarItem>> {
         let start = parse_date(start_date, "開始日")?;
         let end = parse_date(end_date, "終了日")?;
+        parse_date(today_date, "今日の日付")?;
         if end < start {
             return Err("カレンダー終了日は開始日以降にしてください".to_string());
         }
@@ -479,9 +491,30 @@ impl CalendarRepository for SqliteDatabase {
 
         self.with_connection(|connection| {
             let mut items = Vec::new();
-            collect_task_calendar_items(connection, &start_text, &end_text, &mut items)?;
-            collect_subtask_calendar_items(connection, &start_text, &end_text, &mut items)?;
-            collect_active_timer_calendar_item(connection, &start_text, &end_text, &mut items)?;
+            collect_task_calendar_items(
+                connection,
+                &start_text,
+                &end_text,
+                scope,
+                today_date,
+                &mut items,
+            )?;
+            collect_subtask_calendar_items(
+                connection,
+                &start_text,
+                &end_text,
+                scope,
+                today_date,
+                &mut items,
+            )?;
+            collect_active_timer_calendar_item(
+                connection,
+                &start_text,
+                &end_text,
+                scope,
+                today_date,
+                &mut items,
+            )?;
             items.sort_by(|a, b| {
                 a.date
                     .cmp(&b.date)
@@ -1182,6 +1215,27 @@ impl TaskReadRepository for SqliteDatabase {
         }
 
         self.with_connection(|connection| select_task_page(connection, &query))
+    }
+
+    fn get_task_with_subtasks(&self, task_id: &str) -> RepositoryResult<TaskWithSubtasksRecord> {
+        self.with_connection(|connection| {
+            let task = select_existing_task_by_id(connection, task_id)?;
+            if task.status == WorkStatus::Archived {
+                return Err("アーカイブ済みタスクは詳細表示できません".to_string());
+            }
+            let subtasks = select_subtasks_for_task_ids(connection, &[task_id.to_string()])?;
+            build_task_tree(vec![task], subtasks)
+                .into_iter()
+                .next()
+                .ok_or_else(|| "タスク詳細を取得できません".to_string())
+        })
+    }
+
+    fn search_work_items(
+        &self,
+        query: WorkItemSearchQuery,
+    ) -> RepositoryResult<Vec<WorkItemSearchResultRecord>> {
+        self.with_connection(|connection| select_work_item_search_results(connection, &query))
     }
 
     fn list_tasks_with_subtasks(
@@ -4456,6 +4510,138 @@ fn select_task_page(
         next_cursor,
         navigation_counts: select_task_navigation_counts(connection, &query.today_date)?,
     })
+}
+
+fn select_work_item_search_results(
+    connection: &Connection,
+    query: &WorkItemSearchQuery,
+) -> RepositoryResult<Vec<WorkItemSearchResultRecord>> {
+    let escaped_query = escape_like_pattern(&query.query.to_lowercase());
+    let pattern = format!("%{escaped_query}%");
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT matches.target_type,
+                   matches.target_id,
+                   matches.task_id,
+                   matches.title,
+                   matches.parent_title,
+                   matches.list_id,
+                   matches.list_name,
+                   matches.status,
+                   matches.due_date,
+                   matches.due_time
+            FROM (
+              SELECT 'task' AS target_type,
+                     tasks.id AS target_id,
+                     tasks.id AS task_id,
+                     tasks.title AS title,
+                     NULL AS parent_title,
+                     tasks.list_id AS list_id,
+                     task_lists.name AS list_name,
+                     tasks.status AS status,
+                     tasks.due_date AS due_date,
+                     tasks.due_time AS due_time,
+                     tasks.updated_at AS updated_at,
+                     0 AS result_order
+              FROM tasks
+              INNER JOIN task_lists
+                ON task_lists.id = tasks.list_id
+               AND task_lists.deleted_at IS NULL
+              WHERE tasks.deleted_at IS NULL
+                AND tasks.status <> 'archived'
+                AND (
+                  LOWER(tasks.title) LIKE ?1 ESCAPE '\\'
+                  OR LOWER(tasks.memo) LIKE ?1 ESCAPE '\\'
+                  OR EXISTS (
+                    SELECT 1
+                    FROM task_tags
+                    INNER JOIN tags
+                      ON tags.id = task_tags.tag_id
+                     AND tags.deleted_at IS NULL
+                    WHERE task_tags.task_id = tasks.id
+                      AND task_tags.deleted_at IS NULL
+                      AND LOWER(tags.name) LIKE ?1 ESCAPE '\\'
+                  )
+                )
+              UNION ALL
+              SELECT 'subtask' AS target_type,
+                     subtasks.id AS target_id,
+                     tasks.id AS task_id,
+                     subtasks.title AS title,
+                     tasks.title AS parent_title,
+                     tasks.list_id AS list_id,
+                     task_lists.name AS list_name,
+                     subtasks.status AS status,
+                     subtasks.due_date AS due_date,
+                     subtasks.due_time AS due_time,
+                     subtasks.updated_at AS updated_at,
+                     1 AS result_order
+              FROM subtasks
+              INNER JOIN tasks
+                ON tasks.id = subtasks.task_id
+               AND tasks.deleted_at IS NULL
+               AND tasks.status <> 'archived'
+              INNER JOIN task_lists
+                ON task_lists.id = tasks.list_id
+               AND task_lists.deleted_at IS NULL
+              WHERE subtasks.deleted_at IS NULL
+                AND subtasks.status <> 'archived'
+                AND (
+                  LOWER(subtasks.title) LIKE ?1 ESCAPE '\\'
+                  OR LOWER(subtasks.memo) LIKE ?1 ESCAPE '\\'
+                )
+            ) AS matches
+            ORDER BY matches.result_order ASC,
+                     matches.updated_at DESC,
+                     matches.target_id ASC
+            LIMIT ?2
+            ",
+        )
+        .map_err(|error| format!("ローカル検索クエリを準備できません: {error}"))?;
+
+    let rows = statement
+        .query_map(params![pattern, query.limit], |row| {
+            let target_type_text: String = row.get(0)?;
+            let target_type = WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?;
+            Ok(WorkItemSearchResultRecord {
+                target: target_ref(target_type, row.get(1)?),
+                task_id: row.get(2)?,
+                title: row.get(3)?,
+                parent_title: row.get(4)?,
+                list_id: row.get(5)?,
+                list_name: row.get(6)?,
+                status: WorkStatus::from_db(&row.get::<_, String>(7)?).map_err(db_value_error)?,
+                due_date: row.get(8)?,
+                due_time: row.get(9)?,
+                tags: Vec::new(),
+            })
+        })
+        .map_err(|error| format!("ローカル検索を実行できません: {error}"))?;
+    let mut results = rows
+        .map(|row| row.map_err(|error| format!("ローカル検索結果を読めません: {error}")))
+        .collect::<RepositoryResult<Vec<_>>>()?;
+    let tags_by_task_id = select_task_tags_by_task_ids(
+        connection,
+        results
+            .iter()
+            .map(|result| result.task_id.clone())
+            .collect(),
+    )?;
+    for result in &mut results {
+        result.tags = tags_by_task_id
+            .get(&result.task_id)
+            .cloned()
+            .unwrap_or_default();
+    }
+    Ok(results)
+}
+
+fn escape_like_pattern(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 fn select_task_page_tasks(
@@ -9422,6 +9608,8 @@ fn collect_task_calendar_items(
     connection: &Connection,
     start_date: &str,
     end_date: &str,
+    scope: &TaskPageScope,
+    today_date: &str,
     items: &mut Vec<WeekCalendarItem>,
 ) -> RepositoryResult<()> {
     let mut statement = connection
@@ -9446,6 +9634,31 @@ fn collect_task_calendar_items(
             WHERE tasks.deleted_at IS NULL
               AND tasks.status <> 'archived'
               AND (
+                (?3 = 'list' AND tasks.list_id = ?4)
+                OR (?3 = 'today' AND (
+                  tasks.due_date = ?6
+                  OR EXISTS (
+                    SELECT 1
+                    FROM subtasks
+                    WHERE subtasks.task_id = tasks.id
+                      AND subtasks.deleted_at IS NULL
+                      AND subtasks.due_date = ?6
+                  )
+                ))
+                OR (?3 = 'favorites' AND tasks.is_favorite = 1)
+                OR (?3 = 'tag' AND EXISTS (
+                  SELECT 1
+                  FROM task_tags
+                  INNER JOIN tags
+                    ON tags.id = task_tags.tag_id
+                   AND tags.deleted_at IS NULL
+                  WHERE task_tags.task_id = tasks.id
+                    AND task_tags.tag_id = ?5
+                    AND task_tags.deleted_at IS NULL
+                ))
+                OR ?3 = 'board'
+              )
+              AND (
                 tasks.planned_start_date BETWEEN ?1 AND ?2
                 OR tasks.due_date BETWEEN ?1 AND ?2
                 OR (
@@ -9458,24 +9671,35 @@ fn collect_task_calendar_items(
         .map_err(|error| format!("タスクカレンダークエリを準備できません: {error}"))?;
 
     let rows = statement
-        .query_map(params![start_date, end_date], |row| {
-            Ok(CalendarSourceRow {
-                target_type: WorkTargetType::Task,
-                id: row.get(0)?,
-                title: row.get(1)?,
-                planned_start_date: row.get(2)?,
-                due_date: row.get(3)?,
-                due_time: row.get(4)?,
-                scheduled_start_date: row.get(5)?,
-                scheduled_start_time: row.get(6)?,
-                scheduled_end_date: row.get(7)?,
-                scheduled_end_time: row.get(8)?,
-                scheduled_is_all_day: row.get::<_, i64>(9)? != 0,
-                status: WorkStatus::from_db(&row.get::<_, String>(10)?).map_err(db_value_error)?,
-                color_token: row.get(11)?,
-                parent_title: None,
-            })
-        })
+        .query_map(
+            params![
+                start_date,
+                end_date,
+                scope.as_str(),
+                scope.list_id(),
+                scope.tag_id(),
+                today_date,
+            ],
+            |row| {
+                Ok(CalendarSourceRow {
+                    target_type: WorkTargetType::Task,
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    planned_start_date: row.get(2)?,
+                    due_date: row.get(3)?,
+                    due_time: row.get(4)?,
+                    scheduled_start_date: row.get(5)?,
+                    scheduled_start_time: row.get(6)?,
+                    scheduled_end_date: row.get(7)?,
+                    scheduled_end_time: row.get(8)?,
+                    scheduled_is_all_day: row.get::<_, i64>(9)? != 0,
+                    status: WorkStatus::from_db(&row.get::<_, String>(10)?)
+                        .map_err(db_value_error)?,
+                    color_token: row.get(11)?,
+                    parent_title: None,
+                })
+            },
+        )
         .map_err(|error| format!("タスクカレンダーを取得できません: {error}"))?;
 
     for row in rows {
@@ -9491,6 +9715,8 @@ fn collect_subtask_calendar_items(
     connection: &Connection,
     start_date: &str,
     end_date: &str,
+    scope: &TaskPageScope,
+    today_date: &str,
     items: &mut Vec<WeekCalendarItem>,
 ) -> RepositoryResult<()> {
     let mut statement = connection
@@ -9520,6 +9746,31 @@ fn collect_subtask_calendar_items(
             WHERE subtasks.deleted_at IS NULL
               AND subtasks.status <> 'archived'
               AND (
+                (?3 = 'list' AND tasks.list_id = ?4)
+                OR (?3 = 'today' AND (
+                  tasks.due_date = ?6
+                  OR EXISTS (
+                    SELECT 1
+                    FROM subtasks AS scope_subtasks
+                    WHERE scope_subtasks.task_id = tasks.id
+                      AND scope_subtasks.deleted_at IS NULL
+                      AND scope_subtasks.due_date = ?6
+                  )
+                ))
+                OR (?3 = 'favorites' AND tasks.is_favorite = 1)
+                OR (?3 = 'tag' AND EXISTS (
+                  SELECT 1
+                  FROM task_tags
+                  INNER JOIN tags
+                    ON tags.id = task_tags.tag_id
+                   AND tags.deleted_at IS NULL
+                  WHERE task_tags.task_id = tasks.id
+                    AND task_tags.tag_id = ?5
+                    AND task_tags.deleted_at IS NULL
+                ))
+                OR ?3 = 'board'
+              )
+              AND (
                 subtasks.planned_start_date BETWEEN ?1 AND ?2
                 OR subtasks.due_date BETWEEN ?1 AND ?2
                 OR (
@@ -9532,24 +9783,35 @@ fn collect_subtask_calendar_items(
         .map_err(|error| format!("サブタスクカレンダークエリを準備できません: {error}"))?;
 
     let rows = statement
-        .query_map(params![start_date, end_date], |row| {
-            Ok(CalendarSourceRow {
-                target_type: WorkTargetType::Subtask,
-                id: row.get(0)?,
-                title: row.get(1)?,
-                planned_start_date: row.get(2)?,
-                due_date: row.get(3)?,
-                due_time: row.get(4)?,
-                scheduled_start_date: row.get(5)?,
-                scheduled_start_time: row.get(6)?,
-                scheduled_end_date: row.get(7)?,
-                scheduled_end_time: row.get(8)?,
-                scheduled_is_all_day: row.get::<_, i64>(9)? != 0,
-                status: WorkStatus::from_db(&row.get::<_, String>(10)?).map_err(db_value_error)?,
-                parent_title: row.get(11)?,
-                color_token: row.get(12)?,
-            })
-        })
+        .query_map(
+            params![
+                start_date,
+                end_date,
+                scope.as_str(),
+                scope.list_id(),
+                scope.tag_id(),
+                today_date,
+            ],
+            |row| {
+                Ok(CalendarSourceRow {
+                    target_type: WorkTargetType::Subtask,
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    planned_start_date: row.get(2)?,
+                    due_date: row.get(3)?,
+                    due_time: row.get(4)?,
+                    scheduled_start_date: row.get(5)?,
+                    scheduled_start_time: row.get(6)?,
+                    scheduled_end_date: row.get(7)?,
+                    scheduled_end_time: row.get(8)?,
+                    scheduled_is_all_day: row.get::<_, i64>(9)? != 0,
+                    status: WorkStatus::from_db(&row.get::<_, String>(10)?)
+                        .map_err(db_value_error)?,
+                    parent_title: row.get(11)?,
+                    color_token: row.get(12)?,
+                })
+            },
+        )
         .map_err(|error| format!("サブタスクカレンダーを取得できません: {error}"))?;
 
     for row in rows {
@@ -9565,6 +9827,8 @@ fn collect_active_timer_calendar_item(
     connection: &Connection,
     start_date: &str,
     end_date: &str,
+    scope: &TaskPageScope,
+    today_date: &str,
     items: &mut Vec<WeekCalendarItem>,
 ) -> RepositoryResult<()> {
     let active = connection
@@ -9576,7 +9840,7 @@ fn collect_active_timer_calendar_item(
                    COALESCE(task_targets.title, subtask_targets.title) AS title,
                    COALESCE(task_targets.status, subtask_targets.status) AS status,
                    parent_tasks.title AS parent_title,
-                   COALESCE(task_target_lists.color_token, parent_task_lists.color_token, ?3)
+                   COALESCE(task_target_lists.color_token, parent_task_lists.color_token, ?7)
                      AS color_token
             FROM timer_sessions
             LEFT JOIN tasks AS task_targets
@@ -9613,9 +9877,42 @@ fn collect_active_timer_calendar_item(
                 )
               )
               AND substr(timer_sessions.started_at, 1, 10) BETWEEN ?1 AND ?2
+              AND (
+                (?3 = 'list' AND COALESCE(task_targets.list_id, parent_tasks.list_id) = ?4)
+                OR (?3 = 'today' AND (
+                  COALESCE(task_targets.due_date, parent_tasks.due_date) = ?6
+                  OR EXISTS (
+                    SELECT 1
+                    FROM subtasks AS scope_subtasks
+                    WHERE scope_subtasks.task_id = COALESCE(task_targets.id, parent_tasks.id)
+                      AND scope_subtasks.deleted_at IS NULL
+                      AND scope_subtasks.due_date = ?6
+                  )
+                ))
+                OR (?3 = 'favorites' AND COALESCE(task_targets.is_favorite, parent_tasks.is_favorite) = 1)
+                OR (?3 = 'tag' AND EXISTS (
+                  SELECT 1
+                  FROM task_tags
+                  INNER JOIN tags
+                    ON tags.id = task_tags.tag_id
+                   AND tags.deleted_at IS NULL
+                  WHERE task_tags.task_id = COALESCE(task_targets.id, parent_tasks.id)
+                    AND task_tags.tag_id = ?5
+                    AND task_tags.deleted_at IS NULL
+                ))
+                OR ?3 = 'board'
+              )
             LIMIT 1
             ",
-            params![start_date, end_date, DEFAULT_TASK_LIST_COLOR_TOKEN],
+            params![
+                start_date,
+                end_date,
+                scope.as_str(),
+                scope.list_id(),
+                scope.tag_id(),
+                today_date,
+                DEFAULT_TASK_LIST_COLOR_TOKEN,
+            ],
             |row| {
                 let target_type_text: String = row.get(0)?;
                 let target_type =
@@ -15310,5 +15607,211 @@ mod tests {
         assert!(tasks_csv.contains("2026-07-20,09:00,2026-07-20,10:30,false"));
 
         fs::remove_dir_all(export_root).expect("cleanup export");
+    }
+
+    #[test]
+    fn local_search_finds_titles_memos_tags_and_subtasks_without_wildcard_expansion() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-20T00:00:00Z",
+        };
+        let task = usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "設計レビュー".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-21".to_string()),
+                due_time: Some("10:00".to_string()),
+                memo: Some("進捗 50%_確認".to_string()),
+            },
+        )
+        .expect("create searchable task");
+        let tag = usecases::create_tag(
+            &database,
+            &clock,
+            usecases::TagDraft {
+                name: "重要案件".to_string(),
+            },
+        )
+        .expect("create tag");
+        usecases::attach_tag_to_task(&database, &clock, task.id.clone(), tag.id)
+            .expect("attach tag");
+        let subtask = usecases::create_subtask(
+            &database,
+            &clock,
+            task.id.clone(),
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "検索対象サブ".to_string(),
+                planned_start_date: None,
+                due_date: None,
+                due_time: None,
+                memo: Some("子のメモ".to_string()),
+            },
+        )
+        .expect("create subtask");
+        let archived = usecases::create_task(&database, &clock, draft("検索対象アーカイブ"))
+            .expect("create archived task");
+        usecases::archive_task(&database, &clock, archived.id).expect("archive task");
+
+        let title_results = usecases::search_work_items(
+            &database,
+            usecases::WorkItemSearchDraft {
+                query: "設計レビュー".to_string(),
+                limit: 50,
+            },
+        )
+        .expect("search title");
+        assert_eq!(title_results.len(), 1);
+        assert_eq!(title_results[0].task_id, task.id);
+        assert_eq!(title_results[0].tags[0].name, "重要案件");
+
+        let tag_results = usecases::search_work_items(
+            &database,
+            usecases::WorkItemSearchDraft {
+                query: "重要案件".to_string(),
+                limit: 50,
+            },
+        )
+        .expect("search tag");
+        assert_eq!(tag_results.len(), 1);
+        assert_eq!(tag_results[0].target.target_type, WorkTargetType::Task);
+
+        let subtask_results = usecases::search_work_items(
+            &database,
+            usecases::WorkItemSearchDraft {
+                query: "検索対象".to_string(),
+                limit: 50,
+            },
+        )
+        .expect("search subtask");
+        assert_eq!(subtask_results.len(), 1);
+        assert_eq!(subtask_results[0].target.id, subtask.id);
+        assert_eq!(
+            subtask_results[0].parent_title.as_deref(),
+            Some("設計レビュー")
+        );
+
+        for literal in ["%", "_"] {
+            let results = usecases::search_work_items(
+                &database,
+                usecases::WorkItemSearchDraft {
+                    query: literal.to_string(),
+                    limit: 50,
+                },
+            )
+            .expect("search literal wildcard");
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].task_id, task.id);
+        }
+
+        let detail = usecases::get_task_detail(&database, task.id).expect("task detail");
+        assert_eq!(detail.subtasks.len(), 1);
+
+        let blank = usecases::search_work_items(
+            &database,
+            usecases::WorkItemSearchDraft {
+                query: "   ".to_string(),
+                limit: 50,
+            },
+        )
+        .expect("blank search");
+        assert!(blank.is_empty());
+        let too_long = usecases::search_work_items(
+            &database,
+            usecases::WorkItemSearchDraft {
+                query: "a".repeat(121),
+                limit: 50,
+            },
+        );
+        assert!(too_long.expect_err("long query").contains("120文字"));
+    }
+
+    #[test]
+    fn scoped_calendar_filters_by_list_today_and_favorite() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-20T00:00:00Z",
+        };
+        let custom_list = usecases::create_task_list(
+            &database,
+            &clock,
+            usecases::TaskListDraft {
+                name: "仕事".to_string(),
+                color_token: Some("blue".to_string()),
+            },
+        )
+        .expect("create list");
+        let custom_task = usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: Some(custom_list.id.clone()),
+                title: "仕事の期限".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-20".to_string()),
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create custom task");
+        let favorite_task = usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "お気に入り期限".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-21".to_string()),
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create favorite task");
+        usecases::toggle_task_favorite(&database, &clock, favorite_task.id.clone(), true)
+            .expect("favorite task");
+
+        let list_items = usecases::list_calendar_items(
+            &database,
+            usecases::CalendarItemsDraft {
+                start_date: "2026-07-20".to_string(),
+                end_date: "2026-07-21".to_string(),
+                scope: usecases::TaskPageScopeDraft::List {
+                    list_id: custom_list.id,
+                },
+                today_date: "2026-07-20".to_string(),
+            },
+        )
+        .expect("list calendar");
+        assert_eq!(list_items.len(), 1);
+        assert_eq!(list_items[0].target.id, custom_task.id);
+
+        let today_items = usecases::list_calendar_items(
+            &database,
+            usecases::CalendarItemsDraft {
+                start_date: "2026-07-20".to_string(),
+                end_date: "2026-07-21".to_string(),
+                scope: usecases::TaskPageScopeDraft::Today,
+                today_date: "2026-07-20".to_string(),
+            },
+        )
+        .expect("today calendar");
+        assert_eq!(today_items.len(), 1);
+        assert_eq!(today_items[0].target.id, custom_task.id);
+
+        let favorite_items = usecases::list_calendar_items(
+            &database,
+            usecases::CalendarItemsDraft {
+                start_date: "2026-07-20".to_string(),
+                end_date: "2026-07-21".to_string(),
+                scope: usecases::TaskPageScopeDraft::Favorites,
+                today_date: "2026-07-20".to_string(),
+            },
+        )
+        .expect("favorite calendar");
+        assert_eq!(favorite_items.len(), 1);
+        assert_eq!(favorite_items[0].target.id, favorite_task.id);
     }
 }
