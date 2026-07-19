@@ -40,6 +40,8 @@ const thresholds = {
   completion_refresh: 1200,
   task_detail_save: 1200,
   calendar_week: 1500,
+  calendar_overflow_popup: 500,
+  calendar_overlap_layout: 500,
   calendar_drag_create: 1500,
   calendar_move: 1500,
   calendar_resize: 1500,
@@ -239,6 +241,46 @@ try {
         })()`,
     }),
   );
+  const calendarOverflowStartedAt = performance.now();
+  const calendarOverflowResult = await verifyCalendarOverflowPopup(
+    client,
+    sessionId,
+    ".calendar-all-day-cell .calendar-more",
+    false,
+  );
+  if (calendarOverflowResult.commands.length > 0) {
+    throw new Error(
+      `カレンダー予定一覧の操作中にcommandが呼ばれました: ${JSON.stringify(
+        calendarOverflowResult.commands,
+      )}`,
+    );
+  }
+  measurements.push(
+    createMeasurement(
+      "calendar_overflow_popup",
+      performance.now() - calendarOverflowStartedAt,
+      thresholds.calendar_overflow_popup,
+    ),
+  );
+  const calendarOverlapLayoutStartedAt = performance.now();
+  const calendarOverlapLayoutResult = await verifyCalendarOverlapLayout(
+    client,
+    sessionId,
+  );
+  if (calendarOverlapLayoutResult.commands.length > 0) {
+    throw new Error(
+      `カレンダー重複レイアウト確認中にcommandが呼ばれました: ${JSON.stringify(
+        calendarOverlapLayoutResult.commands,
+      )}`,
+    );
+  }
+  measurements.push(
+    createMeasurement(
+      "calendar_overlap_layout",
+      performance.now() - calendarOverlapLayoutStartedAt,
+      thresholds.calendar_overlap_layout,
+    ),
+  );
   const calendarDragCreateStartedAt = performance.now();
   const calendarDragCreateResult = await verifyCalendarDragCreate(
     client,
@@ -327,6 +369,17 @@ try {
         })()`,
     }),
   );
+  const calendarDayOverlapLayoutResult = await verifyCalendarOverlapLayout(
+    client,
+    sessionId,
+  );
+  if (calendarDayOverlapLayoutResult.commands.length > 0) {
+    throw new Error(
+      `日カレンダー重複レイアウト確認中にcommandが呼ばれました: ${JSON.stringify(
+        calendarDayOverlapLayoutResult.commands,
+      )}`,
+    );
+  }
   const calendarDayMoveStartedAt = performance.now();
   const calendarDayMoveResult = await verifyCalendarDayScheduledMove(
     client,
@@ -372,6 +425,19 @@ try {
         })()`,
     }),
   );
+  const calendarMonthOverflowResult = await verifyCalendarOverflowPopup(
+    client,
+    sessionId,
+    ".calendar-month-day.is-today .calendar-more",
+    true,
+  );
+  if (calendarMonthOverflowResult.commands.length > 0) {
+    throw new Error(
+      `月カレンダー予定一覧の操作中にcommandが呼ばれました: ${JSON.stringify(
+        calendarMonthOverflowResult.commands,
+      )}`,
+    );
+  }
   const calendarMonthDragCreateStartedAt = performance.now();
   const calendarMonthDragCreateResult = await verifyCalendarMonthDragCreate(
     client,
@@ -999,6 +1065,267 @@ async function verifyKanbanCardDrag(client, sessionId) {
   };
 }
 
+async function verifyCalendarOverflowPopup(
+  client,
+  sessionId,
+  triggerSelector,
+  expectParent,
+) {
+  await resetInvokeLog(client, sessionId);
+  const setup = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const trigger = document.querySelector(${JSON.stringify(triggerSelector)});
+      if (!(trigger instanceof HTMLButtonElement)) {
+        return null;
+      }
+      trigger.dataset.calendarOverflowTestTrigger = "true";
+      const label = trigger.getAttribute("aria-label") ?? "";
+      const expectedCount = Number(label.match(/予定(\\d+)件/)?.[1] ?? 0);
+      trigger.click();
+      return { expectedCount };
+    })()`,
+  );
+  if (!setup?.expectedCount) {
+    throw new Error(`予定一覧の起点が見つかりません: ${triggerSelector}`);
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('#calendar-overflow-popup'))`,
+  );
+  const opened = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const panel = document.querySelector('.calendar-panel');
+      const popup = document.querySelector('#calendar-overflow-popup');
+      const list = popup?.querySelector('.calendar-overflow-list');
+      const panelBounds = panel?.getBoundingClientRect();
+      const popupBounds = popup?.getBoundingClientRect();
+      const rows = [...(popup?.querySelectorAll('.calendar-overflow-list li') ?? [])];
+      return {
+        rowCount: rows.length,
+        focusedFirst: Boolean(
+          document.activeElement?.hasAttribute('data-calendar-overflow-first')
+        ),
+        swatchCount: popup?.querySelectorAll('.calendar-overflow-color').length ?? 0,
+        markerCount: popup?.querySelectorAll('.calendar-overflow-content small').length ?? 0,
+        parentCount: [...(popup?.querySelectorAll('.calendar-overflow-content small') ?? [])]
+          .filter((element) => element.textContent?.startsWith('親タスク:')).length,
+        insidePanel: Boolean(
+          panelBounds && popupBounds &&
+          popupBounds.left >= panelBounds.left + 11 &&
+          popupBounds.right <= panelBounds.right - 11 &&
+          popupBounds.top >= panelBounds.top + 11 &&
+          popupBounds.bottom <= panelBounds.bottom - 11
+        ),
+        popupHeight: popupBounds?.height ?? null,
+        listScrollContained: Boolean(
+          list && list.clientHeight <= 420 &&
+          popup && popup.scrollHeight <= popup.clientHeight + 1
+        ),
+        createFormOpen: Boolean(document.querySelector('.calendar-create-form'))
+      };
+    })()`,
+  );
+  if (
+    opened?.rowCount !== setup.expectedCount ||
+    !opened.focusedFirst ||
+    opened.swatchCount !== setup.expectedCount ||
+    opened.markerCount < setup.expectedCount ||
+    (expectParent && opened.parentCount < 1) ||
+    !opened.insidePanel ||
+    opened.popupHeight > 421 ||
+    !opened.listScrollContained ||
+    opened.createFormOpen
+  ) {
+    throw new Error(
+      `カレンダー予定一覧の表示が不正です: ${JSON.stringify({ setup, opened })}`,
+    );
+  }
+
+  await client.send(
+    "Input.dispatchKeyEvent",
+    { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+    sessionId,
+  );
+  await client.send(
+    "Input.dispatchKeyEvent",
+    { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+    sessionId,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('#calendar-overflow-popup') &&
+      document.activeElement?.dataset.calendarOverflowTestTrigger === 'true'`,
+  );
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('[data-calendar-overflow-test-trigger="true"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('#calendar-overflow-popup'))`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.calendar-toolbar')?.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 })
+    )`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('#calendar-overflow-popup') &&
+      document.activeElement?.dataset.calendarOverflowTestTrigger === 'true'`,
+  );
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('[data-calendar-overflow-test-trigger="true"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('#calendar-overflow-popup'))`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.calendar-overflow-list button')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('#calendar-overflow-popup') &&
+      Boolean(document.querySelector('.task-detail-pane'))`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('button[aria-label="詳細を閉じる"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.task-detail-pane')`,
+  );
+  return { commands: await takeInvokeLog(client, sessionId) };
+}
+
+async function verifyCalendarOverlapLayout(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  const result = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const calendarScroller = document.querySelector('.calendar-time-grid');
+      const initialScrollTop = calendarScroller?.scrollTop ?? 0;
+      const findItem = (title) => [...document.querySelectorAll(
+        '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
+      )].find((item) =>
+        item.querySelector('.calendar-item-title')?.textContent === title
+      );
+      const describe = (title) => {
+        const item = findItem(title);
+        const button = item?.querySelector('.calendar-item-content');
+        const scroller = item?.closest('.calendar-time-grid');
+        const initialBounds = item?.getBoundingClientRect();
+        const scrollerBounds = scroller?.getBoundingClientRect();
+        if (scroller && initialBounds && scrollerBounds) {
+          scroller.scrollTop += initialBounds.top - scrollerBounds.top -
+            (scroller.clientHeight - initialBounds.height) / 2;
+        }
+        button?.focus({ preventScroll: true });
+        const bounds = item?.getBoundingClientRect();
+        const containerBounds = item?.parentElement?.getBoundingClientRect();
+        const hit = bounds
+          ? document.elementFromPoint(
+              bounds.left + bounds.width / 2,
+              bounds.top + bounds.height / 2
+            )
+          : null;
+        const lowerHit = bounds
+          ? document.elementFromPoint(
+              bounds.left + bounds.width / 2,
+              bounds.top + bounds.height * 0.75
+            )
+          : null;
+        return {
+          exists: Boolean(item),
+          laneIndex: Number(item?.dataset.calendarLaneIndex ?? -1),
+          laneCount: Number(item?.dataset.calendarLaneCount ?? -1),
+          left: bounds?.left ?? null,
+          right: bounds?.right ?? null,
+          width: bounds?.width ?? null,
+          containerWidth: containerBounds?.width ?? null,
+          hit: hit?.closest('.calendar-item') === item,
+          lowerHit: lowerHit?.closest('.calendar-item') === item,
+          hitClass: typeof hit?.className === 'string' ? hit.className : null,
+          hitTitle: hit?.closest('.calendar-item')
+            ?.querySelector('.calendar-item-title')?.textContent ?? null,
+          focusable: document.activeElement === button,
+          isSubtask: item?.classList.contains('is-subtask') ?? false
+        };
+      };
+      const layout = {
+        exactA: describe('重複予定 A'),
+        exactB: describe('重複予定 B'),
+        boundary: describe('境界予定 C'),
+        chainD: describe('連鎖予定 D'),
+        chainE: describe('連鎖予定 E'),
+        chainF: describe('連鎖予定 F')
+      };
+      if (calendarScroller) {
+        calendarScroller.scrollTop = initialScrollTop;
+      }
+      return layout;
+    })()`,
+  );
+  const values = result ? Object.values(result) : [];
+  const exactHasGap =
+    result?.exactA?.right !== null &&
+    result?.exactB?.left !== null &&
+    result.exactA.right < result.exactB.left;
+  const boundaryUsesFullWidth =
+    result?.boundary?.width !== null &&
+    result?.boundary?.containerWidth !== null &&
+    result.boundary.width >= result.boundary.containerWidth - 1;
+  if (
+    values.length !== 6 ||
+    values.some((value) => !value.exists || !value.hit || !value.focusable) ||
+    result?.exactA?.laneIndex !== 0 ||
+    result?.exactB?.laneIndex !== 1 ||
+    result?.exactA?.laneCount !== 2 ||
+    result?.exactB?.laneCount !== 2 ||
+    !result?.exactB?.isSubtask ||
+    !exactHasGap ||
+    result?.boundary?.laneIndex !== 0 ||
+    result?.boundary?.laneCount !== 1 ||
+    !boundaryUsesFullWidth ||
+    result?.chainD?.laneIndex !== 0 ||
+    !result?.chainD?.lowerHit ||
+    result?.chainE?.laneIndex !== 1 ||
+    result?.chainF?.laneIndex !== 1 ||
+    result?.chainD?.laneCount !== 2 ||
+    result?.chainE?.laneCount !== 2 ||
+    result?.chainF?.laneCount !== 2
+  ) {
+    throw new Error(
+      `カレンダー重複レイアウトが不正です: ${JSON.stringify(result)}`,
+    );
+  }
+  return { commands: await takeInvokeLog(client, sessionId) };
+}
+
 async function verifyCalendarDragCreate(client, sessionId) {
   await resetInvokeLog(client, sessionId);
   const geometry = await evaluateValue(
@@ -1361,7 +1688,7 @@ async function verifyCalendarScheduledMove(client, sessionId) {
       const source = document.querySelector(
         '.calendar-item.marker-scheduled.is-timed .calendar-item-content'
       );
-      const sourceDate = source?.closest('.calendar-time-cell')?.dataset.calendarDate;
+      const sourceDate = source?.closest('[data-calendar-date]')?.dataset.calendarDate;
       const destination = [...document.querySelectorAll('.calendar-time-cell')]
         .find((cell) =>
           cell.dataset.calendarDate === sourceDate &&
@@ -1370,6 +1697,7 @@ async function verifyCalendarScheduledMove(client, sessionId) {
       if (!source || !destination) {
         return null;
       }
+      const sourceTitle = source.querySelector('.calendar-item-title')?.textContent ?? null;
       const transfer = new DataTransfer();
       const destinationRect = destination.getBoundingClientRect();
       source.dispatchEvent(new DragEvent('dragstart', {
@@ -1385,7 +1713,10 @@ async function verifyCalendarScheduledMove(client, sessionId) {
         dataTransfer: transfer
       }));
       await new Promise((resolve) => requestAnimationFrame(resolve));
-      const movePreview = destination.querySelector(
+      const dayOverlay = document.querySelector(
+        '.calendar-timed-day-overlay[data-calendar-date="' + sourceDate + '"]'
+      );
+      const movePreview = dayOverlay?.querySelector(
         '.calendar-item.marker-scheduled.is-timed.is-move-preview'
       );
       const original = document.querySelector(
@@ -1407,8 +1738,10 @@ async function verifyCalendarScheduledMove(client, sessionId) {
         dataTransfer: transfer
       }));
       await new Promise((resolve) => requestAnimationFrame(resolve));
-      const moved = destination.querySelector(
+      const moved = [...(dayOverlay?.querySelectorAll(
         '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
+      ) ?? [])].find((item) =>
+        item.querySelector('.calendar-item-title')?.textContent === sourceTitle
       );
       return {
         movedImmediately: Boolean(moved),
@@ -1435,12 +1768,12 @@ async function verifyCalendarScheduledMove(client, sessionId) {
     client,
     sessionId,
     `(() => {
-      const destination = [...document.querySelectorAll('.calendar-time-cell')]
-        .find((cell) =>
-          cell.dataset.calendarDate === ${JSON.stringify(result.targetDate)} &&
-          cell.getAttribute('aria-label')?.includes('11:00')
-        );
-      const moved = destination?.querySelector(
+      const dayOverlay = document.querySelector(
+        '.calendar-timed-day-overlay[data-calendar-date=${JSON.stringify(
+          result.targetDate,
+        )}]'
+      );
+      const moved = dayOverlay?.querySelector(
         '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
       );
       return Boolean(
@@ -1569,8 +1902,10 @@ async function verifyCalendarTimedResizePreview(client, sessionId) {
             );
             return Boolean(
               original?.querySelector('small:last-child')?.textContent?.includes('12:45') &&
+              original?.dataset.calendarLaneCount === '2' &&
               preview?.querySelector('.calendar-preview-label')?.textContent === '変更後' &&
-              preview?.querySelector('small:last-child')?.textContent?.includes('13:15')
+              preview?.querySelector('small:last-child')?.textContent?.includes('13:15') &&
+              preview?.dataset.calendarLaneCount === '2'
             );
           })()`,
         );
@@ -1647,7 +1982,7 @@ async function verifyCalendarDayScheduledMove(client, sessionId) {
         '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview) ' +
         '.calendar-item-content'
       );
-      const sourceDate = source?.closest('.calendar-time-cell')?.dataset.calendarDate;
+      const sourceDate = source?.closest('[data-calendar-date]')?.dataset.calendarDate;
       const destination = [...document.querySelectorAll(
         '.calendar-time-grid.is-day-mode .calendar-time-cell'
       )].find((cell) =>
@@ -1657,6 +1992,7 @@ async function verifyCalendarDayScheduledMove(client, sessionId) {
       if (!source || !destination) {
         return null;
       }
+      const sourceTitle = source.querySelector('.calendar-item-title')?.textContent ?? null;
       const transfer = new DataTransfer();
       const bounds = destination.getBoundingClientRect();
       source.dispatchEvent(new DragEvent('dragstart', {
@@ -1672,11 +2008,14 @@ async function verifyCalendarDayScheduledMove(client, sessionId) {
         dataTransfer: transfer
       }));
       await new Promise((resolve) => requestAnimationFrame(resolve));
+      const dayOverlay = document.querySelector(
+        '.calendar-timed-day-overlay[data-calendar-date="' + sourceDate + '"]'
+      );
       const original = document.querySelector(
         '.calendar-time-grid.is-day-mode ' +
         '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
       );
-      const preview = destination.querySelector(
+      const preview = dayOverlay?.querySelector(
         '.calendar-item.marker-scheduled.is-timed.is-move-preview'
       );
       const previewState = {
@@ -1695,8 +2034,10 @@ async function verifyCalendarDayScheduledMove(client, sessionId) {
         dataTransfer: transfer
       }));
       await new Promise((resolve) => requestAnimationFrame(resolve));
-      const moved = destination.querySelector(
+      const moved = [...(dayOverlay?.querySelectorAll(
         '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
+      ) ?? [])].find((item) =>
+        item.querySelector('.calendar-item-title')?.textContent === sourceTitle
       );
       return {
         targetDate: destination.dataset.calendarDate ?? null,
@@ -1720,9 +2061,12 @@ async function verifyCalendarDayScheduledMove(client, sessionId) {
     client,
     sessionId,
     `(() => {
-      const moved = document.querySelector(
+      const moved = [...document.querySelectorAll(
         '.calendar-time-grid.is-day-mode ' +
         '.calendar-item.marker-scheduled.is-timed:not(.is-calendar-preview)'
+      )].find((item) =>
+        item.querySelector('small:last-child')?.textContent?.includes('14:15') &&
+        item.querySelector('small:last-child')?.textContent?.includes('15:45')
       );
       return Boolean(
         moved?.querySelector('small:last-child')?.textContent?.includes('14:15') &&
@@ -2516,32 +2860,65 @@ function buildTauriInvokeMockSource(profile) {
       const rangeStart = args.startDate ?? args.weekStartDate ?? today;
       const rangeEnd = args.endDate ?? addDays(rangeStart, 6);
       const span = daySpan(rangeStart, rangeEnd);
-      const calendarItems = tasks.map((task, index) => index === 0 ? {
-        id: "calendar-perf-scheduled",
-        target: { type: "task", id: task.id },
-        title: task.title,
-        parentTitle: null,
-        date: scheduledStartDate,
-        time: scheduledStartTime,
-        endDate: scheduledEndDate,
-        endTime: scheduledEndTime,
-        isAllDay: false,
-        marker: "scheduled",
-        status: task.status,
-        colorToken: "blue"
-      } : {
-        id: "calendar-perf-" + pad(index),
-        target: { type: "task", id: task.id },
-        title: task.title,
-        parentTitle: null,
-        date: addDays(rangeStart, index % span),
-        time: null,
-        endDate: null,
-        endTime: null,
-        isAllDay: true,
-        marker: "due",
-        status: task.status,
-        colorToken: "green"
+      const overlapSchedules = new Map([
+        [1, { id: "calendar-overlap-a", title: "重複予定 A", start: "18:00", end: "19:00" }],
+        [2, { id: "calendar-overlap-b", title: "重複予定 B", start: "18:00", end: "19:00", isSubtask: true }],
+        [3, { id: "calendar-overlap-c", title: "境界予定 C", start: "19:00", end: "19:30" }],
+        [4, { id: "calendar-overlap-d", title: "連鎖予定 D", start: "20:00", end: "22:00" }],
+        [5, { id: "calendar-overlap-e", title: "連鎖予定 E", start: "20:00", end: "20:30" }],
+        [6, { id: "calendar-overlap-f", title: "連鎖予定 F", start: "20:30", end: "21:00" }]
+      ]);
+      const calendarItems = tasks.map((task, index) => {
+        if (index === 0) {
+          return {
+            id: "calendar-perf-scheduled",
+            target: { type: "task", id: task.id },
+            title: task.title,
+            parentTitle: null,
+            date: scheduledStartDate,
+            time: scheduledStartTime,
+            endDate: scheduledEndDate,
+            endTime: scheduledEndTime,
+            isAllDay: false,
+            marker: "scheduled",
+            status: task.status,
+            colorToken: "blue"
+          };
+        }
+        const overlap = overlapSchedules.get(index);
+        if (overlap) {
+          const subtask = overlap.isSubtask ? task.subtasks[1] : null;
+          return {
+            id: overlap.id,
+            target: subtask
+              ? { type: "subtask", id: subtask.id }
+              : { type: "task", id: task.id },
+            title: overlap.title,
+            parentTitle: subtask ? task.title : null,
+            date: today,
+            time: overlap.start,
+            endDate: today,
+            endTime: overlap.end,
+            isAllDay: false,
+            marker: "scheduled",
+            status: subtask?.status ?? task.status,
+            colorToken: subtask ? "violet" : "blue"
+          };
+        }
+        return {
+          id: "calendar-perf-" + pad(index),
+          target: { type: "task", id: task.id },
+          title: task.title,
+          parentTitle: null,
+          date: addDays(rangeStart, index % span),
+          time: null,
+          endDate: null,
+          endTime: null,
+          isAllDay: true,
+          marker: "due",
+          status: task.status,
+          colorToken: "green"
+        };
       });
       const commands = {
         health_check: () => "tauri-ready",

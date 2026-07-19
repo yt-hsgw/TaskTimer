@@ -65,6 +65,8 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [057 ポモドーロをタスクから独立した集中機能へ再設計する](057-standalone-pomodoro.md) / GitHub #141
 - [058 タスク行へカウントダウンタイマーと完了通知を追加する](058-task-countdown-timer.md) / GitHub #142
 - [059 カレンダーのドラッグ範囲から予定付きタスクを作成する](059-calendar-drag-range-create.md) / GitHub #146
+- [060 カレンダーの重複予定を横並び表示する](060-calendar-overlap-layout.md) / GitHub #147
+- [061 カレンダーの省略予定を一覧表示する](061-calendar-overflow-popover.md) / GitHub #148
 
 ## 運用
 
