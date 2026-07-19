@@ -21,7 +21,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Check, GripVertical, Pencil, Plus, Trash2, X } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import type {
   BoardColumn,
@@ -54,6 +54,11 @@ const columnDragId = (columnId: string) => `column:${columnId}`;
 const columnDropId = (columnId: string) => `column-drop:${columnId}`;
 const taskDragId = (taskId: string) => `task:${taskId}`;
 
+type PendingTaskMove = {
+  taskId: string;
+  destinationColumnId: string;
+};
+
 export function KanbanBoard({
   columns,
   tasks,
@@ -82,6 +87,9 @@ export function KanbanBoard({
   const [deleteDestinationId, setDeleteDestinationId] = useState("");
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
+  const [pendingTaskMove, setPendingTaskMove] = useState<PendingTaskMove | null>(
+    null,
+  );
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -94,15 +102,23 @@ export function KanbanBoard({
     const groups = new Map(columns.map((column) => [column.id, [] as TaskRow[]]));
     const fallbackColumnId = columns[0]?.id;
     for (const row of taskRows) {
-      const columnId = groups.has(row.boardColumnId)
-        ? row.boardColumnId
+      const requestedColumnId =
+        pendingTaskMove?.taskId === row.id
+          ? pendingTaskMove.destinationColumnId
+          : row.boardColumnId;
+      const columnId = groups.has(requestedColumnId)
+        ? requestedColumnId
         : fallbackColumnId;
       if (columnId) {
-        groups.get(columnId)?.push(row);
+        groups.get(columnId)?.push(
+          row.boardColumnId === columnId
+            ? row
+            : { ...row, boardColumnId: columnId },
+        );
       }
     }
     return groups;
-  }, [columns, taskRows]);
+  }, [columns, pendingTaskMove, taskRows]);
   const pendingDeleteColumn =
     columns.find((column) => column.id === pendingDeleteColumnId) ?? null;
   const activeTaskRow = activeTaskId
@@ -111,6 +127,18 @@ export function KanbanBoard({
   const deletionDestinations = columns.filter(
     (column) => column.id !== pendingDeleteColumnId,
   );
+
+  useEffect(() => {
+    if (!pendingTaskMove) {
+      return;
+    }
+    const persistedRow = taskRows.find(
+      (row) => row.id === pendingTaskMove.taskId,
+    );
+    if (persistedRow?.boardColumnId === pendingTaskMove.destinationColumnId) {
+      setPendingTaskMove(null);
+    }
+  }, [pendingTaskMove, taskRows]);
 
   function handleDragStart(event: DragStartEvent) {
     setDragOverColumnId(null);
@@ -167,9 +195,27 @@ export function KanbanBoard({
         destinationColumnId &&
         sourceColumnId !== destinationColumnId
       ) {
-        void onMoveTask(taskId, destinationColumnId);
+        const move = { taskId, destinationColumnId };
+        setPendingTaskMove(move);
+        void persistTaskMove(move);
       }
     }
+  }
+
+  async function persistTaskMove(move: PendingTaskMove) {
+    try {
+      if (await onMoveTask(move.taskId, move.destinationColumnId)) {
+        return;
+      }
+    } catch {
+      // The mutation boundary reports the user-facing error.
+    }
+    setPendingTaskMove((current) =>
+      current?.taskId === move.taskId &&
+      current.destinationColumnId === move.destinationColumnId
+        ? null
+        : current,
+    );
   }
 
   async function handleCreateColumn(event: FormEvent<HTMLFormElement>) {

@@ -461,14 +461,43 @@ async function verifyKanbanCardDrag(client, sessionId) {
     },
     sessionId,
   );
+  const placementAfterDrop = await evaluateValue(
+    client,
+    sessionId,
+    `(async () => {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      const columns = [...document.querySelectorAll(".kanban-column")];
+      const selector = '[data-task-id="' + CSS.escape(${JSON.stringify(
+        geometry.taskId,
+      )}) + '"]';
+      return {
+        remainsInSource: Boolean(columns[0]?.querySelector(selector)),
+        appearsInDestination: Boolean(columns[1]?.querySelector(selector))
+      };
+    })()`,
+  );
+  if (
+    placementAfterDrop?.remainsInSource ||
+    !placementAfterDrop?.appearsInDestination
+  ) {
+    throw new Error(
+      `ドロップ直後の楽観表示が不正です: ${JSON.stringify(placementAfterDrop)}`,
+    );
+  }
   await waitForPaintedExpression(
     client,
     sessionId,
-    `document.querySelectorAll(".kanban-column")[1]
-      ?.querySelector('[data-task-id=${JSON.stringify(geometry.taskId)}]') &&
-      !document.querySelector(".kanban-card-overlay") &&
-      !document.querySelector(".task-detail-pane") &&
-      !document.querySelector(".app-alert")`,
+    `(() => {
+      const movedCard = document.querySelectorAll(".kanban-column")[1]
+        ?.querySelector('[data-task-id=${JSON.stringify(geometry.taskId)}]');
+      return Boolean(
+        movedCard &&
+        movedCard.getAttribute("tabindex") === "0" &&
+        !document.querySelector(".kanban-card-overlay") &&
+        !document.querySelector(".task-detail-pane") &&
+        !document.querySelector(".app-alert")
+      );
+    })()`,
   );
 }
 
@@ -729,14 +758,19 @@ function buildTauriInvokeMockSource(profile) {
         list_task_rows: () => clone(taskRows),
         list_calendar_items: () => clone(calendarItems),
         list_week_calendar_items: () => clone(calendarItems),
-        move_task_to_board_column: () => {
-          const row = taskRows.find((candidate) => candidate.id === args.request?.taskId);
-          if (!row) {
-            throw new Error("移動対象のタスクが存在しません");
-          }
-          row.boardColumnId = args.request.boardColumnId;
-          return null;
-        },
+        move_task_to_board_column: () => new Promise((resolve, reject) => {
+          setTimeout(() => {
+            const row = taskRows.find(
+              (candidate) => candidate.id === args.request?.taskId
+            );
+            if (!row) {
+              reject(new Error("移動対象のタスクが存在しません"));
+              return;
+            }
+            row.boardColumnId = args.request.boardColumnId;
+            resolve(null);
+          }, 120);
+        }),
         get_active_timer: () => null,
         get_active_pomodoro: () => null,
         sync_expired_pomodoro: () => ({
