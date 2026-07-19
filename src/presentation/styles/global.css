@@ -2617,6 +2617,22 @@ button {
   border-left-color: rgb(20 92 160 / 66%);
 }
 
+.calendar-item.is-resize-preview {
+  filter: none;
+  opacity: 0.78;
+  outline: 2px dashed #1f6fbe;
+  outline-offset: -2px;
+  pointer-events: none;
+  z-index: 8;
+}
+
+.calendar-resize-preview-label {
+  color: currentColor;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .calendar-resize-handle {
   align-items: center;
   background: rgb(255 255 255 / 92%);

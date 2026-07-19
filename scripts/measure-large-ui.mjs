@@ -41,8 +41,10 @@ const thresholds = {
   task_detail_save: 1200,
   calendar_week: 1500,
   calendar_move: 1500,
+  calendar_resize: 1500,
   calendar_day: 1500,
   calendar_month: 2000,
+  calendar_month_date_change: 1500,
   task_detail: 1000,
 };
 const taskPageSize = 200;
@@ -252,6 +254,33 @@ try {
       thresholds.calendar_move,
     ),
   );
+  const calendarResizeStartedAt = performance.now();
+  const calendarResizeResult = await verifyCalendarTimedResizePreview(
+    client,
+    sessionId,
+  );
+  assertCommandScope("カレンダー時刻調整", calendarResizeResult.commands, {
+    required: [
+      "resize_scheduled_work_item",
+      "list_task_page",
+      "list_calendar_items",
+    ],
+    forbidden: [
+      "update_task",
+      "update_subtask",
+      "move_scheduled_work_item",
+      "sync_notifications",
+      "process_notification_os_registrations",
+      "list_board_columns",
+    ],
+  });
+  measurements.push(
+    createMeasurement(
+      "calendar_resize",
+      performance.now() - calendarResizeStartedAt,
+      thresholds.calendar_resize,
+    ),
+  );
   measurements.push(
     await measureView({
       client,
@@ -282,6 +311,35 @@ try {
           return visibleCount + hiddenCount === ${profile.taskCount};
         })()`,
     }),
+  );
+  const calendarMonthDateChangeStartedAt = performance.now();
+  const calendarMonthDateChangeResult =
+    await verifyCalendarMonthDateChange(client, sessionId);
+  assertCommandScope(
+    "月カレンダー日付変更",
+    calendarMonthDateChangeResult.commands,
+    {
+      required: [
+        "resize_scheduled_work_item",
+        "move_scheduled_work_item",
+        "list_task_page",
+        "list_calendar_items",
+      ],
+      forbidden: [
+        "update_task",
+        "update_subtask",
+        "sync_notifications",
+        "process_notification_os_registrations",
+        "list_board_columns",
+      ],
+    },
+  );
+  measurements.push(
+    createMeasurement(
+      "calendar_month_date_change",
+      performance.now() - calendarMonthDateChangeStartedAt,
+      thresholds.calendar_month_date_change,
+    ),
   );
 
   await evaluate(client, sessionId, clickNavigation("タスク"));
@@ -959,6 +1017,358 @@ async function verifyCalendarScheduledMove(client, sessionId) {
   };
 }
 
+async function verifyCalendarTimedResizePreview(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('button[aria-label="詳細を閉じる"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.task-detail-pane')`,
+  );
+  const geometry = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const item = document.querySelector(
+        '.calendar-item.marker-scheduled.is-timed:not(.is-resize-preview)'
+      );
+      const handle = item?.querySelector(
+        '.calendar-resize-handle.is-end.is-vertical'
+      );
+      if (!item || !handle) {
+        return null;
+      }
+      const bounds = handle.getBoundingClientRect();
+      const x = bounds.left + bounds.width / 2;
+      const y = bounds.top + bounds.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      return {
+        x,
+        y,
+        handleBounds: {
+          left: bounds.left,
+          top: bounds.top,
+          width: bounds.width,
+          height: bounds.height
+        },
+        hitTag: hit?.tagName ?? null,
+        hitClass: typeof hit?.className === 'string'
+          ? hit.className
+          : hit?.className?.baseVal ?? null,
+        hitsHandle: hit?.closest('.calendar-resize-handle') === handle,
+        originalMarker: item.querySelector('small:last-child')?.textContent ?? null
+      };
+    })()`,
+  );
+  if (
+    !geometry ||
+    !geometry.hitsHandle ||
+    !geometry.originalMarker?.includes("12:45")
+  ) {
+    throw new Error(
+      `時刻調整の検証対象が不正です: ${JSON.stringify(geometry)}`,
+    );
+  }
+
+  await dragPointer(client, sessionId, geometry.x, geometry.y, geometry.x, geometry.y + 27, {
+    beforeRelease: async () => {
+      try {
+        await waitForPaintedExpression(
+          client,
+          sessionId,
+          `(() => {
+            const original = document.querySelector(
+              '.calendar-item.marker-scheduled.is-timed:not(.is-resize-preview)'
+            );
+            const preview = document.querySelector(
+              '.calendar-item.marker-scheduled.is-timed.is-resize-preview'
+            );
+            return Boolean(
+              original?.querySelector('small:last-child')?.textContent?.includes('12:45') &&
+              preview?.querySelector('.calendar-resize-preview-label')?.textContent === '変更後' &&
+              preview?.querySelector('small:last-child')?.textContent?.includes('13:15')
+            );
+          })()`,
+        );
+      } catch (error) {
+        const diagnostics = await evaluateValue(
+          client,
+          sessionId,
+          `(() => ({
+            hitAtStart: document.elementFromPoint(${geometry.x}, ${geometry.y})?.className ?? null,
+            hitAtEnd: document.elementFromPoint(${geometry.x}, ${geometry.y + 27})?.className ?? null,
+            activeHandles: document.querySelectorAll('.calendar-resize-handle.is-active').length,
+            previewCount: document.querySelectorAll('.calendar-item.is-resize-preview').length,
+            markers: [...document.querySelectorAll('.calendar-item.marker-scheduled small:last-child')]
+              .map((node) => node.textContent),
+            alert: document.querySelector('.app-alert')?.textContent ?? null
+          }))()`,
+        );
+        throw new Error(
+          `時刻調整プレビューの表示待機に失敗しました: ${JSON.stringify(diagnostics)}`,
+          { cause: error },
+        );
+      }
+    },
+  });
+
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const item = document.querySelector(
+        '.calendar-item.marker-scheduled.is-timed:not(.is-resize-preview)'
+      );
+      return Boolean(
+        item?.querySelector('small:last-child')?.textContent?.includes('13:15') &&
+        !document.querySelector('.calendar-item.is-resize-preview') &&
+        window.__taskTimerInvokeLog?.includes('list_task_page') &&
+        window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
+        !document.querySelector('.app-alert')
+      );
+    })()`,
+  );
+  return { commands: await takeInvokeLog(client, sessionId) };
+}
+
+async function verifyCalendarMonthDateChange(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  const resizeGeometry = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const item = document.querySelector(
+        '.calendar-month-day .calendar-item.marker-scheduled:not(.is-resize-preview)'
+      );
+      const sourceCell = item?.closest('.calendar-month-day');
+      const sourceDate = sourceCell?.dataset.calendarDate;
+      const handle = item?.querySelector(
+        '.calendar-resize-handle.is-end.is-horizontal'
+      );
+      if (!item || !sourceDate || !handle) {
+        return null;
+      }
+      const [year, month, day] = sourceDate.split('-').map(Number);
+      const target = new Date(year, month - 1, day);
+      target.setDate(target.getDate() + 1);
+      const targetDate = [
+        target.getFullYear(),
+        String(target.getMonth() + 1).padStart(2, '0'),
+        String(target.getDate()).padStart(2, '0')
+      ].join('-');
+      const targetCell = document.querySelector(
+        '.calendar-month-day[data-calendar-date="' + targetDate + '"]'
+      );
+      if (!targetCell) {
+        return null;
+      }
+      const handleBounds = handle.getBoundingClientRect();
+      const targetBounds = targetCell.getBoundingClientRect();
+      return {
+        sourceDate,
+        targetDate,
+        startX: handleBounds.left + handleBounds.width / 2,
+        startY: handleBounds.top + handleBounds.height / 2,
+        endX: targetBounds.left + targetBounds.width / 2,
+        endY: targetBounds.top + Math.min(64, targetBounds.height / 2)
+      };
+    })()`,
+  );
+  if (!resizeGeometry) {
+    throw new Error("月表示の日付調整対象がありません");
+  }
+
+  await dragPointer(
+    client,
+    sessionId,
+    resizeGeometry.startX,
+    resizeGeometry.startY,
+    resizeGeometry.endX,
+    resizeGeometry.endY,
+    {
+      beforeRelease: async () => {
+        await waitForPaintedExpression(
+          client,
+          sessionId,
+          `(() => {
+            const source = document.querySelector(
+              '.calendar-month-day[data-calendar-date=${JSON.stringify(
+                resizeGeometry.sourceDate,
+              )}] .calendar-item.marker-scheduled:not(.is-resize-preview)'
+            );
+            const preview = document.querySelector(
+              '.calendar-month-day[data-calendar-date=${JSON.stringify(
+                resizeGeometry.targetDate,
+              )}] .calendar-item.marker-scheduled.is-resize-preview'
+            );
+            return Boolean(
+              source &&
+              preview?.querySelector('.calendar-resize-preview-label')?.textContent === '変更後' &&
+              preview?.querySelector('small:last-child')?.textContent?.includes('13:15')
+            );
+          })()`,
+        );
+      },
+    },
+  );
+
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const target = document.querySelector(
+        '.calendar-month-day[data-calendar-date=${JSON.stringify(
+          resizeGeometry.targetDate,
+        )}] .calendar-item.marker-scheduled:not(.is-resize-preview)'
+      );
+      return Boolean(
+        target?.querySelector('small:last-child')?.textContent?.includes('13:15') &&
+        !document.querySelector('.calendar-item.is-resize-preview') &&
+        window.__taskTimerInvokeLog?.includes('resize_scheduled_work_item') &&
+        window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
+        !document.querySelector('.app-alert')
+      );
+    })()`,
+  );
+  const resizeCommands = await takeInvokeLog(client, sessionId);
+
+  const moveResult = await evaluateValue(
+    client,
+    sessionId,
+    `(async () => {
+      const sourceDate = ${JSON.stringify(resizeGeometry.sourceDate)};
+      const [year, month, day] = sourceDate.split('-').map(Number);
+      const destination = new Date(year, month - 1, day);
+      destination.setDate(destination.getDate() + 2);
+      const destinationDate = [
+        destination.getFullYear(),
+        String(destination.getMonth() + 1).padStart(2, '0'),
+        String(destination.getDate()).padStart(2, '0')
+      ].join('-');
+      const source = document.querySelector(
+        '.calendar-month-day[data-calendar-date="' + sourceDate + '"] ' +
+        '.calendar-item.marker-scheduled:not(.is-resize-preview) .calendar-item-content'
+      );
+      const destinationCell = document.querySelector(
+        '.calendar-month-day[data-calendar-date="' + destinationDate + '"]'
+      );
+      if (!source || !destinationCell) {
+        return null;
+      }
+      const transfer = new DataTransfer();
+      source.dispatchEvent(new DragEvent('dragstart', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer
+      }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      destinationCell.dispatchEvent(new DragEvent('dragover', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer
+      }));
+      destinationCell.dispatchEvent(new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer
+      }));
+      source.dispatchEvent(new DragEvent('dragend', {
+        bubbles: true,
+        dataTransfer: transfer
+      }));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      return {
+        destinationDate,
+        movedImmediately: Boolean(destinationCell.querySelector(
+          '.calendar-item.marker-scheduled:not(.is-resize-preview)'
+        ))
+      };
+    })()`,
+  );
+  if (!moveResult?.movedImmediately) {
+    throw new Error(
+      `月表示のドロップ直後の日付が不正です: ${JSON.stringify(moveResult)}`,
+    );
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const destination = document.querySelector(
+        '.calendar-month-day[data-calendar-date=${JSON.stringify(
+          moveResult.destinationDate,
+        )}] .calendar-item.marker-scheduled:not(.is-resize-preview)'
+      );
+      return Boolean(
+        destination &&
+        window.__taskTimerInvokeLog?.includes('move_scheduled_work_item') &&
+        window.__taskTimerInvokeLog?.includes('list_task_page') &&
+        window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
+        !document.querySelector('.app-alert')
+      );
+    })()`,
+  );
+  return {
+    commands: [...resizeCommands, ...(await takeInvokeLog(client, sessionId))],
+  };
+}
+
+async function dragPointer(
+  client,
+  sessionId,
+  startX,
+  startY,
+  endX,
+  endY,
+  { beforeRelease } = {},
+) {
+  await client.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseMoved", x: startX, y: startY, buttons: 0 },
+    sessionId,
+  );
+  await client.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mousePressed",
+      x: startX,
+      y: startY,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  await client.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseMoved",
+      x: endX,
+      y: endY,
+      button: "left",
+      buttons: 1,
+    },
+    sessionId,
+  );
+  await beforeRelease?.();
+  await client.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseReleased",
+      x: endX,
+      y: endY,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+}
+
 async function inspectPage(client, sessionId) {
   const result = await client.send(
     "Runtime.evaluate",
@@ -1341,6 +1751,27 @@ function buildTauriInvokeMockSource(profile) {
             scheduledStartTime = destination.startTime;
             scheduledEndDate = nextEnd.date;
             scheduledEndTime = nextEnd.time;
+            resolve(null);
+          }, 120);
+        }),
+        resize_scheduled_work_item: () => new Promise((resolve, reject) => {
+          setTimeout(() => {
+            const schedule = args.request?.schedule;
+            if (!schedule?.startDate || !schedule?.endDate) {
+              reject(new Error("変更後の予定期間が不正です"));
+              return;
+            }
+            if (
+              schedule.isAllDay === false &&
+              (!schedule.startTime || !schedule.endTime)
+            ) {
+              reject(new Error("変更後の予定時刻が不正です"));
+              return;
+            }
+            scheduledStartDate = schedule.startDate;
+            scheduledStartTime = schedule.startTime;
+            scheduledEndDate = schedule.endDate;
+            scheduledEndTime = schedule.endTime;
             resolve(null);
           }, 120);
         }),

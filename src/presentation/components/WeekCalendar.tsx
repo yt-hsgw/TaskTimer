@@ -89,6 +89,7 @@ type PendingCalendarMove = {
 };
 
 type CalendarItemVariant = "all-day" | "timed" | "month";
+const RESIZE_PREVIEW_ID_SUFFIX = ":resize-preview";
 
 export function WeekCalendar({
   viewMode,
@@ -107,7 +108,7 @@ export function WeekCalendar({
   onSelectItem,
   onCreateTask,
   onRescheduleItem,
-  onResizeItem,
+  onResizeItem: persistResizeItem,
   onMoveScheduledItem,
 }: WeekCalendarProps) {
   usePresentationRenderProbe("WeekCalendar");
@@ -116,14 +117,25 @@ export function WeekCalendar({
   const [draggedItem, setDraggedItem] = useState<WeekCalendarItem | null>(null);
   const [dropTarget, setDropTarget] = useState<CalendarDropTarget | null>(null);
   const [pendingMove, setPendingMove] = useState<PendingCalendarMove | null>(null);
+  const [resizePreview, setResizePreview] = useState<WeekCalendarItem | null>(null);
   const displayItems = useMemo(
-    () =>
-      pendingMove
+    () => {
+      const committedItems = pendingMove
         ? items.map((item) =>
             item.id === pendingMove.item.id ? pendingMove.item : item,
           )
-        : items,
-    [items, pendingMove],
+        : items;
+      return resizePreview
+        ? [
+            ...committedItems,
+            {
+              ...resizePreview,
+              id: `${resizePreview.id}${RESIZE_PREVIEW_ID_SUFFIX}`,
+            },
+          ]
+        : committedItems;
+    },
+    [items, pendingMove, resizePreview],
   );
   const rangeDays =
     viewMode === "day"
@@ -273,6 +285,37 @@ export function WeekCalendar({
             startTime: target.dueTime,
           })
         : await onRescheduleItem(item, target.dueDate, target.dueTime);
+    setPendingMove((current) =>
+      current?.item.id === item.id && saved
+        ? { ...current, isSaved: true }
+        : null,
+    );
+    return saved;
+  }
+
+  function previewScheduleResize(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft | null,
+  ) {
+    const preview = schedule ? applyScheduleToCalendarItem(item, schedule) : null;
+    setResizePreview((current) =>
+      current && preview && isSameCalendarPosition(current, preview)
+        ? current
+        : preview,
+    );
+  }
+
+  async function resizeCalendarItem(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft,
+  ) {
+    const preview = applyScheduleToCalendarItem(item, schedule);
+    setResizePreview(null);
+    if (!preview) {
+      return false;
+    }
+    setPendingMove({ item: preview, isSaved: false });
+    const saved = await persistResizeItem(item, schedule);
     setPendingMove((current) =>
       current?.item.id === item.id && saved
         ? { ...current, isSaved: true }
@@ -580,7 +623,8 @@ export function WeekCalendar({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          onResizeItem={onResizeItem}
+          onResizeItem={resizeCalendarItem}
+          onResizePreview={previewScheduleResize}
           onMoveItemKeyDown={handleMoveItemKeyDown}
         />
       ) : (
@@ -600,7 +644,8 @@ export function WeekCalendar({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          onResizeItem={onResizeItem}
+          onResizeItem={resizeCalendarItem}
+          onResizePreview={previewScheduleResize}
           onMoveItemKeyDown={handleMoveItemKeyDown}
         />
       )}
@@ -625,6 +670,7 @@ function TimeGridCalendar({
   onDragLeave,
   onDrop,
   onResizeItem,
+  onResizePreview,
   onMoveItemKeyDown,
 }: {
   days: CalendarDay[];
@@ -646,6 +692,10 @@ function TimeGridCalendar({
     item: WeekCalendarItem,
     schedule: WorkScheduleDraft,
   ): Promise<boolean>;
+  onResizePreview(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft | null,
+  ): void;
   onMoveItemKeyDown(
     item: WeekCalendarItem,
     variant: CalendarItemVariant,
@@ -716,6 +766,7 @@ function TimeGridCalendar({
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
               onResizeItem={onResizeItem}
+              onResizePreview={onResizePreview}
               onMoveItemKeyDown={onMoveItemKeyDown}
             />
           </div>
@@ -742,6 +793,7 @@ function TimeGridCalendar({
           onDragLeave={onDragLeave}
           onDrop={onDrop}
           onResizeItem={onResizeItem}
+          onResizePreview={onResizePreview}
           onMoveItemKeyDown={onMoveItemKeyDown}
         />
       ))}
@@ -767,6 +819,7 @@ function TimeGridRow({
   onDragLeave,
   onDrop,
   onResizeItem,
+  onResizePreview,
   onMoveItemKeyDown,
 }: {
   hour: number;
@@ -789,6 +842,10 @@ function TimeGridRow({
     item: WeekCalendarItem,
     schedule: WorkScheduleDraft,
   ): Promise<boolean>;
+  onResizePreview(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft | null,
+  ): void;
   onMoveItemKeyDown(
     item: WeekCalendarItem,
     variant: CalendarItemVariant,
@@ -869,6 +926,7 @@ function TimeGridRow({
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
               onResizeItem={onResizeItem}
+              onResizePreview={onResizePreview}
               onMoveItemKeyDown={onMoveItemKeyDown}
             />
           </div>
@@ -890,6 +948,7 @@ function CalendarCellItems({
   onDragStart,
   onDragEnd,
   onResizeItem,
+  onResizePreview,
   onMoveItemKeyDown,
 }: {
   isLoading: boolean;
@@ -906,6 +965,10 @@ function CalendarCellItems({
     item: WeekCalendarItem,
     schedule: WorkScheduleDraft,
   ): Promise<boolean>;
+  onResizePreview(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft | null,
+  ): void;
   onMoveItemKeyDown(
     item: WeekCalendarItem,
     variant: CalendarItemVariant,
@@ -935,6 +998,7 @@ function CalendarCellItems({
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           onResizeItem={onResizeItem}
+          onResizePreview={onResizePreview}
           onMoveItemKeyDown={onMoveItemKeyDown}
         />
       ))}
@@ -959,6 +1023,7 @@ function MonthCalendar({
   onDragLeave,
   onDrop,
   onResizeItem,
+  onResizePreview,
   onMoveItemKeyDown,
 }: {
   days: CalendarDay[];
@@ -980,6 +1045,10 @@ function MonthCalendar({
     item: WeekCalendarItem,
     schedule: WorkScheduleDraft,
   ): Promise<boolean>;
+  onResizePreview(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft | null,
+  ): void;
   onMoveItemKeyDown(
     item: WeekCalendarItem,
     variant: CalendarItemVariant,
@@ -1060,6 +1129,7 @@ function MonthCalendar({
                       onDragStart={onDragStart}
                       onDragEnd={onDragEnd}
                       onResizeItem={onResizeItem}
+                      onResizePreview={onResizePreview}
                       onMoveItemKeyDown={onMoveItemKeyDown}
                     />
                   ))}
@@ -1087,6 +1157,7 @@ function CalendarItemButton({
   onDragStart,
   onDragEnd,
   onResizeItem,
+  onResizePreview,
   onMoveItemKeyDown,
 }: {
   item: WeekCalendarItem;
@@ -1102,20 +1173,28 @@ function CalendarItemButton({
     item: WeekCalendarItem,
     schedule: WorkScheduleDraft,
   ): Promise<boolean>;
+  onResizePreview(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft | null,
+  ): void;
   onMoveItemKeyDown(
     item: WeekCalendarItem,
     variant: CalendarItemVariant,
     event: ReactKeyboardEvent<HTMLButtonElement>,
   ): void;
 }) {
-  const isSelected = isSameTarget(item.target, selectedTarget);
-  const isDraggable = canMoveCalendarItem(item) && !isReschedulingItem;
+  const isResizePreview = item.id.endsWith(RESIZE_PREVIEW_ID_SUFFIX);
+  const isSelected = !isResizePreview && isSameTarget(item.target, selectedTarget);
+  const isDraggable =
+    !isResizePreview && canMoveCalendarItem(item) && !isReschedulingItem;
   const isDragging = draggedItem?.id === item.id;
   const relationLabel = item.parentTitle ? `親: ${item.parentTitle}` : null;
   const markerText = formatCalendarItemMarker(item);
   const isScheduled = item.marker === "scheduled";
-  const hasStartHandle = isScheduled && displayDate === item.date;
-  const hasEndHandle = isScheduled && displayDate === item.endDate;
+  const hasStartHandle =
+    !isResizePreview && isScheduled && displayDate === item.date;
+  const hasEndHandle =
+    !isResizePreview && isScheduled && displayDate === item.endDate;
   const isVerticalResize = variant === "timed" && !item.isAllDay;
   const timedSegment = isVerticalResize
     ? getTimedScheduleSegment(item, displayDate)
@@ -1135,8 +1214,9 @@ function CalendarItemButton({
         isSelected ? "is-selected" : ""
       } ${isDraggable ? "is-draggable" : ""} ${
         isDragging ? "is-dragging" : ""
-      }`}
+      } ${isResizePreview ? "is-resize-preview" : ""}`}
       style={style}
+      aria-hidden={isResizePreview || undefined}
       onDoubleClick={(event) => event.stopPropagation()}
     >
       {hasStartHandle ? (
@@ -1147,12 +1227,14 @@ function CalendarItemButton({
           item={item}
           displayDate={displayDate}
           onResizeItem={onResizeItem}
+          onResizePreview={onResizePreview}
         />
       ) : null}
       <button
         className="calendar-item-content"
         type="button"
         draggable={isDraggable}
+        tabIndex={isResizePreview ? -1 : undefined}
         aria-pressed={isSelected}
         aria-label={`${relationLabel ? `${relationLabel}、` : ""}${item.title}の${markerText}を開く${isDraggable ? `。ドラッグまたは矢印キーで${isScheduled ? "予定期間" : "期限"}を移動できます` : ""}`}
         title={
@@ -1162,17 +1244,24 @@ function CalendarItemButton({
         }
         onDragStart={(event) => onDragStart(item, event)}
         onDragEnd={onDragEnd}
-        onKeyDown={(event) => onMoveItemKeyDown(item, variant, event)}
+        onKeyDown={(event) =>
+          !isResizePreview && onMoveItemKeyDown(item, variant, event)
+        }
         onClick={(event) => {
           event.stopPropagation();
-          onSelectItem(item);
+          if (!isResizePreview) {
+            onSelectItem(item);
+          }
         }}
       >
+        {isResizePreview ? (
+          <span className="calendar-resize-preview-label">変更後</span>
+        ) : null}
         <span className="calendar-item-title">{item.title}</span>
         {relationLabel ? (
           <small className="calendar-item-parent">{relationLabel}</small>
         ) : null}
-        {variant === "timed" || variant === "month" ? (
+        {variant === "timed" || variant === "month" || isResizePreview ? (
           <small>{markerText}</small>
         ) : null}
       </button>
@@ -1184,6 +1273,7 @@ function CalendarItemButton({
           item={item}
           displayDate={displayDate}
           onResizeItem={onResizeItem}
+          onResizePreview={onResizePreview}
         />
       ) : null}
     </div>
@@ -1197,6 +1287,7 @@ function ScheduleResizeHandle({
   item,
   displayDate,
   onResizeItem,
+  onResizePreview,
 }: {
   edge: "start" | "end";
   isVertical: boolean;
@@ -1207,6 +1298,10 @@ function ScheduleResizeHandle({
     item: WeekCalendarItem,
     schedule: WorkScheduleDraft,
   ): Promise<boolean>;
+  onResizePreview(
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft | null,
+  ): void;
 }) {
   const edgeLabel = edge === "start" ? "開始" : "終了";
   const directionLabel = isVertical ? "上下" : "左右";
@@ -1230,6 +1325,7 @@ function ScheduleResizeHandle({
           edge,
           isVertical,
           onResizeItem,
+          onResizePreview,
         )
       }
       onKeyDown={(event) =>
@@ -1261,6 +1357,10 @@ function beginScheduleResize(
     item: WeekCalendarItem,
     schedule: WorkScheduleDraft,
   ) => Promise<boolean>,
+  onResizePreview: (
+    item: WeekCalendarItem,
+    schedule: WorkScheduleDraft | null,
+  ) => void,
 ) {
   if (event.button !== 0) {
     return;
@@ -1271,7 +1371,11 @@ function beginScheduleResize(
   const pointerId = event.pointerId;
   const originX = event.clientX;
   const originY = event.clientY;
-  handle.setPointerCapture(pointerId);
+  try {
+    handle.setPointerCapture(pointerId);
+  } catch {
+    // WebViewがキャプチャを拒否しても、window上の監視で操作を継続する。
+  }
   handle.classList.add("is-active");
 
   const cleanup = () => {
@@ -1281,9 +1385,9 @@ function beginScheduleResize(
     }
     window.removeEventListener("pointerup", handlePointerUp);
     window.removeEventListener("pointercancel", handlePointerCancel);
+    window.removeEventListener("pointermove", handlePointerMove);
   };
-  const handlePointerCancel = () => cleanup();
-  const handlePointerUp = (pointerEvent: PointerEvent) => {
+  const resolveSchedule = (pointerEvent: PointerEvent) => {
     const delta = isVertical
       ? roundToQuarterHour(((pointerEvent.clientY - originY) / 54) * 60)
       : resolveDayResizeDelta(
@@ -1293,16 +1397,26 @@ function beginScheduleResize(
           pointerEvent.clientX - originX,
           handle,
         );
+    return delta === 0 ? null : shiftScheduleEdge(item, edge, delta, isVertical);
+  };
+  const handlePointerMove = (pointerEvent: PointerEvent) => {
+    onResizePreview(item, resolveSchedule(pointerEvent));
+  };
+  const handlePointerCancel = () => {
+    onResizePreview(item, null);
     cleanup();
-    if (delta === 0) {
-      return;
-    }
-    const schedule = shiftScheduleEdge(item, edge, delta, isVertical);
+  };
+  const handlePointerUp = (pointerEvent: PointerEvent) => {
+    const schedule = resolveSchedule(pointerEvent);
+    cleanup();
     if (schedule) {
       void onResizeItem(item, schedule);
+    } else {
+      onResizePreview(item, null);
     }
   };
 
+  window.addEventListener("pointermove", handlePointerMove);
   window.addEventListener("pointerup", handlePointerUp, { once: true });
   window.addEventListener("pointercancel", handlePointerCancel, { once: true });
 }
@@ -1385,6 +1499,23 @@ function shiftScheduleEdge(
     endDate: toDateInputValue(end),
     endTime: toTimeInputValue(end),
     isAllDay: false,
+  };
+}
+
+function applyScheduleToCalendarItem(
+  item: WeekCalendarItem,
+  schedule: WorkScheduleDraft,
+): WeekCalendarItem | null {
+  if (item.marker !== "scheduled") {
+    return null;
+  }
+  return {
+    ...item,
+    date: schedule.startDate,
+    time: schedule.startTime,
+    endDate: schedule.endDate,
+    endTime: schedule.endTime,
+    isAllDay: schedule.isAllDay,
   };
 }
 
