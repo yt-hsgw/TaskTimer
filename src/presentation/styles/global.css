@@ -2587,6 +2587,22 @@ button {
   grid-auto-rows: 26px;
 }
 
+.calendar-timed-day-overlay {
+  min-width: 0;
+  padding: 3px 6px;
+  pointer-events: none;
+  position: relative;
+  z-index: 3;
+}
+
+.calendar-timed-day-overlay .calendar-items.is-timed {
+  height: 100%;
+}
+
+.calendar-timed-day-overlay .calendar-item {
+  pointer-events: auto;
+}
+
 .calendar-all-day-item-placeholder {
   display: block;
   min-height: 26px;
@@ -2671,16 +2687,23 @@ button {
 .calendar-item.is-timed {
   align-content: start;
   min-height: 46px;
+  min-width: 0;
 }
 
 .calendar-item.marker-scheduled.is-timed {
   height: var(--schedule-height, 46px);
-  left: 0;
+  left: var(--schedule-lane-left, 0%);
   min-height: var(--schedule-height, 46px);
   position: absolute;
-  right: 0;
+  width: var(--schedule-lane-width, 100%);
   top: var(--schedule-offset, 0);
   z-index: 4;
+}
+
+.calendar-item.marker-scheduled.is-timed:hover,
+.calendar-item.marker-scheduled.is-timed.is-selected,
+.calendar-item.marker-scheduled.is-timed:focus-within {
+  z-index: 5;
 }
 
 .calendar-item.marker-scheduled {
@@ -2825,6 +2848,7 @@ button {
   background: #d93025;
   height: 2px;
   left: 0;
+  pointer-events: none;
   position: absolute;
   right: 0;
   z-index: 2;
