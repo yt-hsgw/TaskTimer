@@ -91,7 +91,7 @@ type PendingCalendarMove = {
 type CalendarItemVariant = "all-day" | "timed" | "month";
 const RESIZE_PREVIEW_ID_SUFFIX = ":resize-preview";
 const MOVE_PREVIEW_ID_SUFFIX = ":move-preview";
-const MONTH_VISIBLE_ITEM_LIMIT = 3;
+const CALENDAR_VISIBLE_ITEM_LIMIT = 3;
 
 export function WeekCalendar({
   viewMode,
@@ -725,6 +725,21 @@ function TimeGridCalendar({
   ): void;
 }) {
   const currentTime = getCurrentTimeMarker(days);
+  const headerItems = useMemo(
+    () =>
+      items.filter((item) =>
+        item.marker === "scheduled"
+          ? item.isAllDay || isMultiDaySchedule(item)
+          : !item.time,
+      ),
+    [items],
+  );
+  const headerDayLayouts = useMemo(
+    () => buildCalendarDayLayouts(days, headerItems),
+    [days, headerItems],
+  );
+  const rangeBoundaryStart = days[0]?.date;
+  const rangeBoundaryEnd = days.at(-1)?.date;
 
   return (
     <div
@@ -732,7 +747,7 @@ function TimeGridCalendar({
         viewMode === "day" ? "is-day-mode" : ""
       }`}
     >
-      <div className="calendar-time-zone">{formatTimeZoneOffset(new Date())}</div>
+      <div className="calendar-time-zone" aria-hidden="true" />
       {days.map((day) => (
         <div
           className={`calendar-time-header ${isToday(day.date) ? "is-today" : ""}`}
@@ -743,15 +758,17 @@ function TimeGridCalendar({
         </div>
       ))}
 
-      <div className="calendar-time-label">終日</div>
+      <div
+        className="calendar-time-label is-time-zone"
+        aria-label={`${formatTimeZoneOffset(new Date())}の終日・複数日予定`}
+      >
+        {formatTimeZoneOffset(new Date())}
+      </div>
       {days.map((day) => {
-        const dateOnlyItems = items
-          .filter((item) =>
-            item.marker === "scheduled"
-              ? item.isAllDay && isDateWithinSchedule(item, day.date)
-              : item.date === day.date && !item.time,
-          )
-          .sort(sortCalendarItems);
+        const dayLayout = headerDayLayouts.get(day.date) ?? {
+          slots: [],
+          hiddenCount: 0,
+        };
         const dropTargetForDay = { dueDate: day.date, dueTime: null };
         return (
           <div
@@ -778,12 +795,15 @@ function TimeGridCalendar({
           >
             <CalendarCellItems
               isLoading={isLoading}
-              items={dateOnlyItems}
+              items={dayLayout.slots}
+              hiddenCount={dayLayout.hiddenCount}
               selectedTarget={selectedTarget}
               draggedItem={draggedItem}
               isReschedulingItem={isReschedulingItem}
               variant="all-day"
               displayDate={day.date}
+              rangeBoundaryStart={rangeBoundaryStart}
+              rangeBoundaryEnd={rangeBoundaryEnd}
               onSelectItem={onSelectItem}
               onDragStart={onDragStart}
               onDragEnd={onDragEnd}
@@ -883,6 +903,7 @@ function TimeGridRow({
             if (item.marker === "scheduled") {
               return (
                 !item.isAllDay &&
+                !isMultiDaySchedule(item) &&
                 getTimedScheduleSegment(item, day.date)?.startHour === hour
               );
             }
@@ -966,6 +987,9 @@ function CalendarCellItems({
   isReschedulingItem,
   variant,
   displayDate,
+  hiddenCount = 0,
+  rangeBoundaryStart,
+  rangeBoundaryEnd,
   onSelectItem,
   onDragStart,
   onDragEnd,
@@ -974,12 +998,15 @@ function CalendarCellItems({
   onMoveItemKeyDown,
 }: {
   isLoading: boolean;
-  items: WeekCalendarItem[];
+  items: Array<WeekCalendarItem | null>;
   selectedTarget: WorkTargetRef | null;
   draggedItem: WeekCalendarItem | null;
   isReschedulingItem: boolean;
   variant: Exclude<CalendarItemVariant, "month">;
   displayDate: string;
+  hiddenCount?: number;
+  rangeBoundaryStart?: string;
+  rangeBoundaryEnd?: string;
   onSelectItem(item: WeekCalendarItem): void;
   onDragStart(item: WeekCalendarItem, event: DragEvent<HTMLButtonElement>): void;
   onDragEnd(): void;
@@ -1001,29 +1028,42 @@ function CalendarCellItems({
     return <p className="calendar-empty">読み込み中</p>;
   }
 
-  if (items.length === 0) {
+  if (items.length === 0 && hiddenCount === 0) {
     return null;
   }
 
   return (
     <div className={`calendar-items is-${variant}`}>
-      {items.map((item) => (
-        <CalendarItemButton
-          item={item}
-          key={`${item.id}:${displayDate}`}
-          displayDate={displayDate}
-          selectedTarget={selectedTarget}
-          draggedItem={draggedItem}
-          isReschedulingItem={isReschedulingItem}
-          variant={variant}
-          onSelectItem={onSelectItem}
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-          onResizeItem={onResizeItem}
-          onResizePreview={onResizePreview}
-          onMoveItemKeyDown={onMoveItemKeyDown}
-        />
-      ))}
+      {items.map((item, slotIndex) =>
+        item ? (
+          <CalendarItemButton
+            item={item}
+            key={`${item.id}:${displayDate}`}
+            displayDate={displayDate}
+            selectedTarget={selectedTarget}
+            draggedItem={draggedItem}
+            isReschedulingItem={isReschedulingItem}
+            variant={variant}
+            rangeBoundaryStart={rangeBoundaryStart}
+            rangeBoundaryEnd={rangeBoundaryEnd}
+            onSelectItem={onSelectItem}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            onResizeItem={onResizeItem}
+            onResizePreview={onResizePreview}
+            onMoveItemKeyDown={onMoveItemKeyDown}
+          />
+        ) : (
+          <span
+            className="calendar-all-day-item-placeholder"
+            aria-hidden="true"
+            key={`empty:${displayDate}:${slotIndex}`}
+          />
+        ),
+      )}
+      {hiddenCount > 0 ? (
+        <span className="calendar-more">他 {hiddenCount} 件</span>
+      ) : null}
     </div>
   );
 }
@@ -1080,7 +1120,7 @@ function MonthCalendar({
   const anchor = parseDateInputValue(anchorDate);
   const currentMonth = anchor.getMonth();
   const dayLayouts = useMemo(
-    () => buildMonthDayLayouts(days, items),
+    () => buildCalendarDayLayouts(days, items),
     [days, items],
   );
 
@@ -1177,16 +1217,16 @@ function MonthCalendar({
   );
 }
 
-type MonthDayLayout = {
+type CalendarDayLayout = {
   slots: Array<WeekCalendarItem | null>;
   hiddenCount: number;
 };
 
-function buildMonthDayLayouts(
+function buildCalendarDayLayouts(
   days: CalendarDay[],
   items: WeekCalendarItem[],
 ) {
-  const layouts = new Map<string, MonthDayLayout>();
+  const layouts = new Map<string, CalendarDayLayout>();
   for (let weekIndex = 0; weekIndex < days.length; weekIndex += 7) {
     const weekDays = days.slice(weekIndex, weekIndex + 7);
     const weekStart = weekDays[0]?.date;
@@ -1229,7 +1269,7 @@ function buildMonthDayLayouts(
 
     for (const day of weekDays) {
       const slots: Array<WeekCalendarItem | null> = Array.from(
-        { length: MONTH_VISIBLE_ITEM_LIMIT },
+        { length: CALENDAR_VISIBLE_ITEM_LIMIT },
         () => null,
       );
       const activeScheduledItems = scheduledItems.filter((item) =>
@@ -1238,7 +1278,7 @@ function buildMonthDayLayouts(
       let hiddenCount = 0;
       for (const item of activeScheduledItems) {
         const lane = scheduledLanes.get(item.id);
-        if (lane === undefined || lane >= MONTH_VISIBLE_ITEM_LIMIT) {
+        if (lane === undefined || lane >= CALENDAR_VISIBLE_ITEM_LIMIT) {
           hiddenCount += 1;
           continue;
         }
@@ -1282,6 +1322,8 @@ function CalendarItemButton({
   draggedItem,
   isReschedulingItem,
   variant,
+  rangeBoundaryStart,
+  rangeBoundaryEnd,
   onSelectItem,
   onDragStart,
   onDragEnd,
@@ -1295,6 +1337,8 @@ function CalendarItemButton({
   draggedItem: WeekCalendarItem | null;
   isReschedulingItem: boolean;
   variant: CalendarItemVariant;
+  rangeBoundaryStart?: string;
+  rangeBoundaryEnd?: string;
   onSelectItem(item: WeekCalendarItem): void;
   onDragStart(item: WeekCalendarItem, event: DragEvent<HTMLButtonElement>): void;
   onDragEnd(): void;
@@ -1324,9 +1368,16 @@ function CalendarItemButton({
   const relationLabel = item.parentTitle ? `親: ${item.parentTitle}` : null;
   const markerText = formatCalendarItemMarker(item);
   const isScheduled = item.marker === "scheduled";
-  const monthRangeSegment =
-    variant === "month" && isScheduled
-      ? getMonthRangeSegment(item, displayDate)
+  const rangeSegment =
+    isScheduled &&
+    (variant === "month" ||
+      (variant === "all-day" && isMultiDaySchedule(item)))
+      ? getCalendarRangeSegment(
+          item,
+          displayDate,
+          rangeBoundaryStart,
+          rangeBoundaryEnd,
+        )
       : null;
   const hasStartHandle =
     !isCalendarPreview && isScheduled && displayDate === item.date;
@@ -1354,10 +1405,10 @@ function CalendarItemButton({
       } ${isCalendarPreview ? "is-calendar-preview" : ""} ${
         isResizePreview ? "is-resize-preview" : ""
       } ${isMovePreview ? "is-move-preview" : ""} ${
-        monthRangeSegment ? "is-scheduled-range" : ""
+        rangeSegment ? "is-scheduled-range" : ""
       } ${
-        monthRangeSegment?.connectsBefore ? "connects-before" : ""
-      } ${monthRangeSegment?.connectsAfter ? "connects-after" : ""}`}
+        rangeSegment?.connectsBefore ? "connects-before" : ""
+      } ${rangeSegment?.connectsAfter ? "connects-after" : ""}`}
       style={style}
       aria-hidden={isCalendarPreview || undefined}
       data-calendar-preview={previewKind ?? undefined}
@@ -1399,13 +1450,13 @@ function CalendarItemButton({
         }}
       >
         {isCalendarPreview &&
-        (!monthRangeSegment || monthRangeSegment.showsContent) ? (
+        (!rangeSegment || rangeSegment.showsContent) ? (
           <span className="calendar-preview-label">
             {isMovePreview ? "移動後" : "変更後"}
           </span>
         ) : null}
-        {monthRangeSegment ? (
-          monthRangeSegment.showsContent ? (
+        {rangeSegment ? (
+          rangeSegment.showsContent ? (
             <>
               {item.time ? (
                 <small className="calendar-month-range-time">{item.time}</small>
@@ -1416,10 +1467,10 @@ function CalendarItemButton({
         ) : (
           <span className="calendar-item-title">{item.title}</span>
         )}
-        {relationLabel && !monthRangeSegment ? (
+        {relationLabel && !rangeSegment ? (
           <small className="calendar-item-parent">{relationLabel}</small>
         ) : null}
-        {!monthRangeSegment &&
+        {!rangeSegment &&
         (variant === "timed" ||
           variant === "month" ||
           isCalendarPreview) ? (
@@ -1451,7 +1502,12 @@ function getCalendarPreviewKind(itemId: string): "resize" | "move" | null {
   return null;
 }
 
-function getMonthRangeSegment(item: WeekCalendarItem, displayDate: string) {
+function getCalendarRangeSegment(
+  item: WeekCalendarItem,
+  displayDate: string,
+  rangeBoundaryStart?: string,
+  rangeBoundaryEnd?: string,
+) {
   if (
     item.marker !== "scheduled" ||
     !item.endDate ||
@@ -1459,14 +1515,23 @@ function getMonthRangeSegment(item: WeekCalendarItem, displayDate: string) {
   ) {
     return null;
   }
-  const weekday = (parseDateInputValue(displayDate).getDay() + 6) % 7;
-  const connectsBefore = displayDate > item.date && weekday > 0;
-  const connectsAfter = displayDate < item.endDate && weekday < 6;
+  const boundaryStart = rangeBoundaryStart ?? getWeekStartDate(displayDate);
+  const boundaryEnd = rangeBoundaryEnd ?? getWeekEndDate(displayDate);
+  const connectsBefore = displayDate > item.date && displayDate > boundaryStart;
+  const connectsAfter = displayDate < item.endDate && displayDate < boundaryEnd;
   return {
     connectsBefore,
     connectsAfter,
     showsContent: !connectsBefore,
   };
+}
+
+function isMultiDaySchedule(item: WeekCalendarItem) {
+  return (
+    item.marker === "scheduled" &&
+    item.endDate !== null &&
+    item.endDate > item.date
+  );
 }
 
 function ScheduleResizeHandle({

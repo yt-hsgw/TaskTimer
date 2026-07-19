@@ -46,6 +46,7 @@ const thresholds = {
   calendar_day_move: 1500,
   calendar_month: 2000,
   calendar_month_date_change: 1500,
+  calendar_multiday_header: 2000,
   task_detail: 1000,
 };
 const taskPageSize = 200;
@@ -228,7 +229,12 @@ try {
       action: clickNavigation("カレンダー"),
       ready: `document.querySelector('button.nav-item[aria-label="カレンダー"][aria-current="page"]') &&
         document.querySelector(".calendar-time-grid:not(.is-day-mode)") &&
-        document.querySelectorAll(".calendar-item").length === ${profile.taskCount}`,
+        (() => {
+          const visibleCount = document.querySelectorAll(".calendar-item").length;
+          const hiddenCount = [...document.querySelectorAll(".calendar-more")]
+            .reduce((total, element) => total + Number(element.textContent?.match(/\\d+/)?.[0] ?? 0), 0);
+          return visibleCount + hiddenCount === ${profile.taskCount};
+        })()`,
     }),
   );
   const calendarMoveStartedAt = performance.now();
@@ -292,7 +298,12 @@ try {
       ready: `document.querySelector(".calendar-time-grid.is-day-mode") &&
         [...document.querySelectorAll(".calendar-view-switch button")]
           .some((button) => button.textContent === "日" && button.classList.contains("is-active")) &&
-        document.querySelectorAll(".calendar-item").length === ${profile.taskCount}`,
+        (() => {
+          const visibleCount = document.querySelectorAll(".calendar-item").length;
+          const hiddenCount = [...document.querySelectorAll(".calendar-more")]
+            .reduce((total, element) => total + Number(element.textContent?.match(/\\d+/)?.[0] ?? 0), 0);
+          return visibleCount + hiddenCount === ${profile.taskCount};
+        })()`,
     }),
   );
   const calendarDayMoveStartedAt = performance.now();
@@ -367,6 +378,35 @@ try {
       "calendar_month_date_change",
       performance.now() - calendarMonthDateChangeStartedAt,
       thresholds.calendar_month_date_change,
+    ),
+  );
+  const calendarMultiDayHeaderStartedAt = performance.now();
+  const calendarMultiDayHeaderResult = await verifyCalendarMultiDayHeader(
+    client,
+    sessionId,
+    calendarMonthDateChangeResult.destinationDate,
+    calendarMonthDateChangeResult.destinationEndDate,
+  );
+  assertCommandScope(
+    "日・週カレンダー複数日上部表示",
+    calendarMultiDayHeaderResult.commands,
+    {
+      required: ["list_calendar_items"],
+      forbidden: [
+        "update_task",
+        "update_subtask",
+        "resize_scheduled_work_item",
+        "move_scheduled_work_item",
+        "sync_notifications",
+        "process_notification_os_registrations",
+      ],
+    },
+  );
+  measurements.push(
+    createMeasurement(
+      "calendar_multiday_header",
+      performance.now() - calendarMultiDayHeaderStartedAt,
+      thresholds.calendar_multiday_header,
     ),
   );
   await evaluate(client, sessionId, clickNavigation("タスク"));
@@ -1163,22 +1203,43 @@ async function verifyCalendarTimedResizePreview(client, sessionId) {
     },
   });
 
-  await waitForPaintedExpression(
-    client,
-    sessionId,
-    `(() => {
-      const item = document.querySelector(
-        '.calendar-item.marker-scheduled.is-timed:not(.is-resize-preview)'
-      );
-      return Boolean(
-        item?.querySelector('small:last-child')?.textContent?.includes('13:15') &&
-        !document.querySelector('.calendar-item.is-resize-preview') &&
-        window.__taskTimerInvokeLog?.includes('list_task_page') &&
-        window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
-        !document.querySelector('.app-alert')
-      );
-    })()`,
-  );
+  try {
+    await waitForPaintedExpression(
+      client,
+      sessionId,
+      `(() => {
+        const item = document.querySelector(
+          '.calendar-item.marker-scheduled.is-timed:not(.is-resize-preview)'
+        );
+        return Boolean(
+          item?.querySelector('small:last-child')?.textContent?.includes('13:15') &&
+          !document.querySelector('.calendar-item.is-resize-preview') &&
+          !document.querySelector('.task-detail-pane') &&
+          window.__taskTimerInvokeLog?.includes('list_task_page') &&
+          window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
+          !document.querySelector('.app-alert')
+        );
+      })()`,
+    );
+  } catch (error) {
+    const diagnostics = await evaluateValue(
+      client,
+      sessionId,
+      `(() => ({
+        marker: document.querySelector(
+          '.calendar-item.marker-scheduled.is-timed:not(.is-resize-preview) small:last-child'
+        )?.textContent ?? null,
+        previewCount: document.querySelectorAll('.calendar-item.is-resize-preview').length,
+        detailOpen: Boolean(document.querySelector('.task-detail-pane')),
+        commands: window.__taskTimerInvokeLog ?? [],
+        alert: document.querySelector('.app-alert')?.textContent ?? null
+      }))()`,
+    );
+    throw new Error(
+      `時刻調整後の状態が不正です: ${JSON.stringify(diagnostics)}`,
+      { cause: error },
+    );
+  }
   return { commands: await takeInvokeLog(client, sessionId) };
 }
 
@@ -1443,6 +1504,7 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
         targetBounds &&
         Math.abs(targetBounds.right - sourceBounds.left) <= 2 &&
         !document.querySelector('.calendar-item.is-resize-preview') &&
+        !document.querySelector('.task-detail-pane') &&
         window.__taskTimerInvokeLog?.includes('resize_scheduled_work_item') &&
         window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
         !document.querySelector('.app-alert')
@@ -1561,6 +1623,7 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
       return Boolean(
         destination?.classList.contains('connects-after') &&
         destinationEnd?.classList.contains('connects-before') &&
+        !document.querySelector('.task-detail-pane') &&
         window.__taskTimerInvokeLog?.includes('move_scheduled_work_item') &&
         window.__taskTimerInvokeLog?.includes('list_task_page') &&
         window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
@@ -1570,7 +1633,191 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
   );
   return {
     commands: [...resizeCommands, ...(await takeInvokeLog(client, sessionId))],
+    destinationDate: moveResult.destinationDate,
+    destinationEndDate: moveResult.destinationEndDate,
   };
+}
+
+async function verifyCalendarMultiDayHeader(
+  client,
+  sessionId,
+  destinationDate,
+  destinationEndDate,
+) {
+  await resetInvokeLog(client, sessionId);
+  await evaluate(client, sessionId, clickCalendarMode("日"));
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector('.calendar-time-grid.is-day-mode') &&
+      !document.querySelector('.task-detail-pane')`,
+  );
+
+  let destinationVisible = false;
+  for (let offset = 0; offset < 8; offset += 1) {
+    destinationVisible = await evaluateValue(
+      client,
+      sessionId,
+      `Boolean(document.querySelector(
+        '.calendar-all-day-cell[data-calendar-date=${JSON.stringify(destinationDate)}]'
+      ))`,
+    );
+    if (destinationVisible) {
+      break;
+    }
+    const previousDate = await evaluateValue(
+      client,
+      sessionId,
+      `document.querySelector('.calendar-all-day-cell')?.dataset.calendarDate ?? null`,
+    );
+    await evaluate(
+      client,
+      sessionId,
+      `document.querySelector('button[aria-label="次の日"]')?.click()`,
+    );
+    await waitForPaintedExpression(
+      client,
+      sessionId,
+      `document.querySelector('.calendar-all-day-cell')?.dataset.calendarDate !== ${JSON.stringify(previousDate)}`,
+    );
+  }
+  if (!destinationVisible) {
+    throw new Error(`日表示で複数日予定の開始日へ移動できません: ${destinationDate}`);
+  }
+
+  const dayLayout = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const cell = document.querySelector(
+        '.calendar-all-day-cell[data-calendar-date=${JSON.stringify(destinationDate)}]'
+      );
+      const item = cell?.querySelector(
+        '.calendar-item.marker-scheduled.is-all-day.is-scheduled-range:not(.is-calendar-preview)'
+      );
+      const timeLabel = document.querySelector('.calendar-time-label.is-time-zone');
+      const itemBounds = item?.getBoundingClientRect();
+      const labelBounds = timeLabel?.getBoundingClientRect();
+      return {
+        timeZone: timeLabel?.textContent?.trim() ?? null,
+        marker: item?.textContent?.trim() ?? null,
+        hasStartHandle: Boolean(item?.querySelector(
+          '.calendar-resize-handle.is-start.is-horizontal'
+        )),
+        timedDuplicateCount: document.querySelectorAll(
+          '.calendar-time-cell .calendar-item.marker-scheduled'
+        ).length,
+        sameRow: Boolean(
+          itemBounds &&
+          labelBounds &&
+          itemBounds.top < labelBounds.bottom &&
+          itemBounds.bottom > labelBounds.top
+        ),
+        detailOpen: Boolean(document.querySelector('.task-detail-pane'))
+      };
+    })()`,
+  );
+  if (
+    !dayLayout?.timeZone?.startsWith("GMT") ||
+    !dayLayout.marker?.includes("14:15") ||
+    !dayLayout.hasStartHandle ||
+    dayLayout.timedDuplicateCount !== 0 ||
+    !dayLayout.sameRow ||
+    dayLayout.detailOpen
+  ) {
+    throw new Error(`日表示の複数日上部予定行が不正です: ${JSON.stringify(dayLayout)}`);
+  }
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector(
+      '.calendar-all-day-cell[data-calendar-date=${JSON.stringify(destinationDate)}] ' +
+      '.calendar-item.marker-scheduled .calendar-item-content'
+    )?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.task-detail-pane'))`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('button[aria-label="詳細を閉じる"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.task-detail-pane')`,
+  );
+
+  await evaluate(client, sessionId, clickCalendarMode("週"));
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector(
+        '.calendar-all-day-cell[data-calendar-date=${JSON.stringify(destinationDate)}] ' +
+        '.calendar-item.marker-scheduled.is-scheduled-range'
+      ) &&
+      document.querySelector(
+        '.calendar-all-day-cell[data-calendar-date=${JSON.stringify(destinationEndDate)}] ' +
+        '.calendar-item.marker-scheduled.is-scheduled-range'
+      )
+    )`,
+  );
+  const weekLayout = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const start = document.querySelector(
+        '.calendar-all-day-cell[data-calendar-date=${JSON.stringify(destinationDate)}] ' +
+        '.calendar-item.marker-scheduled.is-scheduled-range:not(.is-calendar-preview)'
+      );
+      const end = document.querySelector(
+        '.calendar-all-day-cell[data-calendar-date=${JSON.stringify(destinationEndDate)}] ' +
+        '.calendar-item.marker-scheduled.is-scheduled-range:not(.is-calendar-preview)'
+      );
+      const startBounds = start?.getBoundingClientRect();
+      const endBounds = end?.getBoundingClientRect();
+      return {
+        startsRange: start?.classList.contains('connects-after') ?? false,
+        continuesRange: end?.classList.contains('connects-before') ?? false,
+        gap: startBounds && endBounds
+          ? Math.abs(startBounds.right - endBounds.left)
+          : null,
+        rowOffset: startBounds && endBounds
+          ? Math.abs(startBounds.top - endBounds.top)
+          : null,
+        startContent: start?.textContent?.trim() ?? null,
+        endContent: end?.textContent?.trim() ?? null,
+        hasEndHandle: Boolean(end?.querySelector(
+          '.calendar-resize-handle.is-end.is-horizontal'
+        )),
+        timedDuplicateCount: document.querySelectorAll(
+          '.calendar-time-cell .calendar-item.marker-scheduled'
+        ).length,
+        detailOpen: Boolean(document.querySelector('.task-detail-pane'))
+      };
+    })()`,
+  );
+  if (
+    !weekLayout?.startsRange ||
+    !weekLayout.continuesRange ||
+    weekLayout.gap === null ||
+    weekLayout.gap > 2 ||
+    weekLayout.rowOffset === null ||
+    weekLayout.rowOffset > 1 ||
+    !weekLayout.startContent?.includes("14:15") ||
+    weekLayout.endContent !== "" ||
+    !weekLayout.hasEndHandle ||
+    weekLayout.timedDuplicateCount !== 0 ||
+    weekLayout.detailOpen
+  ) {
+    throw new Error(`週表示の複数日上部予定行が不正です: ${JSON.stringify(weekLayout)}`);
+  }
+  return { commands: await takeInvokeLog(client, sessionId) };
 }
 
 async function dragPointer(

@@ -1728,7 +1728,6 @@ export function App() {
       }
       return runMutation(async () => {
         await tauriTaskTimerGateway.resizeScheduledWorkItem(item.target, schedule);
-        return resolveTaskIdForTarget(tasks, item.target) ?? undefined;
       }, {
         scope: "calendar",
         refresh: {
@@ -1737,7 +1736,7 @@ export function App() {
         },
       });
     },
-    [runMutation, tasks],
+    [runMutation],
   );
 
   const handleMoveScheduledCalendarItem = useCallback(
@@ -1757,7 +1756,6 @@ export function App() {
           item.target,
           destination,
         );
-        return resolveTaskIdForTarget(tasks, item.target) ?? undefined;
       }, {
         scope: "calendar",
         refresh: {
@@ -1766,7 +1764,7 @@ export function App() {
         },
       });
     },
-    [runMutation, tasks],
+    [runMutation],
   );
 
   const handleChangeCalendarViewMode = useCallback(
