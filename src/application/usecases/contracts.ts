@@ -144,6 +144,16 @@ export type PomodoroSettingsDraft = {
   autoStartNextWork: boolean;
 };
 
+export type TaskTimerSettings = {
+  id: string;
+  defaultTargetSeconds: number;
+  updatedAt: string;
+};
+
+export type TaskTimerSettingsDraft = {
+  defaultTargetSeconds: number;
+};
+
 export type PomodoroPhase = "work" | "short_break" | "long_break";
 export type PomodoroStatus = "running" | "paused" | "completed" | "cancelled";
 
@@ -168,6 +178,11 @@ export type ActivePomodoro = {
 export type PomodoroExpirySyncResult = {
   expiredPomodoro: ActivePomodoro | null;
   activePomodoro: ActivePomodoro | null;
+  notificationSummary: NotificationDispatchSummary;
+};
+
+export type TaskCountdownExpirySyncResult = {
+  expiredTimer: ActiveTimer | null;
   notificationSummary: NotificationDispatchSummary;
 };
 
@@ -333,6 +348,9 @@ export type TaskTimerGateway = {
   listCalendarItems(startDate: string, endDate: string): Promise<WeekCalendarItem[]>;
   listWeekCalendarItems(weekStartDate: string): Promise<WeekCalendarItem[]>;
   getActiveTimer(): Promise<ActiveTimer | null>;
+  syncExpiredTaskCountdown(): Promise<TaskCountdownExpirySyncResult>;
+  getTaskTimerSettings(): Promise<TaskTimerSettings>;
+  updateTaskTimerSettings(input: TaskTimerSettingsDraft): Promise<TaskTimerSettings>;
   getActivePomodoro(): Promise<ActivePomodoro | null>;
   syncExpiredPomodoro(): Promise<PomodoroExpirySyncResult>;
   getPomodoroSettings(): Promise<PomodoroSettings>;

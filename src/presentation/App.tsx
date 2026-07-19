@@ -16,6 +16,8 @@ import type {
   TaskPageCursor,
   TaskPageScope,
   TaskRow,
+  TaskTimerSettings,
+  TaskTimerSettingsDraft,
   TaskWithSubtasks,
   UiPreferences,
   WeekCalendarItem,
@@ -25,7 +27,7 @@ import type {
   WorkScheduleMoveDraft,
 } from "../application/usecases/contracts";
 import type { NotificationDisplayMode } from "../domain/notification/types";
-import type { ActiveTimer, TimerSession } from "../domain/timer/types";
+import type { ActiveTimer } from "../domain/timer/types";
 import {
   DEFAULT_TASK_LIST_ID,
   type Task,
@@ -65,6 +67,7 @@ type ReadModelRefreshPlan = {
   settings?: boolean;
   notifications?: boolean;
   syncExpiredPomodoro?: boolean;
+  syncExpiredTaskCountdown?: boolean;
 };
 
 type MutationScope =
@@ -153,6 +156,8 @@ export function App() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [pomodoroSettings, setPomodoroSettings] =
     useState<PomodoroSettings | null>(null);
+  const [taskTimerSettings, setTaskTimerSettings] =
+    useState<TaskTimerSettings | null>(null);
   const [notificationSummary, setNotificationSummary] =
     useState<NotificationDispatchSummary | null>(null);
   const [nextNotificationSchedule, setNextNotificationSchedule] =
@@ -368,11 +373,19 @@ export function App() {
     [calendarQueryKey, calendarRange.endDate, calendarRange.startDate],
   );
 
-  const refreshRuntime = useCallback(async (syncExpiredPomodoro = false) => {
+  const refreshRuntime = useCallback(async (
+    syncExpiredPomodoro = false,
+    syncExpiredTaskCountdown = false,
+  ) => {
     const requestId = ++runtimeRequestIdRef.current;
-    const pomodoroSyncResult = syncExpiredPomodoro
-      ? await tauriTaskTimerGateway.syncExpiredPomodoro()
-      : null;
+    const [pomodoroSyncResult, countdownSyncResult] = await Promise.all([
+      syncExpiredPomodoro
+        ? tauriTaskTimerGateway.syncExpiredPomodoro()
+        : Promise.resolve(null),
+      syncExpiredTaskCountdown
+        ? tauriTaskTimerGateway.syncExpiredTaskCountdown()
+        : Promise.resolve(null),
+    ]);
     const [nextActiveTimer, nextActivePomodoro] = await Promise.all([
       tauriTaskTimerGateway.getActiveTimer(),
       tauriTaskTimerGateway.getActivePomodoro(),
@@ -382,19 +395,30 @@ export function App() {
     }
     setActiveTimer(nextActiveTimer);
     setActivePomodoro(nextActivePomodoro);
-    return pomodoroSyncResult?.notificationSummary ?? null;
+    const pomodoroSummary = pomodoroSyncResult?.notificationSummary ?? null;
+    const countdownSummary = countdownSyncResult?.notificationSummary ?? null;
+    return pomodoroSummary && countdownSummary
+      ? combineNotificationSummaries(pomodoroSummary, countdownSummary)
+      : pomodoroSummary ?? countdownSummary;
   }, []);
 
   const refreshSettings = useCallback(async () => {
     const requestId = ++settingsRequestIdRef.current;
-    const [nextPomodoroSettings, nextDisplayMode, nextNotificationsEnabled] =
+    const [
+      nextPomodoroSettings,
+      nextTaskTimerSettings,
+      nextDisplayMode,
+      nextNotificationsEnabled,
+    ] =
       await Promise.all([
         tauriTaskTimerGateway.getPomodoroSettings(),
+        tauriTaskTimerGateway.getTaskTimerSettings(),
         tauriTaskTimerGateway.getNotificationDisplayMode(),
         tauriTaskTimerGateway.getNotificationsEnabled(),
       ]);
     if (requestId === settingsRequestIdRef.current) {
       setPomodoroSettings(nextPomodoroSettings);
+      setTaskTimerSettings(nextTaskTimerSettings);
       setDisplayMode(nextDisplayMode);
       setNotificationsEnabled(nextNotificationsEnabled);
     }
@@ -424,7 +448,17 @@ export function App() {
 
   const refreshReadModels = useCallback(
     async (plan: ReadModelRefreshPlan) => {
-      let pomodoroSummary: NotificationDispatchSummary | null = null;
+      let runtimeSummary: NotificationDispatchSummary | null = null;
+      const shouldSyncExpiredRuntime = Boolean(
+        plan.syncExpiredPomodoro || plan.syncExpiredTaskCountdown,
+      );
+      if (shouldSyncExpiredRuntime) {
+        runtimeSummary = await refreshRuntime(
+          plan.syncExpiredPomodoro,
+          plan.syncExpiredTaskCountdown,
+        );
+      }
+
       const refreshes: Promise<void>[] = [];
       if (plan.taskPage) {
         refreshes.push(refreshTaskPage());
@@ -441,10 +475,10 @@ export function App() {
       if (plan.calendar) {
         refreshes.push(refreshCalendar());
       }
-      if (plan.runtime || plan.syncExpiredPomodoro) {
+      if (plan.runtime && !shouldSyncExpiredRuntime) {
         refreshes.push(
-          refreshRuntime(plan.syncExpiredPomodoro).then((summary) => {
-            pomodoroSummary = summary;
+          refreshRuntime().then((summary) => {
+            runtimeSummary = summary;
           }),
         );
       }
@@ -453,7 +487,7 @@ export function App() {
       }
       await Promise.all(refreshes);
       if (plan.notifications) {
-        await refreshNotifications(pomodoroSummary);
+        await refreshNotifications(runtimeSummary);
       }
     },
     [
@@ -488,6 +522,7 @@ export function App() {
           settings: true,
           notifications: true,
           syncExpiredPomodoro: true,
+          syncExpiredTaskCountdown: true,
         });
       } catch (error) {
         setNextNotificationSchedule(null);
@@ -667,6 +702,7 @@ export function App() {
         runtime: true,
         notifications: true,
         syncExpiredPomodoro: true,
+        syncExpiredTaskCountdown: true,
       })
         .catch((error) => {
           setErrorMessage(toErrorMessage(error));
@@ -707,6 +743,25 @@ export function App() {
     }, timeoutMs);
     return () => window.clearTimeout(timerId);
   }, [activePomodoro, refreshReadModels]);
+
+  useEffect(() => {
+    const timeoutMs = getTaskCountdownSyncTimeoutMs(activeTimer);
+    if (timeoutMs === null) {
+      return;
+    }
+
+    const timerId = window.setTimeout(() => {
+      void refreshReadModels({
+        taskPage: true,
+        runtime: true,
+        notifications: true,
+        syncExpiredTaskCountdown: true,
+      }).catch((error) => {
+        setErrorMessage(toErrorMessage(error));
+      });
+    }, timeoutMs);
+    return () => window.clearTimeout(timerId);
+  }, [activeTimer, refreshReadModels]);
 
   useEffect(() => {
     if (
@@ -1160,7 +1215,6 @@ export function App() {
     (target: WorkTargetRef) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.startTimer(target);
-        return target.type === "task" ? target.id : undefined;
       }, {
         scope: "detail",
         ...TASK_TIMER_REFRESH,
@@ -1302,10 +1356,7 @@ export function App() {
   const handlePauseTimer = useCallback(
     () =>
       runMutation(async () => {
-        const pausedTimer = await tauriTaskTimerGateway.pauseActiveTimer();
-        return pausedTimer.target.type === "task"
-          ? pausedTimer.target.id
-          : undefined;
+        await tauriTaskTimerGateway.pauseActiveTimer();
       }, {
         scope: "detail",
         ...TASK_TIMER_REFRESH,
@@ -1316,10 +1367,7 @@ export function App() {
   const handleResumeTimer = useCallback(
     () =>
       runMutation(async () => {
-        const resumedTimer = await tauriTaskTimerGateway.resumeActiveTimer();
-        return resumedTimer.target.type === "task"
-          ? resumedTimer.target.id
-          : undefined;
+        await tauriTaskTimerGateway.resumeActiveTimer();
       }, {
         scope: "detail",
         ...TASK_TIMER_REFRESH,
@@ -1330,11 +1378,7 @@ export function App() {
   const handleStopTimer = useCallback(
     () =>
       runMutation(async () => {
-        const stoppedTimer: TimerSession =
-          await tauriTaskTimerGateway.stopActiveTimer();
-        return stoppedTimer.target.type === "task"
-          ? stoppedTimer.target.id
-          : undefined;
+        await tauriTaskTimerGateway.stopActiveTimer();
       }, {
         scope: "detail",
         ...TASK_TIMER_REFRESH,
@@ -1519,6 +1563,17 @@ export function App() {
     (input: PomodoroSettingsDraft) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.updatePomodoroSettings(input);
+      }, {
+        scope: "settings",
+        refresh: { settings: true },
+      }),
+    [runMutation],
+  );
+
+  const handleUpdateTaskTimerSettings = useCallback(
+    (input: TaskTimerSettingsDraft) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.updateTaskTimerSettings(input);
       }, {
         scope: "settings",
         refresh: { settings: true },
@@ -1859,6 +1914,8 @@ export function App() {
                 tasks={visibleTasks}
                 taskRows={visibleTaskRows}
                 selectedTaskId={selectedTaskId}
+                activeTimer={activeTimer}
+                activePomodoro={activePomodoro}
                 eyebrow={getTaskPanelEyebrow(activeView)}
                 title={
                   activeView.kind === "today"
@@ -1880,7 +1937,7 @@ export function App() {
                 }
                 showTaskForm={activeView.kind === "list"}
                 isLoading={isLoading || isTaskPageLoading}
-                isMutating={false}
+                isMutating={isDetailMutating}
                 isCreatingTaskPending={isCreatingTaskPending}
                 isLoadingMore={isLoadingMoreTasks}
                 totalTaskCount={taskPageState.totalCount}
@@ -1892,6 +1949,10 @@ export function App() {
                 onCreateTask={handleCreateTask}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
                 onToggleTaskFavorite={handleToggleTaskFavorite}
+                onStartTimer={handleStartTimer}
+                onPauseTimer={handlePauseTimer}
+                onResumeTimer={handleResumeTimer}
+                onStopTimer={handleStopTimer}
                 onLoadMoreTasks={handleLoadMoreTasks}
               />
               {selectedTask ? (
@@ -2103,11 +2164,13 @@ export function App() {
             <MemoizedSettingsPanel
               displayMode={displayMode}
               notificationsEnabled={notificationsEnabled}
+              taskTimerSettings={taskTimerSettings}
               pomodoroSettings={pomodoroSettings}
               isMutating={isSettingsMutating}
               notificationSummary={notificationSummary}
               onUpdateDisplayMode={handleUpdateNotificationDisplayMode}
               onUpdateNotificationsEnabled={handleUpdateNotificationsEnabled}
+              onUpdateTaskTimerSettings={handleUpdateTaskTimerSettings}
               onUpdatePomodoroSettings={handleUpdatePomodoroSettings}
               onRetryNotifications={handleRetryNotifications}
               onCreateJsonExport={handleCreateJsonExport}
@@ -2387,6 +2450,26 @@ function getPomodoroSyncTimeoutMs(activePomodoro: ActivePomodoro | null) {
     return 500;
   }
   return Math.min(remainingMs + 500, 60_000);
+}
+
+function getTaskCountdownSyncTimeoutMs(activeTimer: ActiveTimer | null) {
+  if (!activeTimer?.targetSeconds || activeTimer.pausedAt) {
+    return null;
+  }
+
+  const startedAt = new Date(activeTimer.startedAt).getTime();
+  if (Number.isNaN(startedAt)) {
+    return 60_000;
+  }
+
+  const endAt =
+    startedAt +
+    (activeTimer.targetSeconds + activeTimer.accumulatedPausedSeconds) * 1_000;
+  const remainingMs = endAt - Date.now();
+  if (remainingMs <= 0) {
+    return 500;
+  }
+  return remainingMs + 500;
 }
 
 function getNotificationScheduleTimeoutMs(notifyAt: string) {

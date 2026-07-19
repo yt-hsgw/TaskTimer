@@ -118,6 +118,37 @@ pub fn get_active_timer(
 }
 
 #[tauri::command]
+pub fn get_task_timer_settings(
+    database: DatabaseState<'_>,
+) -> Result<super::dto::TaskTimerSettingsDto, String> {
+    super::usecases::get_task_timer_settings(database.inner()).map(Into::into)
+}
+
+#[tauri::command]
+pub fn update_task_timer_settings(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::UpdateTaskTimerSettingsRequestDto,
+) -> Result<super::dto::TaskTimerSettingsDto, String> {
+    super::usecases::update_task_timer_settings(database.inner(), clock.inner(), request.into())
+        .map(Into::into)
+}
+
+#[tauri::command]
+pub fn sync_expired_task_countdown(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    notification_gateway: NotificationGatewayState<'_>,
+) -> Result<super::dto::TaskCountdownExpirySyncDto, String> {
+    super::usecases::sync_expired_task_countdown(
+        database.inner(),
+        notification_gateway.inner(),
+        clock.inner(),
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
 pub fn get_pomodoro_settings(
     database: DatabaseState<'_>,
 ) -> Result<super::dto::PomodoroSettingsDto, String> {

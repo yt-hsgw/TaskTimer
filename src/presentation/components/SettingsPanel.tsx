@@ -4,6 +4,8 @@ import type {
   NotificationDispatchSummary,
   PomodoroSettings,
   PomodoroSettingsDraft,
+  TaskTimerSettings,
+  TaskTimerSettingsDraft,
 } from "../../application/usecases/contracts";
 import { usePresentationRenderProbe } from "../renderProbe";
 
@@ -19,11 +21,13 @@ type SettingsPanelProps = {
   displayMode: NotificationDisplayMode;
   notificationsEnabled: boolean;
   pomodoroSettings: PomodoroSettings | null;
+  taskTimerSettings: TaskTimerSettings | null;
   isMutating: boolean;
   notificationSummary: NotificationDispatchSummary | null;
   onUpdateDisplayMode(displayMode: NotificationDisplayMode): Promise<boolean>;
   onUpdateNotificationsEnabled(enabled: boolean): Promise<boolean>;
   onUpdatePomodoroSettings(input: PomodoroSettingsDraft): Promise<boolean>;
+  onUpdateTaskTimerSettings(input: TaskTimerSettingsDraft): Promise<boolean>;
   onRetryNotifications(): Promise<boolean>;
   onCreateJsonExport(): Promise<DataManagementActionResult>;
   onCreateCsvExport(): Promise<DataManagementActionResult>;
@@ -33,11 +37,13 @@ export function SettingsPanel({
   displayMode,
   notificationsEnabled,
   pomodoroSettings,
+  taskTimerSettings,
   isMutating,
   notificationSummary,
   onUpdateDisplayMode,
   onUpdateNotificationsEnabled,
   onUpdatePomodoroSettings,
+  onUpdateTaskTimerSettings,
   onRetryNotifications,
   onCreateJsonExport,
   onCreateCsvExport,
@@ -53,6 +59,12 @@ export function SettingsPanel({
   const [pomodoroSaveMessage, setPomodoroSaveMessage] = useState<string | null>(
     null,
   );
+  const [taskTimerMinutes, setTaskTimerMinutes] = useState(() =>
+    secondsToMinutesText(taskTimerSettings?.defaultTargetSeconds),
+  );
+  const [taskTimerSaveMessage, setTaskTimerSaveMessage] = useState<string | null>(
+    null,
+  );
   const isDataManagementBusy = isMutating || activeDataOperation !== null;
   const pomodoroValidationError = pomodoroSettings
     ? validatePomodoroDraft(pomodoroDraft)
@@ -65,6 +77,13 @@ export function SettingsPanel({
     setPomodoroDraft(createPomodoroDraft(pomodoroSettings));
     setPomodoroSaveMessage(null);
   }, [pomodoroSettings]);
+
+  useEffect(() => {
+    setTaskTimerMinutes(
+      secondsToMinutesText(taskTimerSettings?.defaultTargetSeconds),
+    );
+    setTaskTimerSaveMessage(null);
+  }, [taskTimerSettings]);
 
   const runDataManagementAction = async (
     operation: DataManagementOperation,
@@ -104,6 +123,22 @@ export function SettingsPanel({
     });
     setPomodoroSaveMessage(
       updated ? "ポモドーロ設定を保存しました。" : "ポモドーロ設定を保存できませんでした。",
+    );
+  };
+
+  const handleTaskTimerSubmit = async () => {
+    const minutes = Number(taskTimerMinutes);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+      setTaskTimerSaveMessage("1分以上1,440分以内で入力してください。");
+      return;
+    }
+    const updated = await onUpdateTaskTimerSettings({
+      defaultTargetSeconds: minutes * 60,
+    });
+    setTaskTimerSaveMessage(
+      updated
+        ? "タスクタイマー設定を保存しました。"
+        : "タスクタイマー設定を保存できませんでした。",
     );
   };
 
@@ -206,6 +241,70 @@ export function SettingsPanel({
           >
             通知を再試行
           </button>
+        </section>
+
+        <section
+          className="settings-section"
+          aria-labelledby="task-timer-settings-title"
+        >
+          <div className="settings-section-heading">
+            <div>
+              <h3 id="task-timer-settings-title">タスクタイマー</h3>
+              <span>タスクに時間が未設定の場合の既定値</span>
+            </div>
+          </div>
+
+          <form
+            className="task-timer-settings-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleTaskTimerSubmit();
+            }}
+          >
+            <label className="field-group" htmlFor="task-timer-default-minutes">
+              既定時間（分）
+              <input
+                id="task-timer-default-minutes"
+                type="number"
+                min="1"
+                max="1440"
+                step="1"
+                inputMode="numeric"
+                value={taskTimerMinutes}
+                disabled={isMutating || !taskTimerSettings}
+                onChange={(event) => {
+                  setTaskTimerMinutes(event.target.value);
+                  setTaskTimerSaveMessage(null);
+                }}
+              />
+            </label>
+            <button
+              className="primary-button"
+              type="submit"
+              disabled={isMutating || !taskTimerSettings}
+            >
+              保存
+            </button>
+          </form>
+          {taskTimerSaveMessage ? (
+            <div
+              className={`settings-status ${
+                taskTimerSaveMessage.includes("できません") ||
+                taskTimerSaveMessage.includes("入力してください")
+                  ? "is-failed"
+                  : "is-success"
+              }`}
+              role={
+                taskTimerSaveMessage.includes("できません") ||
+                taskTimerSaveMessage.includes("入力してください")
+                  ? "alert"
+                  : "status"
+              }
+              aria-live="polite"
+            >
+              {taskTimerSaveMessage}
+            </div>
+          ) : null}
         </section>
 
         <section
@@ -484,6 +583,10 @@ function hasPomodoroDraftChanges(
 
 function secondsToMinutes(seconds: number) {
   return String(Math.max(1, Math.floor(seconds / 60)));
+}
+
+function secondsToMinutesText(seconds: number | undefined) {
+  return seconds ? secondsToMinutes(seconds) : "";
 }
 
 function isIntegerTextInRange(value: string, min: number, max: number) {

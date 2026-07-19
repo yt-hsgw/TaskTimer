@@ -165,6 +165,13 @@ CREATE TABLE IF NOT EXISTS timer_sessions (
   started_at TEXT NOT NULL,
   stopped_at TEXT NULL,
   elapsed_seconds INTEGER NULL CHECK (elapsed_seconds IS NULL OR elapsed_seconds >= 0),
+  target_seconds INTEGER NULL CHECK (
+    target_seconds IS NULL OR (target_seconds >= 60 AND target_seconds <= 86400)
+  ),
+  completion_reason TEXT NULL CHECK (
+    completion_reason IS NULL OR completion_reason IN ('manual', 'countdown_expired')
+  ),
+  completion_notified_at TEXT NULL,
   deleted_at TEXT NULL,
   created_at TEXT NOT NULL,
   CHECK (stopped_at IS NULL OR stopped_at >= started_at)
@@ -177,6 +184,25 @@ WHERE stopped_at IS NULL AND deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS timer_sessions_target_idx
 ON timer_sessions (target_type, target_id, started_at)
 WHERE deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS task_timer_settings (
+  id TEXT PRIMARY KEY CHECK (id = 'default'),
+  default_target_seconds INTEGER NOT NULL CHECK (
+    default_target_seconds >= 60 AND default_target_seconds <= 86400
+  ),
+  updated_at TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO task_timer_settings (
+  id,
+  default_target_seconds,
+  updated_at
+)
+VALUES (
+  'default',
+  1800,
+  strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+);
 
 CREATE TABLE IF NOT EXISTS timer_pauses (
   id TEXT PRIMARY KEY,

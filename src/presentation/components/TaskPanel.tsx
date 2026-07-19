@@ -1,10 +1,13 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Pause, Play, Square } from "lucide-react";
 import type {
   TaskRow,
   TaskWithSubtasks,
   WorkItemDraft,
 } from "../../application/usecases/contracts";
-import type { Subtask, Task } from "../../domain/task/types";
+import type { ActivePomodoro } from "../../application/usecases/contracts";
+import type { ActiveTimer } from "../../domain/timer/types";
+import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
 import { usePresentationRenderProbe } from "../renderProbe";
 
 type TaskPanelProps = {
@@ -12,6 +15,8 @@ type TaskPanelProps = {
   taskRows: TaskRow[];
   selectedTaskId: string | null;
   selectedSubtaskId: string | null;
+  activeTimer: ActiveTimer | null;
+  activePomodoro: ActivePomodoro | null;
   eyebrow?: string;
   title?: string;
   emptyMessage?: string;
@@ -28,6 +33,10 @@ type TaskPanelProps = {
   onCreateTask(input: WorkItemDraft): Promise<boolean>;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
+  onStartTimer(target: WorkTargetRef): Promise<boolean>;
+  onPauseTimer(): Promise<boolean>;
+  onResumeTimer(): Promise<boolean>;
+  onStopTimer(): Promise<boolean>;
   onLoadMoreTasks(): Promise<void>;
 };
 
@@ -43,6 +52,8 @@ export function TaskPanel({
   taskRows,
   selectedTaskId,
   selectedSubtaskId,
+  activeTimer,
+  activePomodoro,
   eyebrow = "DB接続済みタスク",
   title = "タスク",
   emptyMessage = "まだタスクはありません。",
@@ -59,6 +70,10 @@ export function TaskPanel({
   onCreateTask,
   onToggleTaskCompletion,
   onToggleTaskFavorite,
+  onStartTimer,
+  onPauseTimer,
+  onResumeTimer,
+  onStopTimer,
   onLoadMoreTasks,
 }: TaskPanelProps) {
   usePresentationRenderProbe("TaskPanel");
@@ -188,6 +203,12 @@ export function TaskPanel({
             onToggleExpansion={toggleTaskExpansion}
             onToggleTaskCompletion={handleCompleteRow}
             onToggleTaskFavorite={onToggleTaskFavorite}
+            activeTimer={activeTimer}
+            activePomodoro={activePomodoro}
+            onStartTimer={onStartTimer}
+            onPauseTimer={onPauseTimer}
+            onResumeTimer={onResumeTimer}
+            onStopTimer={onStopTimer}
           />
         ))}
 
@@ -307,6 +328,12 @@ export function TaskPanel({
                     onToggleExpansion={toggleTaskExpansion}
                     onToggleTaskCompletion={handleCompleteRow}
                     onToggleTaskFavorite={onToggleTaskFavorite}
+                    activeTimer={activeTimer}
+                    activePomodoro={activePomodoro}
+                    onStartTimer={onStartTimer}
+                    onPauseTimer={onPauseTimer}
+                    onResumeTimer={onResumeTimer}
+                    onStopTimer={onStopTimer}
                   />
                 ))}
               </div>
@@ -339,11 +366,17 @@ type TaskRowItemProps = {
   selectedSubtaskId: string | null;
   isExpanded: boolean;
   isMutating: boolean;
+  activeTimer: ActiveTimer | null;
+  activePomodoro: ActivePomodoro | null;
   onSelectTask(taskId: string): void;
   onSelectSubtask(taskId: string, subtaskId: string): void;
   onToggleExpansion(taskId: string): void;
   onToggleTaskCompletion(row: TaskRow): void;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
+  onStartTimer(target: WorkTargetRef): Promise<boolean>;
+  onPauseTimer(): Promise<boolean>;
+  onResumeTimer(): Promise<boolean>;
+  onStopTimer(): Promise<boolean>;
 };
 
 function TaskRowItem({
@@ -353,11 +386,17 @@ function TaskRowItem({
   selectedSubtaskId,
   isExpanded,
   isMutating,
+  activeTimer,
+  activePomodoro,
   onSelectTask,
   onSelectSubtask,
   onToggleExpansion,
   onToggleTaskCompletion,
   onToggleTaskFavorite,
+  onStartTimer,
+  onPauseTimer,
+  onResumeTimer,
+  onStopTimer,
 }: TaskRowItemProps) {
   const hasProgress = row.subtaskTotalCount > 0;
   const subtasks = task?.subtasks ?? [];
@@ -440,6 +479,19 @@ function TaskRowItem({
           ) : null}
         </button>
 
+        <TaskTimerControl
+          target={{ type: "task", id: row.id }}
+          label={row.title}
+          status={row.status}
+          activeTimer={activeTimer}
+          activePomodoro={activePomodoro}
+          isMutating={isMutating}
+          onStartTimer={onStartTimer}
+          onPauseTimer={onPauseTimer}
+          onResumeTimer={onResumeTimer}
+          onStopTimer={onStopTimer}
+        />
+
         <button
           className={`favorite-button ${row.isFavorite ? "is-favorite" : ""}`}
           type="button"
@@ -465,6 +517,13 @@ function TaskRowItem({
               subtask={subtask}
               isSelected={subtask.id === selectedSubtaskId}
               onSelect={() => onSelectSubtask(row.id, subtask.id)}
+              activeTimer={activeTimer}
+              activePomodoro={activePomodoro}
+              isMutating={isMutating}
+              onStartTimer={onStartTimer}
+              onPauseTimer={onPauseTimer}
+              onResumeTimer={onResumeTimer}
+              onStopTimer={onStopTimer}
             />
           ))}
         </div>
@@ -477,32 +536,198 @@ type SubtaskRowButtonProps = {
   subtask: Subtask;
   isSelected: boolean;
   onSelect(): void;
+  activeTimer: ActiveTimer | null;
+  activePomodoro: ActivePomodoro | null;
+  isMutating: boolean;
+  onStartTimer(target: WorkTargetRef): Promise<boolean>;
+  onPauseTimer(): Promise<boolean>;
+  onResumeTimer(): Promise<boolean>;
+  onStopTimer(): Promise<boolean>;
 };
 
 function SubtaskRowButton({
   subtask,
   isSelected,
   onSelect,
+  activeTimer,
+  activePomodoro,
+  isMutating,
+  onStartTimer,
+  onPauseTimer,
+  onResumeTimer,
+  onStopTimer,
 }: SubtaskRowButtonProps) {
   return (
-    <button
+    <div
       className={`task-row-subtask ${isSelected ? "is-selected" : ""} ${
         subtask.status === "done" ? "is-done" : ""
       }`}
-      type="button"
-      onClick={onSelect}
     >
-      <span className="subtask-dot" aria-hidden="true" />
-      <span>
-        <strong>{subtask.title}</strong>
-        <small>
-          {statusLabels[subtask.status]}
-          {subtask.dueDate ? ` / 期限 ${formatDateLabel(subtask.dueDate)}` : ""}
-          {subtask.dueTime ? ` ${subtask.dueTime}` : ""}
-        </small>
-      </span>
-    </button>
+      <button className="subtask-row-content" type="button" onClick={onSelect}>
+        <span className="subtask-dot" aria-hidden="true" />
+        <span>
+          <strong>{subtask.title}</strong>
+          <small>
+            {statusLabels[subtask.status]}
+            {subtask.dueDate ? ` / 期限 ${formatDateLabel(subtask.dueDate)}` : ""}
+            {subtask.dueTime ? ` ${subtask.dueTime}` : ""}
+          </small>
+        </span>
+      </button>
+      <TaskTimerControl
+        target={{ type: "subtask", id: subtask.id }}
+        label={subtask.title}
+        status={subtask.status}
+        activeTimer={activeTimer}
+        activePomodoro={activePomodoro}
+        isMutating={isMutating}
+        onStartTimer={onStartTimer}
+        onPauseTimer={onPauseTimer}
+        onResumeTimer={onResumeTimer}
+        onStopTimer={onStopTimer}
+      />
+    </div>
   );
+}
+
+type TaskTimerControlProps = {
+  target: WorkTargetRef;
+  label: string;
+  status: Task["status"];
+  activeTimer: ActiveTimer | null;
+  activePomodoro: ActivePomodoro | null;
+  isMutating: boolean;
+  onStartTimer(target: WorkTargetRef): Promise<boolean>;
+  onPauseTimer(): Promise<boolean>;
+  onResumeTimer(): Promise<boolean>;
+  onStopTimer(): Promise<boolean>;
+};
+
+function TaskTimerControl({
+  target,
+  label,
+  status,
+  activeTimer,
+  activePomodoro,
+  isMutating,
+  onStartTimer,
+  onPauseTimer,
+  onResumeTimer,
+  onStopTimer,
+}: TaskTimerControlProps) {
+  const isActive = isSameTarget(activeTimer?.target ?? null, target);
+  const isPaused = isActive && Boolean(activeTimer?.pausedAt);
+  const [now, setNow] = useState(Date.now);
+
+  useEffect(() => {
+    setNow(Date.now());
+    if (!isActive || isPaused || !activeTimer?.targetSeconds) {
+      return;
+    }
+    const intervalId = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(intervalId);
+  }, [activeTimer, isActive, isPaused]);
+
+  const canStart =
+    !activeTimer &&
+    !activePomodoro &&
+    status !== "done" &&
+    status !== "archived" &&
+    !isMutating;
+
+  if (activePomodoro) {
+    return (
+      <span className="task-timer-slot">
+        <button
+          className="task-timer-icon-button"
+          type="button"
+          aria-label={`${label}のタイマーを開始`}
+          title="ポモドーロが実行中です"
+          disabled
+        >
+          <Play size={16} />
+        </button>
+      </span>
+    );
+  }
+
+  if (isActive && activeTimer) {
+    return (
+      <span className="task-timer-slot is-active">
+        <span className="task-countdown-value">
+          {formatCountdownRemaining(activeTimer, now)}
+        </span>
+        <button
+          className="task-timer-icon-button"
+          type="button"
+          aria-label={isPaused ? `${label}のタイマーを再開` : `${label}のタイマーを一時停止`}
+          title={isPaused ? "再開" : "一時停止"}
+          disabled={isMutating}
+          onClick={() => void (isPaused ? onResumeTimer() : onPauseTimer())}
+        >
+          {isPaused ? <Play size={15} /> : <Pause size={15} />}
+        </button>
+        <button
+          className="task-timer-icon-button"
+          type="button"
+          aria-label={`${label}のタイマーを終了`}
+          title="終了"
+          disabled={isMutating}
+          onClick={() => void onStopTimer()}
+        >
+          <Square size={14} />
+        </button>
+      </span>
+    );
+  }
+
+  return (
+    <span className="task-timer-slot">
+      <button
+        className="task-timer-icon-button"
+        type="button"
+        aria-label={`${label}のタイマーを開始`}
+        title={
+          activeTimer || activePomodoro
+            ? "他のタイマーまたはポモドーロが実行中です"
+            : "タイマーを開始"
+        }
+        disabled={!canStart}
+        onClick={() => void onStartTimer(target)}
+      >
+        <Play size={16} />
+      </button>
+    </span>
+  );
+}
+
+function isSameTarget(current: WorkTargetRef | null, expected: WorkTargetRef) {
+  return current?.type === expected.type && current.id === expected.id;
+}
+
+function formatCountdownRemaining(activeTimer: ActiveTimer, now: number) {
+  if (!activeTimer.targetSeconds) {
+    return "計測中";
+  }
+  const startedAt = new Date(activeTimer.startedAt).getTime();
+  const effectiveNow = activeTimer.pausedAt
+    ? new Date(activeTimer.pausedAt).getTime()
+    : now;
+  if (Number.isNaN(startedAt) || Number.isNaN(effectiveNow)) {
+    return "--:--";
+  }
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((effectiveNow - startedAt) / 1_000) -
+      activeTimer.accumulatedPausedSeconds,
+  );
+  const remainingSeconds = Math.max(0, activeTimer.targetSeconds - elapsedSeconds);
+  const hours = Math.floor(remainingSeconds / 3_600);
+  const minutes = Math.floor((remainingSeconds % 3_600) / 60);
+  const seconds = remainingSeconds % 60;
+  return hours > 0
+    ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function normalizeDraft(input: WorkItemDraft): WorkItemDraft {

@@ -31,13 +31,13 @@ use crate::{
         PomodoroSettingsUpdate, RecurrenceRuleInput, RecurrenceRuleRecord, RepositoryResult,
         SqliteBackupCreate, SqliteBackupManifestRecord, SqliteBackupRecord, SqliteBackupRepository,
         SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord,
-        TagRepository, TagUpdate, TaskListCommandRepository, TaskListCreate, TaskListRecord,
-        TaskListUpdate, TaskNavigationCountsRecord, TaskPageCursor, TaskPageQuery, TaskPageRecord,
-        TaskReadRepository, TaskRecord, TaskRowRecord, TaskStatusUpdate, TaskTagRecord,
-        TaskTimerCommandRepository, TaskWithSubtasksRecord, TimerRepository,
-        UiPreferenceRepository, UiPreferencesRecord, UiPreferencesUpdate, WeekCalendarItem,
-        WorkItemCreate, WorkItemUpdate, WorkScheduleMove, WorkScheduleUpdate,
-        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        TagRepository, TagUpdate, TaskCountdownExpiry, TaskListCommandRepository, TaskListCreate,
+        TaskListRecord, TaskListUpdate, TaskNavigationCountsRecord, TaskPageCursor, TaskPageQuery,
+        TaskPageRecord, TaskReadRepository, TaskRecord, TaskRowRecord, TaskStatusUpdate,
+        TaskTagRecord, TaskTimerCommandRepository, TaskTimerSettingsRecord,
+        TaskTimerSettingsUpdate, TaskWithSubtasksRecord, TimerRepository, UiPreferenceRepository,
+        UiPreferencesRecord, UiPreferencesUpdate, WeekCalendarItem, WorkItemCreate, WorkItemUpdate,
+        WorkScheduleMove, WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
     domain::{
         notification::{
@@ -57,7 +57,11 @@ use crate::{
             DEFAULT_BOARD_COLUMN_ID, DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID,
             DEFAULT_TASK_LIST_NAME, IN_PROGRESS_BOARD_COLUMN_ID,
         },
-        timer::{WorkTargetRef, WorkTargetType},
+        timer::{
+            TimerCompletionReason, WorkTargetRef, WorkTargetType, DEFAULT_TASK_TIMER_SETTINGS_ID,
+            DEFAULT_TASK_TIMER_TARGET_SECONDS, MAX_TASK_TIMER_TARGET_SECONDS,
+            MIN_TASK_TIMER_TARGET_SECONDS,
+        },
     },
 };
 
@@ -71,7 +75,7 @@ const BACKUP_DATABASE_FILE: &str = "tasktimer.sqlite3";
 const BACKUP_MANIFEST_FILE: &str = "backup-manifest.json";
 const JSON_EXPORT_FORMAT: &str = "tasktimer-json-export";
 const CSV_EXPORT_FORMAT: &str = "tasktimer-csv-export";
-const DATA_EXPORT_FORMAT_VERSION: i64 = 3;
+const DATA_EXPORT_FORMAT_VERSION: i64 = 4;
 const DATA_EXPORT_COMPATIBILITY: &str = "viewing-and-migration-aid-not-restore";
 const CSV_EXPORT_MANIFEST_FILE: &str = "export-manifest.json";
 const UI_PREF_LEFT_PANE_OPEN: &str = "left_pane_open";
@@ -186,6 +190,7 @@ struct JsonExportFile {
     subtasks: Vec<ExportSubtaskRow>,
     timer_sessions: Vec<ExportTimerSessionRow>,
     timer_pauses: Vec<ExportTimerPauseRow>,
+    task_timer_settings: Vec<ExportTaskTimerSettingsRow>,
     pomodoro_settings: Vec<ExportPomodoroSettingsRow>,
     pomodoro_sessions: Vec<ExportPomodoroSessionRow>,
     notification_rules: Vec<ExportNotificationRuleRow>,
@@ -203,6 +208,7 @@ struct ExportDataset {
     subtasks: Vec<ExportSubtaskRow>,
     timer_sessions: Vec<ExportTimerSessionRow>,
     timer_pauses: Vec<ExportTimerPauseRow>,
+    task_timer_settings: Vec<ExportTaskTimerSettingsRow>,
     pomodoro_settings: Vec<ExportPomodoroSettingsRow>,
     pomodoro_sessions: Vec<ExportPomodoroSessionRow>,
     notification_rules: Vec<ExportNotificationRuleRow>,
@@ -300,7 +306,17 @@ struct ExportTimerSessionRow {
     started_at: String,
     stopped_at: Option<String>,
     elapsed_seconds: Option<i64>,
+    target_seconds: Option<i64>,
+    completion_reason: Option<String>,
+    completion_notified_at: Option<String>,
     created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ExportTaskTimerSettingsRow {
+    id: String,
+    default_target_seconds: i64,
+    updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -490,6 +506,111 @@ impl CalendarRepository for SqliteDatabase {
 impl TimerRepository for SqliteDatabase {
     fn get_active_timer(&self) -> RepositoryResult<Option<ActiveTimer>> {
         self.with_connection(select_active_timer)
+    }
+
+    fn get_task_timer_settings(&self) -> RepositoryResult<TaskTimerSettingsRecord> {
+        self.with_connection(select_task_timer_settings)
+    }
+
+    fn update_task_timer_settings(
+        &self,
+        input: TaskTimerSettingsUpdate,
+    ) -> RepositoryResult<TaskTimerSettingsRecord> {
+        self.with_transaction(|transaction| {
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE task_timer_settings
+                    SET default_target_seconds = ?1,
+                        updated_at = ?2
+                    WHERE id = ?3
+                    ",
+                    params![
+                        input.default_target_seconds,
+                        input.now,
+                        DEFAULT_TASK_TIMER_SETTINGS_ID
+                    ],
+                )
+                .map_err(|error| format!("タスクタイマー設定を保存できません: {error}"))?;
+            if updated != 1 {
+                return Err("タスクタイマー設定を保存できませんでした".to_string());
+            }
+            select_task_timer_settings(transaction)
+        })
+    }
+
+    fn sync_expired_task_countdown(
+        &self,
+        now: String,
+    ) -> RepositoryResult<Option<TaskCountdownExpiry>> {
+        self.with_transaction(|transaction| {
+            let Some(active_timer) = select_active_timer(transaction)? else {
+                return Ok(None);
+            };
+            let Some(target_seconds) = active_timer.target_seconds else {
+                return Ok(None);
+            };
+            if active_timer.paused_at.is_some() {
+                return Ok(None);
+            }
+
+            let paused_seconds = total_pause_seconds(transaction, &active_timer.id, &now)?;
+            let (_, elapsed_seconds) =
+                calculate_stop_values(&active_timer.started_at, &now, paused_seconds)?;
+            if elapsed_seconds < target_seconds {
+                return Ok(None);
+            }
+
+            let target_title = select_target_title(transaction, &active_timer.target)?;
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE timer_sessions
+                    SET stopped_at = ?1,
+                        elapsed_seconds = target_seconds,
+                        completion_reason = 'countdown_expired'
+                    WHERE id = ?2
+                      AND stopped_at IS NULL
+                      AND target_seconds IS NOT NULL
+                      AND deleted_at IS NULL
+                    ",
+                    params![now, active_timer.id.as_str()],
+                )
+                .map_err(|error| format!("終了したタスクタイマーを保存できません: {error}"))?;
+            if updated != 1 {
+                return Ok(None);
+            }
+
+            Ok(Some(TaskCountdownExpiry {
+                expired_timer: select_timer_by_id(transaction, &active_timer.id)?,
+                target_title,
+            }))
+        })
+    }
+
+    fn mark_task_countdown_notification_sent(
+        &self,
+        timer_session_id: String,
+        now: String,
+    ) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| {
+            let updated = transaction
+                .execute(
+                    "
+                    UPDATE timer_sessions
+                    SET completion_notified_at = COALESCE(completion_notified_at, ?1)
+                    WHERE id = ?2
+                      AND completion_reason = 'countdown_expired'
+                      AND deleted_at IS NULL
+                    ",
+                    params![now, timer_session_id],
+                )
+                .map_err(|error| format!("タイマー通知済み時刻を保存できません: {error}"))?;
+            if updated != 1 {
+                return Err("通知対象のタイマー履歴が見つかりません".to_string());
+            }
+            Ok(())
+        })
     }
 }
 
@@ -1397,6 +1518,7 @@ impl DataExportRepository for SqliteDatabase {
             subtasks: dataset.subtasks,
             timer_sessions: dataset.timer_sessions,
             timer_pauses: dataset.timer_pauses,
+            task_timer_settings: dataset.task_timer_settings,
             pomodoro_settings: dataset.pomodoro_settings,
             pomodoro_sessions: dataset.pomodoro_sessions,
             notification_rules: dataset.notification_rules,
@@ -1528,17 +1650,24 @@ impl TaskTimerCommandRepository for SqliteDatabase {
             assert_timer_startable(&status)?;
             ensure_no_active_timer(transaction)?;
             ensure_no_active_pomodoro(transaction)?;
+            let target_seconds = select_effective_task_timer_seconds(transaction, &target)?;
 
             let timer_id = Uuid::new_v4().to_string();
             transaction
                 .execute(
                     "
                     INSERT INTO timer_sessions (
-                      id, target_type, target_id, started_at, created_at
+                      id, target_type, target_id, started_at, target_seconds, created_at
                     )
-                    VALUES (?1, ?2, ?3, ?4, ?4)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?4)
                     ",
-                    params![timer_id, target.target_type.as_str(), target.id, now],
+                    params![
+                        timer_id,
+                        target.target_type.as_str(),
+                        target.id,
+                        now,
+                        target_seconds
+                    ],
                 )
                 .map_err(|error| format!("タイマーを開始できません: {error}"))?;
 
@@ -1615,7 +1744,8 @@ impl TaskTimerCommandRepository for SqliteDatabase {
                     "
                     UPDATE timer_sessions
                     SET stopped_at = ?1,
-                        elapsed_seconds = ?2
+                        elapsed_seconds = ?2,
+                        completion_reason = 'manual'
                     WHERE id = ?3
                       AND stopped_at IS NULL
                       AND deleted_at IS NULL
@@ -5899,6 +6029,33 @@ fn find_target_status(
     }
 }
 
+fn select_effective_task_timer_seconds(
+    connection: &Connection,
+    target: &WorkTargetRef,
+) -> RepositoryResult<i64> {
+    let target_seconds = match target.target_type {
+        WorkTargetType::Task => connection.query_row(
+            "SELECT timer_target_seconds FROM tasks WHERE id = ?1 AND deleted_at IS NULL",
+            params![target.id.as_str()],
+            |row| row.get::<_, Option<i64>>(0),
+        ),
+        WorkTargetType::Subtask => connection.query_row(
+            "SELECT timer_target_seconds FROM subtasks WHERE id = ?1 AND deleted_at IS NULL",
+            params![target.id.as_str()],
+            |row| row.get::<_, Option<i64>>(0),
+        ),
+    }
+    .map_err(|error| format!("タイマー目標時間を取得できません: {error}"))?;
+
+    let effective_seconds =
+        target_seconds.unwrap_or(select_task_timer_settings(connection)?.default_target_seconds);
+    if !(MIN_TASK_TIMER_TARGET_SECONDS..=MAX_TASK_TIMER_TARGET_SECONDS).contains(&effective_seconds)
+    {
+        return Err("タイマー目標時間は1分以上24時間以内で設定してください".to_string());
+    }
+    Ok(effective_seconds)
+}
+
 fn ensure_no_active_timer_for_task_graph(
     connection: &Connection,
     task_id: &str,
@@ -6357,7 +6514,20 @@ fn select_active_timer(connection: &Connection) -> RepositoryResult<Option<Activ
                    timer_sessions.elapsed_seconds,
                    timer_sessions.deleted_at,
                    timer_sessions.created_at,
-                   open_pause.paused_at
+                   open_pause.paused_at,
+                   timer_sessions.target_seconds,
+                   COALESCE((
+                     SELECT SUM(
+                       CAST(strftime('%s', pauses.resumed_at) AS INTEGER) -
+                       CAST(strftime('%s', pauses.paused_at) AS INTEGER)
+                     )
+                     FROM timer_pauses AS pauses
+                     WHERE pauses.timer_session_id = timer_sessions.id
+                       AND pauses.resumed_at IS NOT NULL
+                       AND pauses.deleted_at IS NULL
+                   ), 0),
+                   timer_sessions.completion_reason,
+                   timer_sessions.completion_notified_at
             FROM timer_sessions
             LEFT JOIN tasks AS task_targets
               ON timer_sessions.target_type = 'task'
@@ -6411,7 +6581,20 @@ fn select_active_timer_by_id(connection: &Connection, id: &str) -> RepositoryRes
                    timer_sessions.elapsed_seconds,
                    timer_sessions.deleted_at,
                    timer_sessions.created_at,
-                   open_pause.paused_at
+                   open_pause.paused_at,
+                   timer_sessions.target_seconds,
+                   COALESCE((
+                     SELECT SUM(
+                       CAST(strftime('%s', pauses.resumed_at) AS INTEGER) -
+                       CAST(strftime('%s', pauses.paused_at) AS INTEGER)
+                     )
+                     FROM timer_pauses AS pauses
+                     WHERE pauses.timer_session_id = timer_sessions.id
+                       AND pauses.resumed_at IS NOT NULL
+                       AND pauses.deleted_at IS NULL
+                   ), 0),
+                   timer_sessions.completion_reason,
+                   timer_sessions.completion_notified_at
             FROM timer_sessions
             LEFT JOIN timer_pauses AS open_pause
               ON open_pause.timer_session_id = timer_sessions.id
@@ -6439,7 +6622,20 @@ fn select_timer_by_id(connection: &Connection, id: &str) -> RepositoryResult<Act
                    timer_sessions.elapsed_seconds,
                    timer_sessions.deleted_at,
                    timer_sessions.created_at,
-                   open_pause.paused_at
+                   open_pause.paused_at,
+                   timer_sessions.target_seconds,
+                   COALESCE((
+                     SELECT SUM(
+                       CAST(strftime('%s', pauses.resumed_at) AS INTEGER) -
+                       CAST(strftime('%s', pauses.paused_at) AS INTEGER)
+                     )
+                     FROM timer_pauses AS pauses
+                     WHERE pauses.timer_session_id = timer_sessions.id
+                       AND pauses.resumed_at IS NOT NULL
+                       AND pauses.deleted_at IS NULL
+                   ), 0),
+                   timer_sessions.completion_reason,
+                   timer_sessions.completion_notified_at
             FROM timer_sessions
             LEFT JOIN timer_pauses AS open_pause
               ON open_pause.timer_session_id = timer_sessions.id
@@ -6457,6 +6653,12 @@ fn select_timer_by_id(connection: &Connection, id: &str) -> RepositoryResult<Act
 fn map_active_timer_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActiveTimer> {
     let target_type_text: String = row.get(1)?;
     let target_type = WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?;
+    let completion_reason_text: Option<String> = row.get(11)?;
+    let completion_reason = completion_reason_text
+        .as_deref()
+        .map(TimerCompletionReason::from_db)
+        .transpose()
+        .map_err(db_value_error)?;
     Ok(ActiveTimer {
         id: row.get(0)?,
         target: target_ref(target_type, row.get(2)?),
@@ -6464,9 +6666,35 @@ fn map_active_timer_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ActiveTimer
         stopped_at: row.get(4)?,
         elapsed_seconds: row.get(5)?,
         paused_at: row.get(8)?,
+        target_seconds: row.get(9)?,
+        accumulated_paused_seconds: row.get(10)?,
+        completion_reason,
+        completion_notified_at: row.get(12)?,
         deleted_at: row.get(6)?,
         created_at: row.get(7)?,
     })
+}
+
+fn select_task_timer_settings(
+    connection: &Connection,
+) -> RepositoryResult<TaskTimerSettingsRecord> {
+    connection
+        .query_row(
+            "
+            SELECT id, default_target_seconds, updated_at
+            FROM task_timer_settings
+            WHERE id = ?1
+            ",
+            params![DEFAULT_TASK_TIMER_SETTINGS_ID],
+            |row| {
+                Ok(TaskTimerSettingsRecord {
+                    id: row.get(0)?,
+                    default_target_seconds: row.get(1)?,
+                    updated_at: row.get(2)?,
+                })
+            },
+        )
+        .map_err(|error| format!("タスクタイマー設定を取得できません: {error}"))
 }
 
 fn select_pomodoro_settings(connection: &Connection) -> RepositoryResult<PomodoroSettingsRecord> {
@@ -6847,7 +7075,7 @@ fn select_target_title(
                 params![target.id.as_str()],
                 |row| row.get(0),
             )
-            .map_err(|error| format!("ポモドーロ対象タスク名を取得できません: {error}")),
+            .map_err(|error| format!("タイマー対象タスク名を取得できません: {error}")),
         WorkTargetType::Subtask => connection
             .query_row(
                 "
@@ -6864,7 +7092,7 @@ fn select_target_title(
                 params![target.id.as_str()],
                 |row| row.get(0),
             )
-            .map_err(|error| format!("ポモドーロ対象サブタスク名を取得できません: {error}")),
+            .map_err(|error| format!("タイマー対象サブタスク名を取得できません: {error}")),
     }
 }
 
@@ -7060,6 +7288,7 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
         .execute_batch(INITIAL_SCHEMA)
         .map_err(|error| format!("SQLite初期マイグレーションに失敗しました: {error}"))?;
     run_timer_recurrence_migration(connection)?;
+    run_task_countdown_migration(connection)?;
     run_pomodoro_migration(connection)?;
     run_due_time_migration(connection)?;
     run_work_schedule_migration(connection)?;
@@ -7069,6 +7298,41 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
     run_notification_preference_migration(connection)?;
     run_notification_os_registration_migration(connection)?;
     run_notification_delivery_attempt_migration(connection)
+}
+
+fn run_task_countdown_migration(connection: &Connection) -> RepositoryResult<()> {
+    ensure_column(
+        connection,
+        "timer_sessions",
+        "target_seconds",
+        "ALTER TABLE timer_sessions ADD COLUMN target_seconds INTEGER NULL CHECK (target_seconds IS NULL OR (target_seconds >= 60 AND target_seconds <= 86400))",
+    )?;
+    ensure_column(
+        connection,
+        "timer_sessions",
+        "completion_reason",
+        "ALTER TABLE timer_sessions ADD COLUMN completion_reason TEXT NULL CHECK (completion_reason IS NULL OR completion_reason IN ('manual', 'countdown_expired'))",
+    )?;
+    ensure_column(
+        connection,
+        "timer_sessions",
+        "completion_notified_at",
+        "ALTER TABLE timer_sessions ADD COLUMN completion_notified_at TEXT NULL",
+    )?;
+    connection
+        .execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS task_timer_settings (
+              id TEXT PRIMARY KEY CHECK (id = 'default'),
+              default_target_seconds INTEGER NOT NULL CHECK (
+                default_target_seconds >= 60 AND default_target_seconds <= 86400
+              ),
+              updated_at TEXT NOT NULL
+            );
+            ",
+        )
+        .map_err(|error| format!("タスクタイマー設定テーブルを作成できません: {error}"))?;
+    seed_default_task_timer_settings(connection)
 }
 
 fn run_board_column_migration(connection: &Connection) -> RepositoryResult<()> {
@@ -7685,6 +7949,24 @@ fn ensure_default_board_columns(connection: &Connection, now: &str) -> Repositor
         .map_err(|error| format!("初期状態を保存できません: {error}"))
 }
 
+fn seed_default_task_timer_settings(connection: &Connection) -> RepositoryResult<()> {
+    connection
+        .execute(
+            "
+            INSERT OR IGNORE INTO task_timer_settings (
+              id, default_target_seconds, updated_at
+            )
+            VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            ",
+            params![
+                DEFAULT_TASK_TIMER_SETTINGS_ID,
+                DEFAULT_TASK_TIMER_TARGET_SECONDS
+            ],
+        )
+        .map(|_| ())
+        .map_err(|error| format!("タスクタイマー設定を初期化できません: {error}"))
+}
+
 fn seed_default_ui_preferences(connection: &Connection) -> RepositoryResult<()> {
     connection
         .execute(
@@ -8145,6 +8427,9 @@ fn write_csv_export_files(
             "started_at",
             "stopped_at",
             "elapsed_seconds",
+            "target_seconds",
+            "completion_reason",
+            "completion_notified_at",
             "created_at",
         ],
         dataset
@@ -8158,6 +8443,9 @@ fn write_csv_export_files(
                     row.started_at.clone(),
                     option_text(&row.stopped_at),
                     option_i64_text(row.elapsed_seconds),
+                    option_i64_text(row.target_seconds),
+                    option_text(&row.completion_reason),
+                    option_text(&row.completion_notified_at),
                     row.created_at.clone(),
                 ]
             })
@@ -8182,6 +8470,21 @@ fn write_csv_export_files(
                     row.paused_at.clone(),
                     option_text(&row.resumed_at),
                     row.created_at.clone(),
+                ]
+            })
+            .collect(),
+    )?;
+    write_csv_file(
+        &export_dir.join("task_timer_settings.csv"),
+        &["id", "default_target_seconds", "updated_at"],
+        dataset
+            .task_timer_settings
+            .iter()
+            .map(|row| {
+                vec![
+                    row.id.clone(),
+                    row.default_target_seconds.to_string(),
+                    row.updated_at.clone(),
                 ]
             })
             .collect(),
@@ -8367,6 +8670,7 @@ fn csv_export_file_names() -> Vec<&'static str> {
         "subtasks.csv",
         "timer_sessions.csv",
         "timer_pauses.csv",
+        "task_timer_settings.csv",
         "pomodoro_settings.csv",
         "pomodoro_sessions.csv",
         "notification_rules.csv",
@@ -8439,6 +8743,7 @@ fn select_export_dataset(connection: &Connection) -> RepositoryResult<ExportData
         subtasks: select_export_subtasks(connection)?,
         timer_sessions: select_export_timer_sessions(connection)?,
         timer_pauses: select_export_timer_pauses(connection)?,
+        task_timer_settings: select_export_task_timer_settings(connection)?,
         pomodoro_settings: select_export_pomodoro_settings(connection)?,
         pomodoro_sessions: select_export_pomodoro_sessions(connection)?,
         notification_rules: select_export_notification_rules(connection)?,
@@ -8647,7 +8952,8 @@ fn select_export_timer_sessions(
         .prepare(
             "
             SELECT id, target_type, target_id, started_at, stopped_at,
-                   elapsed_seconds, created_at
+                   elapsed_seconds, target_seconds, completion_reason,
+                   completion_notified_at, created_at
             FROM timer_sessions
             WHERE deleted_at IS NULL
             ORDER BY started_at, created_at, id
@@ -8663,11 +8969,40 @@ fn select_export_timer_sessions(
                 started_at: row.get(3)?,
                 stopped_at: row.get(4)?,
                 elapsed_seconds: row.get(5)?,
-                created_at: row.get(6)?,
+                target_seconds: row.get(6)?,
+                completion_reason: row.get(7)?,
+                completion_notified_at: row.get(8)?,
+                created_at: row.get(9)?,
             })
         })
         .map_err(|error| format!("エクスポート用タイマー履歴を取得できません: {error}"))?;
     collect_export_rows(rows, "エクスポート用タイマー履歴を読めません")
+}
+
+fn select_export_task_timer_settings(
+    connection: &Connection,
+) -> RepositoryResult<Vec<ExportTaskTimerSettingsRow>> {
+    let mut statement = connection
+        .prepare(
+            "
+            SELECT id, default_target_seconds, updated_at
+            FROM task_timer_settings
+            ORDER BY id
+            ",
+        )
+        .map_err(|error| {
+            format!("エクスポート用タスクタイマー設定取得を準備できません: {error}")
+        })?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(ExportTaskTimerSettingsRow {
+                id: row.get(0)?,
+                default_target_seconds: row.get(1)?,
+                updated_at: row.get(2)?,
+            })
+        })
+        .map_err(|error| format!("エクスポート用タスクタイマー設定を取得できません: {error}"))?;
+    collect_export_rows(rows, "エクスポート用タスクタイマー設定を読めません")
 }
 
 fn select_export_timer_pauses(
@@ -9285,6 +9620,186 @@ mod tests {
         }
     }
 
+    #[test]
+    fn task_countdown_uses_start_time_snapshot_of_default_duration() {
+        let database = in_memory_database();
+        let start_clock = FixedClock {
+            now: "2026-07-19T00:00:00Z",
+        };
+        let task = usecases::create_task(&database, &start_clock, draft("集中作業")).expect("task");
+        usecases::update_task_timer_settings(
+            &database,
+            &start_clock,
+            usecases::TaskTimerSettingsDraft {
+                default_target_seconds: 120,
+            },
+        )
+        .expect("settings");
+
+        let active = usecases::start_timer(
+            &database,
+            &start_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start countdown");
+        usecases::update_task_timer_settings(
+            &database,
+            &FixedClock {
+                now: "2026-07-19T00:00:10Z",
+            },
+            usecases::TaskTimerSettingsDraft {
+                default_target_seconds: 300,
+            },
+        )
+        .expect("updated settings");
+
+        assert_eq!(active.target_seconds, Some(120));
+        assert_eq!(
+            database
+                .get_active_timer()
+                .expect("active timer")
+                .expect("timer")
+                .target_seconds,
+            Some(120)
+        );
+    }
+
+    #[test]
+    fn task_countdown_expires_once_after_completed_pause_time() {
+        let database = in_memory_database();
+        let notification_gateway = RecordingNotificationGateway::ok();
+        let start_clock = FixedClock {
+            now: "2026-07-19T00:00:00Z",
+        };
+        let task =
+            usecases::create_task(&database, &start_clock, draft("見積書を確認")).expect("task");
+        usecases::update_task_timer_settings(
+            &database,
+            &start_clock,
+            usecases::TaskTimerSettingsDraft {
+                default_target_seconds: 60,
+            },
+        )
+        .expect("settings");
+        usecases::start_timer(
+            &database,
+            &start_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start countdown");
+        usecases::pause_active_timer(
+            &database,
+            &FixedClock {
+                now: "2026-07-19T00:00:30Z",
+            },
+        )
+        .expect("pause");
+
+        let paused_sync = usecases::sync_expired_task_countdown(
+            &database,
+            &notification_gateway,
+            &FixedClock {
+                now: "2026-07-19T00:02:00Z",
+            },
+        )
+        .expect("sync while paused");
+        assert!(paused_sync.expired_timer.is_none());
+
+        let resumed = usecases::resume_active_timer(
+            &database,
+            &FixedClock {
+                now: "2026-07-19T00:02:00Z",
+            },
+        )
+        .expect("resume");
+        assert_eq!(resumed.accumulated_paused_seconds, 90);
+
+        let result = usecases::sync_expired_task_countdown(
+            &database,
+            &notification_gateway,
+            &FixedClock {
+                now: "2026-07-19T00:02:30Z",
+            },
+        )
+        .expect("sync expired countdown");
+        let expired = result.expired_timer.expect("expired timer");
+        assert_eq!(expired.elapsed_seconds, Some(60));
+        assert_eq!(
+            expired.completion_reason,
+            Some(TimerCompletionReason::CountdownExpired)
+        );
+        assert_eq!(result.notification_summary.succeeded, 1);
+        assert_eq!(notification_gateway.messages().len(), 1);
+        assert_eq!(notification_gateway.messages()[0].title, "見積書を確認");
+
+        let second = usecases::sync_expired_task_countdown(
+            &database,
+            &notification_gateway,
+            &FixedClock {
+                now: "2026-07-19T00:03:00Z",
+            },
+        )
+        .expect("second sync");
+        assert!(second.expired_timer.is_none());
+        assert_eq!(notification_gateway.messages().len(), 1);
+    }
+
+    #[test]
+    fn task_countdown_completes_without_notification_when_notifications_are_disabled() {
+        let database = in_memory_database();
+        let notification_gateway = RecordingNotificationGateway::ok();
+        let start_clock = FixedClock {
+            now: "2026-07-19T00:00:00Z",
+        };
+        let task = usecases::create_task(&database, &start_clock, draft("通知なしの集中作業"))
+            .expect("task");
+        usecases::update_task_timer_settings(
+            &database,
+            &start_clock,
+            usecases::TaskTimerSettingsDraft {
+                default_target_seconds: 60,
+            },
+        )
+        .expect("settings");
+        usecases::update_notifications_enabled(&database, &start_clock, false)
+            .expect("disable notifications");
+        usecases::start_timer(
+            &database,
+            &start_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start countdown");
+
+        let result = usecases::sync_expired_task_countdown(
+            &database,
+            &notification_gateway,
+            &FixedClock {
+                now: "2026-07-19T00:01:00Z",
+            },
+        )
+        .expect("sync expired countdown");
+
+        assert_eq!(
+            result
+                .expired_timer
+                .expect("expired timer")
+                .completion_reason,
+            Some(TimerCompletionReason::CountdownExpired)
+        );
+        assert_eq!(result.notification_summary.attempted, 0);
+        assert!(notification_gateway.messages().is_empty());
+        assert!(database.get_active_timer().expect("active timer").is_none());
+    }
+
     fn draft(title: &str) -> usecases::WorkItemDraft {
         usecases::WorkItemDraft {
             list_id: None,
@@ -9832,6 +10347,13 @@ mod tests {
                 |row| row.get(0),
             )
             .expect("timer recurrence tables");
+        let default_task_timer_seconds: i64 = connection
+            .query_row(
+                "SELECT default_target_seconds FROM task_timer_settings WHERE id = 'default'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("default task timer settings");
 
         assert_eq!(list_id, DEFAULT_TASK_LIST_ID);
         assert_eq!(board_column_id, DEFAULT_BOARD_COLUMN_ID);
@@ -9842,10 +10364,22 @@ mod tests {
         assert_eq!(task_list_color_token, DEFAULT_TASK_LIST_COLOR_TOKEN);
         assert_eq!(ui_preference_count, 4);
         assert_eq!(timer_recurrence_table_count, 2);
+        assert_eq!(
+            default_task_timer_seconds,
+            DEFAULT_TASK_TIMER_TARGET_SECONDS
+        );
         assert!(
             column_exists(&connection, "subtasks", "timer_target_seconds")
                 .expect("subtask timer target column")
         );
+        for column_name in [
+            "target_seconds",
+            "completion_reason",
+            "completion_notified_at",
+        ] {
+            assert!(column_exists(&connection, "timer_sessions", column_name)
+                .expect("task countdown timer session column"));
+        }
     }
 
     #[test]
@@ -12809,7 +13343,7 @@ mod tests {
                 planned_start_date: Some("2026-07-08".to_string()),
                 due_date: None,
                 due_time: None,
-                timer_target_seconds: Some(1_800),
+                timer_target_seconds: Some(900),
                 recurrence_rule: None,
                 memo: Some("新しいメモ".to_string()),
             },
@@ -12860,7 +13394,7 @@ mod tests {
         assert_eq!(updated.title, "更新後");
         assert_eq!(updated.planned_start_date.as_deref(), Some("2026-07-08"));
         assert_eq!(updated.due_date, None);
-        assert_eq!(updated.timer_target_seconds, Some(1_800));
+        assert_eq!(updated.timer_target_seconds, Some(900));
         assert_eq!(updated.memo, "新しいメモ");
         assert_eq!(active_rules.len(), 1);
         assert_eq!(
@@ -12872,6 +13406,17 @@ mod tests {
             )
         );
         assert_eq!(disabled_due_rules, 1);
+
+        let active_timer = usecases::start_timer(
+            &database,
+            &update_clock,
+            WorkTargetRef {
+                target_type: WorkTargetType::Task,
+                id: task.id,
+            },
+        )
+        .expect("start timer with task target");
+        assert_eq!(active_timer.target_seconds, Some(900));
     }
 
     #[test]

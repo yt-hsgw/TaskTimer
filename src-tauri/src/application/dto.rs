@@ -13,13 +13,15 @@ use super::{
         PomodoroSettingsRecord, RecurrenceRuleRecord, SqliteBackupManifestRecord,
         SqliteBackupRecord, SqliteRestoreRecord, SubtaskRecord, TagRecord, TaskListRecord,
         TaskNavigationCountsRecord, TaskPageCursor, TaskPageRecord, TaskRecord, TaskRowRecord,
-        TaskTagRecord, TaskWithSubtasksRecord, UiPreferencesRecord, WeekCalendarItem,
+        TaskTagRecord, TaskTimerSettingsRecord, TaskWithSubtasksRecord, UiPreferencesRecord,
+        WeekCalendarItem,
     },
     usecases::{
         BoardColumnDraft, DataExportCreateDraft, PomodoroSettingsDraft, RecurrenceRuleDraft,
         SqliteBackupCreateDraft, SqliteBackupRestoreDraft, TagDraft, TaskListDraft,
-        TaskPageCursorDraft, TaskPageDraft, TaskPageScopeDraft, UiPreferencesDraft, WorkItemDraft,
-        WorkItemUpdateDraft, WorkScheduleDraft, WorkScheduleMoveDraft,
+        TaskPageCursorDraft, TaskPageDraft, TaskPageScopeDraft, TaskTimerSettingsDraft,
+        UiPreferencesDraft, WorkItemDraft, WorkItemUpdateDraft, WorkScheduleDraft,
+        WorkScheduleMoveDraft,
     },
 };
 
@@ -238,6 +240,12 @@ pub struct UpdatePomodoroSettingsRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UpdateTaskTimerSettingsRequestDto {
+    pub default_target_seconds: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PomodoroSessionRequestDto {
     pub pomodoro_session_id: String,
 }
@@ -371,8 +379,20 @@ pub struct ActiveTimerDto {
     pub stopped_at: Option<String>,
     pub elapsed_seconds: Option<i64>,
     pub paused_at: Option<String>,
+    pub target_seconds: Option<i64>,
+    pub accumulated_paused_seconds: i64,
+    pub completion_reason: Option<String>,
+    pub completion_notified_at: Option<String>,
     pub deleted_at: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskTimerSettingsDto {
+    pub id: String,
+    pub default_target_seconds: i64,
+    pub updated_at: String,
 }
 
 #[derive(Serialize)]
@@ -413,6 +433,13 @@ pub struct ActivePomodoroDto {
 pub struct PomodoroExpirySyncDto {
     pub expired_pomodoro: Option<ActivePomodoroDto>,
     pub active_pomodoro: Option<ActivePomodoroDto>,
+    pub notification_summary: NotificationDispatchSummaryDto,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskCountdownExpirySyncDto {
+    pub expired_timer: Option<ActiveTimerDto>,
     pub notification_summary: NotificationDispatchSummaryDto,
 }
 
@@ -955,6 +982,14 @@ impl From<UpdatePomodoroSettingsRequestDto> for PomodoroSettingsDraft {
     }
 }
 
+impl From<UpdateTaskTimerSettingsRequestDto> for TaskTimerSettingsDraft {
+    fn from(value: UpdateTaskTimerSettingsRequestDto) -> Self {
+        Self {
+            default_target_seconds: value.default_target_seconds,
+        }
+    }
+}
+
 impl From<WeekCalendarItem> for WeekCalendarItemDto {
     fn from(value: WeekCalendarItem) -> Self {
         Self {
@@ -1194,8 +1229,24 @@ impl From<ActiveTimer> for ActiveTimerDto {
             stopped_at: value.stopped_at,
             elapsed_seconds: value.elapsed_seconds,
             paused_at: value.paused_at,
+            target_seconds: value.target_seconds,
+            accumulated_paused_seconds: value.accumulated_paused_seconds,
+            completion_reason: value
+                .completion_reason
+                .map(|reason| reason.as_str().to_string()),
+            completion_notified_at: value.completion_notified_at,
             deleted_at: value.deleted_at,
             created_at: value.created_at,
+        }
+    }
+}
+
+impl From<TaskTimerSettingsRecord> for TaskTimerSettingsDto {
+    fn from(value: TaskTimerSettingsRecord) -> Self {
+        Self {
+            id: value.id,
+            default_target_seconds: value.default_target_seconds,
+            updated_at: value.updated_at,
         }
     }
 }
@@ -1245,6 +1296,15 @@ impl From<super::usecases::PomodoroExpirySyncResult> for PomodoroExpirySyncDto {
         Self {
             expired_pomodoro: value.expired_pomodoro.map(Into::into),
             active_pomodoro: value.active_pomodoro.map(Into::into),
+            notification_summary: value.notification_summary.into(),
+        }
+    }
+}
+
+impl From<super::usecases::TaskCountdownExpirySyncResult> for TaskCountdownExpirySyncDto {
+    fn from(value: super::usecases::TaskCountdownExpirySyncResult) -> Self {
+        Self {
+            expired_timer: value.expired_timer.map(Into::into),
             notification_summary: value.notification_summary.into(),
         }
     }

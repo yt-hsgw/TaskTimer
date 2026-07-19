@@ -12,6 +12,9 @@ import type {
   PomodoroExpirySyncResult,
   PomodoroSettings,
   PomodoroSettingsDraft,
+  TaskCountdownExpirySyncResult,
+  TaskTimerSettings,
+  TaskTimerSettingsDraft,
   ScheduledTaskDraft,
   SqliteBackupResult,
   SqliteRestoreResult,
@@ -53,6 +56,12 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   listWeekCalendarItems: (weekStartDate) =>
     invoke<WeekCalendarItem[]>("list_week_calendar_items", { weekStartDate }),
   getActiveTimer: () => invoke<ActiveTimer | null>("get_active_timer"),
+  syncExpiredTaskCountdown: () =>
+    invoke<TaskCountdownExpirySyncResult>("sync_expired_task_countdown"),
+  getTaskTimerSettings: () =>
+    invoke<TaskTimerSettings>("get_task_timer_settings"),
+  updateTaskTimerSettings: (input: TaskTimerSettingsDraft) =>
+    invoke<TaskTimerSettings>("update_task_timer_settings", { request: input }),
   getActivePomodoro: () => invoke<ActivePomodoro | null>("get_active_pomodoro"),
   syncExpiredPomodoro: () =>
     invoke<PomodoroExpirySyncResult>("sync_expired_pomodoro"),
