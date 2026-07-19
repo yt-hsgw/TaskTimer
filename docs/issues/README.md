@@ -67,6 +67,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [059 カレンダーのドラッグ範囲から予定付きタスクを作成する](059-calendar-drag-range-create.md) / GitHub #146
 - [060 カレンダーの重複予定を横並び表示する](060-calendar-overlap-layout.md) / GitHub #147
 - [061 カレンダーの省略予定を一覧表示する](061-calendar-overflow-popover.md) / GitHub #148
+- [062 カレンダーの時間グリッド表示回帰を修正する](062-calendar-time-grid-regression.md) / GitHub #152
 
 ## 運用
 

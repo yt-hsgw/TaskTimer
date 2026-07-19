@@ -1283,9 +1283,10 @@ function TimeGridCalendar({
         );
       })}
 
-      {businessHours.map((hour) => (
+      {businessHours.map((hour, hourIndex) => (
         <TimeGridRow
           hour={hour}
+          gridRow={hourIndex + 3}
           days={days}
           items={items}
           key={hour}
@@ -1343,6 +1344,7 @@ function TimeGridCalendar({
 
 function TimeGridRow({
   hour,
+  gridRow,
   days,
   items,
   currentTime,
@@ -1363,6 +1365,7 @@ function TimeGridRow({
   onMoveItemKeyDown,
 }: {
   hour: number;
+  gridRow: number;
   days: CalendarDay[];
   items: WeekCalendarItem[];
   currentTime: CurrentTimeMarker | null;
@@ -1394,8 +1397,13 @@ function TimeGridRow({
 }) {
   return (
     <>
-      <div className="calendar-time-label">{formatHourLabel(hour)}</div>
-      {days.map((day) => {
+      <div
+        className="calendar-time-label"
+        style={{ gridColumn: 1, gridRow }}
+      >
+        {formatHourLabel(hour)}
+      </div>
+      {days.map((day, dayIndex) => {
         const hourItems = items
           .filter((item) => {
             if (item.marker === "scheduled") {
@@ -1419,6 +1427,7 @@ function TimeGridRow({
                 ? "is-drop-target"
                 : ""
             }`}
+            style={{ gridColumn: dayIndex + 2, gridRow }}
             key={`${day.date}:${hour}`}
             data-calendar-date={day.date}
             data-calendar-hour={hour}
