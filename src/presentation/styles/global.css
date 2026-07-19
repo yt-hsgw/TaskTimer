@@ -465,24 +465,110 @@ button {
 }
 
 .pomodoro-focus {
+  --pomodoro-progress-color: var(--green);
   align-items: center;
   align-self: center;
-  background: #f6faf8;
-  border: 1px solid #cbdcd5;
-  border-radius: 8px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 20px;
   justify-content: center;
-  min-height: 310px;
-  padding: 32px;
+  min-height: 390px;
+  padding: 8px 24px 20px;
   width: min(100%, 620px);
 }
 
 .pomodoro-focus.is-short_break,
 .pomodoro-focus.is-long_break {
-  background: #f5f8fc;
-  border-color: #cad8e8;
+  --pomodoro-progress-color: var(--blue);
+}
+
+.pomodoro-progress {
+  --pomodoro-remaining-angle: 360deg;
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  gap: 10px;
+  width: clamp(240px, 30vw, 292px);
+}
+
+.pomodoro-progress-face {
+  aspect-ratio: 1;
+  background: conic-gradient(
+    from 0deg,
+    var(--pomodoro-progress-color) 0deg var(--pomodoro-remaining-angle),
+    #e7eeeb var(--pomodoro-remaining-angle) 360deg
+  );
+  border: 1px solid #cbd9d3;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 45%),
+    0 8px 24px rgb(35 52 45 / 8%);
+  display: block;
+  flex: 0 0 auto;
+  position: relative;
+  width: 82%;
+}
+
+.pomodoro-progress-face::before {
+  -webkit-mask: radial-gradient(
+    circle,
+    transparent 0 43%,
+    #000 44% 47%,
+    transparent 48% 100%
+  );
+  background: repeating-conic-gradient(
+    from -0.5deg,
+    rgb(24 33 39 / 34%) 0deg 1deg,
+    transparent 1deg 6deg
+  );
+  border-radius: 50%;
+  content: "";
+  inset: 5px;
+  mask: radial-gradient(
+    circle,
+    transparent 0 43%,
+    #000 44% 47%,
+    transparent 48% 100%
+  );
+  position: absolute;
+}
+
+.pomodoro-progress-face::after {
+  background: var(--ink);
+  border: 3px solid rgb(255 255 255 / 72%);
+  border-radius: 50%;
+  box-shadow: 0 2px 7px rgb(24 33 39 / 28%);
+  content: "";
+  height: 18px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 18px;
+}
+
+.pomodoro-focus.is-short_break .pomodoro-progress-face,
+.pomodoro-focus.is-long_break .pomodoro-progress-face {
+  background: conic-gradient(
+    from 0deg,
+    var(--pomodoro-progress-color) 0deg var(--pomodoro-remaining-angle),
+    #e5ebf3 var(--pomodoro-remaining-angle) 360deg
+  );
+  border-color: #cbd7e5;
+}
+
+.pomodoro-focus.is-paused .pomodoro-progress-face {
+  opacity: 0.72;
+}
+
+.pomodoro-progress-content {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  text-align: center;
 }
 
 .pomodoro-phase-label,
@@ -493,9 +579,27 @@ button {
   margin: 0;
 }
 
+.pomodoro-phase-label {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pomodoro-phase-label span {
+  color: var(--pomodoro-progress-color);
+  font-size: 11px;
+  line-height: 1;
+  min-height: 11px;
+}
+
+.pomodoro-phase-label span.is-hidden {
+  visibility: hidden;
+}
+
 .pomodoro-focus-countdown {
   color: var(--ink);
-  font-size: 68px;
+  font-size: 52px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   letter-spacing: 0;
@@ -505,10 +609,11 @@ button {
 .pomodoro-focus-actions {
   align-items: center;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
   justify-content: center;
-  margin-top: 8px;
+  min-height: 84px;
+  width: min(100%, 340px);
 }
 
 .pomodoro-focus-actions button,
@@ -517,6 +622,49 @@ button {
   display: inline-flex;
   gap: 6px;
   justify-content: center;
+}
+
+.pomodoro-control-grid,
+.pomodoro-secondary-actions {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.pomodoro-control-grid {
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  min-height: 40px;
+}
+
+.pomodoro-control-button,
+.pomodoro-control-placeholder {
+  height: 40px;
+  min-width: 40px;
+  width: 40px;
+}
+
+.pomodoro-primary-action {
+  min-height: 40px;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.pomodoro-secondary-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: 36px;
+}
+
+.pomodoro-secondary-actions .secondary-button {
+  min-width: 0;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.pomodoro-control-placeholder,
+.pomodoro-secondary-placeholder {
+  display: block;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .pomodoro-settings-summary {
@@ -3706,12 +3854,29 @@ button {
   }
 
   .pomodoro-focus {
-    min-height: 270px;
-    padding: 24px 14px;
+    gap: 16px;
+    min-height: 360px;
+    padding: 8px 4px 16px;
+  }
+
+  .pomodoro-progress {
+    width: 224px;
+  }
+
+  .pomodoro-progress-face {
+    width: 78%;
   }
 
   .pomodoro-focus-countdown {
-    font-size: 52px;
+    font-size: 44px;
+  }
+
+  .pomodoro-focus-actions {
+    width: min(100%, 312px);
+  }
+
+  .pomodoro-secondary-actions .secondary-button {
+    font-size: 12px;
   }
 
   .calendar-toolbar {
