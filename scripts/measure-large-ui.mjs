@@ -40,6 +40,7 @@ const thresholds = {
   completion_refresh: 1200,
   task_detail_save: 1200,
   calendar_week: 1500,
+  calendar_overflow_popup: 500,
   calendar_overlap_layout: 500,
   calendar_drag_create: 1500,
   calendar_move: 1500,
@@ -240,6 +241,27 @@ try {
         })()`,
     }),
   );
+  const calendarOverflowStartedAt = performance.now();
+  const calendarOverflowResult = await verifyCalendarOverflowPopup(
+    client,
+    sessionId,
+    ".calendar-all-day-cell .calendar-more",
+    false,
+  );
+  if (calendarOverflowResult.commands.length > 0) {
+    throw new Error(
+      `カレンダー予定一覧の操作中にcommandが呼ばれました: ${JSON.stringify(
+        calendarOverflowResult.commands,
+      )}`,
+    );
+  }
+  measurements.push(
+    createMeasurement(
+      "calendar_overflow_popup",
+      performance.now() - calendarOverflowStartedAt,
+      thresholds.calendar_overflow_popup,
+    ),
+  );
   const calendarOverlapLayoutStartedAt = performance.now();
   const calendarOverlapLayoutResult = await verifyCalendarOverlapLayout(
     client,
@@ -403,6 +425,19 @@ try {
         })()`,
     }),
   );
+  const calendarMonthOverflowResult = await verifyCalendarOverflowPopup(
+    client,
+    sessionId,
+    ".calendar-month-day.is-today .calendar-more",
+    true,
+  );
+  if (calendarMonthOverflowResult.commands.length > 0) {
+    throw new Error(
+      `月カレンダー予定一覧の操作中にcommandが呼ばれました: ${JSON.stringify(
+        calendarMonthOverflowResult.commands,
+      )}`,
+    );
+  }
   const calendarMonthDragCreateStartedAt = performance.now();
   const calendarMonthDragCreateResult = await verifyCalendarMonthDragCreate(
     client,
@@ -1028,6 +1063,162 @@ async function verifyKanbanCardDrag(client, sessionId) {
     commands: await takeInvokeLog(client, sessionId),
     renderCounts: await takeRenderCounts(client, sessionId),
   };
+}
+
+async function verifyCalendarOverflowPopup(
+  client,
+  sessionId,
+  triggerSelector,
+  expectParent,
+) {
+  await resetInvokeLog(client, sessionId);
+  const setup = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const trigger = document.querySelector(${JSON.stringify(triggerSelector)});
+      if (!(trigger instanceof HTMLButtonElement)) {
+        return null;
+      }
+      trigger.dataset.calendarOverflowTestTrigger = "true";
+      const label = trigger.getAttribute("aria-label") ?? "";
+      const expectedCount = Number(label.match(/予定(\\d+)件/)?.[1] ?? 0);
+      trigger.click();
+      return { expectedCount };
+    })()`,
+  );
+  if (!setup?.expectedCount) {
+    throw new Error(`予定一覧の起点が見つかりません: ${triggerSelector}`);
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('#calendar-overflow-popup'))`,
+  );
+  const opened = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const panel = document.querySelector('.calendar-panel');
+      const popup = document.querySelector('#calendar-overflow-popup');
+      const list = popup?.querySelector('.calendar-overflow-list');
+      const panelBounds = panel?.getBoundingClientRect();
+      const popupBounds = popup?.getBoundingClientRect();
+      const rows = [...(popup?.querySelectorAll('.calendar-overflow-list li') ?? [])];
+      return {
+        rowCount: rows.length,
+        focusedFirst: Boolean(
+          document.activeElement?.hasAttribute('data-calendar-overflow-first')
+        ),
+        swatchCount: popup?.querySelectorAll('.calendar-overflow-color').length ?? 0,
+        markerCount: popup?.querySelectorAll('.calendar-overflow-content small').length ?? 0,
+        parentCount: [...(popup?.querySelectorAll('.calendar-overflow-content small') ?? [])]
+          .filter((element) => element.textContent?.startsWith('親タスク:')).length,
+        insidePanel: Boolean(
+          panelBounds && popupBounds &&
+          popupBounds.left >= panelBounds.left + 11 &&
+          popupBounds.right <= panelBounds.right - 11 &&
+          popupBounds.top >= panelBounds.top + 11 &&
+          popupBounds.bottom <= panelBounds.bottom - 11
+        ),
+        popupHeight: popupBounds?.height ?? null,
+        listScrollContained: Boolean(
+          list && list.clientHeight <= 420 &&
+          popup && popup.scrollHeight <= popup.clientHeight + 1
+        ),
+        createFormOpen: Boolean(document.querySelector('.calendar-create-form'))
+      };
+    })()`,
+  );
+  if (
+    opened?.rowCount !== setup.expectedCount ||
+    !opened.focusedFirst ||
+    opened.swatchCount !== setup.expectedCount ||
+    opened.markerCount < setup.expectedCount ||
+    (expectParent && opened.parentCount < 1) ||
+    !opened.insidePanel ||
+    opened.popupHeight > 421 ||
+    !opened.listScrollContained ||
+    opened.createFormOpen
+  ) {
+    throw new Error(
+      `カレンダー予定一覧の表示が不正です: ${JSON.stringify({ setup, opened })}`,
+    );
+  }
+
+  await client.send(
+    "Input.dispatchKeyEvent",
+    { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+    sessionId,
+  );
+  await client.send(
+    "Input.dispatchKeyEvent",
+    { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+    sessionId,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('#calendar-overflow-popup') &&
+      document.activeElement?.dataset.calendarOverflowTestTrigger === 'true'`,
+  );
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('[data-calendar-overflow-test-trigger="true"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('#calendar-overflow-popup'))`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.calendar-toolbar')?.dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 })
+    )`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('#calendar-overflow-popup') &&
+      document.activeElement?.dataset.calendarOverflowTestTrigger === 'true'`,
+  );
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('[data-calendar-overflow-test-trigger="true"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('#calendar-overflow-popup'))`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.calendar-overflow-list button')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('#calendar-overflow-popup') &&
+      Boolean(document.querySelector('.task-detail-pane'))`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('button[aria-label="詳細を閉じる"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.task-detail-pane')`,
+  );
+  return { commands: await takeInvokeLog(client, sessionId) };
 }
 
 async function verifyCalendarOverlapLayout(client, sessionId) {

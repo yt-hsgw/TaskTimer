@@ -7,7 +7,7 @@ import type {
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { GripHorizontal, GripVertical } from "lucide-react";
+import { GripHorizontal, GripVertical, X } from "lucide-react";
 import type {
   ScheduledTaskDraft,
   TaskListItem,
@@ -132,6 +132,16 @@ type CalendarCreateSelection =
   | DateCalendarCreateSelection;
 
 type CalendarItemVariant = "all-day" | "timed" | "month";
+type CalendarOverflowScope = "all-day" | "month";
+type CalendarOverflowPopupState = {
+  date: string;
+  scope: CalendarOverflowScope;
+  trigger: HTMLButtonElement;
+  left: number;
+  top: number;
+  width: number;
+  maxHeight: number;
+};
 type TimedCalendarItemLayout = {
   laneIndex: number;
   laneCount: number;
@@ -166,6 +176,8 @@ export function WeekCalendar({
   onMoveScheduledItem,
 }: WeekCalendarProps) {
   usePresentationRenderProbe("WeekCalendar");
+  const calendarPanelRef = useRef<HTMLElement>(null);
+  const overflowPopupRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const createSelectionRef = useRef<CalendarCreateSelection | null>(null);
   const [createDraft, setCreateDraft] = useState<CalendarTaskDraft | null>(null);
@@ -175,6 +187,8 @@ export function WeekCalendar({
   const [dropTarget, setDropTarget] = useState<CalendarDropTarget | null>(null);
   const [pendingMove, setPendingMove] = useState<PendingCalendarMove | null>(null);
   const [resizePreview, setResizePreview] = useState<WeekCalendarItem | null>(null);
+  const [overflowPopup, setOverflowPopup] =
+    useState<CalendarOverflowPopupState | null>(null);
   const displayItems = useMemo(
     () => {
       const committedItems = pendingMove
@@ -214,6 +228,17 @@ export function WeekCalendar({
     [anchorDate, viewMode],
   );
   const monthDays = useMemo(() => buildMonthDays(anchorDate), [anchorDate]);
+  const overflowItems = useMemo(
+    () =>
+      overflowPopup
+        ? getCalendarOverflowItems(
+            displayItems,
+            overflowPopup.date,
+            overflowPopup.scope,
+          )
+        : [],
+    [displayItems, overflowPopup],
+  );
   const headingLabel = formatCalendarHeading(viewMode, anchorDate);
   const weekBadge =
     viewMode === "week" ? `第${getIsoWeekNumber(anchorDate)}週` : null;
@@ -246,7 +271,85 @@ export function WeekCalendar({
 
   useEffect(() => {
     clearCreateSelection();
+    closeOverflowPopup(false);
   }, [anchorDate, viewMode]);
+
+  useEffect(() => {
+    const activePopup = overflowPopup;
+    if (!activePopup) {
+      return;
+    }
+    const activeTrigger = activePopup.trigger;
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      overflowPopupRef.current
+        ?.querySelector<HTMLElement>("[data-calendar-overflow-first]")
+        ?.focus();
+    });
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeOverflowPopup();
+      }
+    }
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (
+        !(target instanceof Node) ||
+        overflowPopupRef.current?.contains(target) ||
+        activeTrigger.contains(target)
+      ) {
+        return;
+      }
+      closeOverflowPopup();
+    }
+    function handleCalendarScroll(event: Event) {
+      if (
+        event.target instanceof Node &&
+        overflowPopupRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+      closeOverflowPopup(false);
+    }
+    function handleResize() {
+      const panel = calendarPanelRef.current;
+      if (!panel || !activeTrigger.isConnected) {
+        closeOverflowPopup(false);
+        return;
+      }
+      const position = resolveCalendarOverflowPosition(
+        activeTrigger.getBoundingClientRect(),
+        panel.getBoundingClientRect(),
+      );
+      setOverflowPopup((current) =>
+        current?.trigger === activeTrigger ? { ...current, ...position } : current,
+      );
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    const panel = calendarPanelRef.current;
+    panel?.addEventListener("scroll", handleCalendarScroll, true);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      panel?.removeEventListener("scroll", handleCalendarScroll, true);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [overflowPopup]);
+
+  useEffect(() => {
+    if (
+      overflowPopup &&
+      (!overflowPopup.trigger.isConnected ||
+        overflowItems.length <= CALENDAR_VISIBLE_ITEM_LIMIT)
+    ) {
+      closeOverflowPopup(false);
+    }
+  }, [overflowItems.length, overflowPopup]);
 
   useEffect(() => {
     if (
@@ -258,6 +361,7 @@ export function WeekCalendar({
   }, [items, pendingMove]);
 
   function openCreateForm(startDate: string, startTime: string | null) {
+    closeOverflowPopup(false);
     const end = startTime
       ? addMinutesToLocalDateTime(startDate, startTime, 60)
       : { date: startDate, time: "" };
@@ -269,6 +373,44 @@ export function WeekCalendar({
       isAllDay: !startTime,
       sourceLabel: formatCreateSourceLabel(startDate, startTime),
     });
+  }
+
+  function openOverflowPopup(
+    date: string,
+    scope: CalendarOverflowScope,
+    trigger: HTMLButtonElement,
+  ) {
+    if (overflowPopup?.trigger === trigger) {
+      closeOverflowPopup();
+      return;
+    }
+    const panel = calendarPanelRef.current;
+    if (!panel) {
+      return;
+    }
+    setOverflowPopup({
+      date,
+      scope,
+      trigger,
+      ...resolveCalendarOverflowPosition(
+        trigger.getBoundingClientRect(),
+        panel.getBoundingClientRect(),
+      ),
+    });
+  }
+
+  function closeOverflowPopup(restoreFocus = true) {
+    setOverflowPopup((current) => {
+      if (restoreFocus && current?.trigger.isConnected) {
+        window.requestAnimationFrame(() => current.trigger.focus());
+      }
+      return null;
+    });
+  }
+
+  function selectOverflowItem(item: WeekCalendarItem) {
+    closeOverflowPopup(false);
+    onSelectItem(item);
   }
 
   function openCreateFormForSchedule({
@@ -645,6 +787,7 @@ export function WeekCalendar({
 
   return (
     <section
+      ref={calendarPanelRef}
       className={`panel calendar-panel ${
         createSelection?.didDrag ? "is-creating-range" : ""
       }`}
@@ -940,6 +1083,7 @@ export function WeekCalendar({
           onResizeItem={resizeCalendarItem}
           onResizePreview={previewScheduleResize}
           onMoveItemKeyDown={handleMoveItemKeyDown}
+          onOpenOverflow={openOverflowPopup}
         />
       ) : (
         <TimeGridCalendar
@@ -961,8 +1105,24 @@ export function WeekCalendar({
           onResizeItem={resizeCalendarItem}
           onResizePreview={previewScheduleResize}
           onMoveItemKeyDown={handleMoveItemKeyDown}
+          onOpenOverflow={openOverflowPopup}
         />
       )}
+      {overflowPopup ? (
+        <CalendarOverflowPopup
+          popupRef={overflowPopupRef}
+          date={overflowPopup.date}
+          items={overflowItems}
+          style={{
+            left: overflowPopup.left,
+            top: overflowPopup.top,
+            width: overflowPopup.width,
+            maxHeight: overflowPopup.maxHeight,
+          }}
+          onClose={() => closeOverflowPopup()}
+          onSelectItem={selectOverflowItem}
+        />
+      ) : null}
     </section>
   );
 }
@@ -986,6 +1146,7 @@ function TimeGridCalendar({
   onResizeItem,
   onResizePreview,
   onMoveItemKeyDown,
+  onOpenOverflow,
 }: {
   days: CalendarDay[];
   items: WeekCalendarItem[];
@@ -1014,6 +1175,11 @@ function TimeGridCalendar({
     item: WeekCalendarItem,
     variant: CalendarItemVariant,
     event: ReactKeyboardEvent<HTMLButtonElement>,
+  ): void;
+  onOpenOverflow(
+    date: string,
+    scope: CalendarOverflowScope,
+    trigger: HTMLButtonElement,
   ): void;
 }) {
   const currentTime = getCurrentTimeMarker(days);
@@ -1064,6 +1230,7 @@ function TimeGridCalendar({
         const dayLayout = headerDayLayouts.get(day.date) ?? {
           slots: [],
           hiddenCount: 0,
+          allItems: [],
         };
         const dropTargetForDay = { dueDate: day.date, dueTime: null };
         return (
@@ -1093,6 +1260,7 @@ function TimeGridCalendar({
             <CalendarCellItems
               isLoading={isLoading}
               items={dayLayout.slots}
+              allItems={dayLayout.allItems}
               hiddenCount={dayLayout.hiddenCount}
               selectedTarget={selectedTarget}
               draggedItem={draggedItem}
@@ -1107,6 +1275,9 @@ function TimeGridCalendar({
               onResizeItem={onResizeItem}
               onResizePreview={onResizePreview}
               onMoveItemKeyDown={onMoveItemKeyDown}
+              onOpenOverflow={(date, trigger) =>
+                onOpenOverflow(date, "all-day", trigger)
+              }
             />
           </div>
         );
@@ -1304,9 +1475,119 @@ function TimeGridRow({
   );
 }
 
+function CalendarOverflowButton({
+  date,
+  hiddenCount,
+  itemCount,
+  onOpen,
+}: {
+  date: string;
+  hiddenCount: number;
+  itemCount: number;
+  onOpen?(date: string, trigger: HTMLButtonElement): void;
+}) {
+  return (
+    <button
+      className="calendar-more"
+      type="button"
+      aria-haspopup="dialog"
+      aria-controls="calendar-overflow-popup"
+      aria-label={`${formatDateLabel(date)}の予定${itemCount}件を表示。ほか${hiddenCount}件`}
+      onPointerDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpen?.(date, event.currentTarget);
+      }}
+    >
+      他 {hiddenCount} 件
+    </button>
+  );
+}
+
+function CalendarOverflowPopup({
+  popupRef,
+  date,
+  items,
+  style,
+  onClose,
+  onSelectItem,
+}: {
+  popupRef: React.RefObject<HTMLDivElement | null>;
+  date: string;
+  items: WeekCalendarItem[];
+  style: CSSProperties;
+  onClose(): void;
+  onSelectItem(item: WeekCalendarItem): void;
+}) {
+  const titleId = "calendar-overflow-popup-title";
+  return (
+    <div
+      ref={popupRef}
+      id="calendar-overflow-popup"
+      className="calendar-overflow-popup"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby={titleId}
+      style={style}
+      onPointerDown={(event) => event.stopPropagation()}
+      onDoubleClick={(event) => event.stopPropagation()}
+    >
+      <div className="calendar-overflow-heading">
+        <div>
+          <strong id={titleId}>{formatDateLabel(date)}の予定</strong>
+          <span>{items.length}件</span>
+        </div>
+        <button
+          className="inline-icon-button"
+          type="button"
+          aria-label="予定一覧を閉じる"
+          data-calendar-overflow-first={items.length === 0 ? "true" : undefined}
+          onClick={onClose}
+        >
+          <X aria-hidden="true" size={16} strokeWidth={2.2} />
+        </button>
+      </div>
+      {items.length > 0 ? (
+        <ul className="calendar-overflow-list">
+          {items.map((item, index) => {
+            const markerText = formatCalendarItemMarker(item);
+            const parentText = item.parentTitle
+              ? `親タスク: ${item.parentTitle}`
+              : null;
+            return (
+              <li key={getCalendarOverflowItemKey(item)}>
+                <button
+                  type="button"
+                  data-calendar-overflow-first={index === 0 ? "true" : undefined}
+                  aria-label={`${item.title}、${markerText}${parentText ? `、${parentText}` : ""}を開く`}
+                  onClick={() => onSelectItem(item)}
+                >
+                  <span
+                    className={`calendar-overflow-color color-${item.colorToken}`}
+                    aria-hidden="true"
+                  />
+                  <span className="calendar-overflow-content">
+                    <strong>{item.title}</strong>
+                    <small>{markerText}</small>
+                    {parentText ? <small>{parentText}</small> : null}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="calendar-overflow-empty">表示できる予定はありません。</p>
+      )}
+    </div>
+  );
+}
+
 function CalendarCellItems({
   isLoading,
   items,
+  allItems = [],
   timedItemLayouts,
   selectedTarget,
   draggedItem,
@@ -1322,9 +1603,11 @@ function CalendarCellItems({
   onResizeItem,
   onResizePreview,
   onMoveItemKeyDown,
+  onOpenOverflow,
 }: {
   isLoading: boolean;
   items: Array<WeekCalendarItem | null>;
+  allItems?: WeekCalendarItem[];
   timedItemLayouts?: ReadonlyMap<string, TimedCalendarItemLayout>;
   selectedTarget: WorkTargetRef | null;
   draggedItem: WeekCalendarItem | null;
@@ -1350,6 +1633,7 @@ function CalendarCellItems({
     variant: CalendarItemVariant,
     event: ReactKeyboardEvent<HTMLButtonElement>,
   ): void;
+  onOpenOverflow?(date: string, trigger: HTMLButtonElement): void;
 }) {
   if (isLoading) {
     return <p className="calendar-empty">読み込み中</p>;
@@ -1392,7 +1676,12 @@ function CalendarCellItems({
         ),
       )}
       {hiddenCount > 0 ? (
-        <span className="calendar-more">他 {hiddenCount} 件</span>
+        <CalendarOverflowButton
+          date={displayDate}
+          hiddenCount={hiddenCount}
+          itemCount={allItems.length}
+          onOpen={onOpenOverflow}
+        />
       ) : null}
     </div>
   );
@@ -1417,6 +1706,7 @@ function MonthCalendar({
   onResizeItem,
   onResizePreview,
   onMoveItemKeyDown,
+  onOpenOverflow,
 }: {
   days: CalendarDay[];
   anchorDate: string;
@@ -1446,6 +1736,11 @@ function MonthCalendar({
     variant: CalendarItemVariant,
     event: ReactKeyboardEvent<HTMLButtonElement>,
   ): void;
+  onOpenOverflow(
+    date: string,
+    scope: CalendarOverflowScope,
+    trigger: HTMLButtonElement,
+  ): void;
 }) {
   const anchor = parseDateInputValue(anchorDate);
   const currentMonth = anchor.getMonth();
@@ -1466,6 +1761,7 @@ function MonthCalendar({
           const dayLayout = dayLayouts.get(day.date) ?? {
             slots: [],
             hiddenCount: 0,
+            allItems: [],
           };
           const isOutsideMonth =
             parseDateInputValue(day.date).getMonth() !== currentMonth;
@@ -1534,9 +1830,14 @@ function MonthCalendar({
                     ),
                   )}
                   {dayLayout.hiddenCount > 0 ? (
-                    <span className="calendar-more">
-                      他 {dayLayout.hiddenCount} 件
-                    </span>
+                    <CalendarOverflowButton
+                      date={day.date}
+                      hiddenCount={dayLayout.hiddenCount}
+                      itemCount={dayLayout.allItems.length}
+                      onOpen={(date, trigger) =>
+                        onOpenOverflow(date, "month", trigger)
+                      }
+                    />
                   ) : null}
                 </div>
               )}
@@ -1551,6 +1852,7 @@ function MonthCalendar({
 type CalendarDayLayout = {
   slots: Array<WeekCalendarItem | null>;
   hiddenCount: number;
+  allItems: WeekCalendarItem[];
 };
 
 function buildCalendarDayLayouts(
@@ -1640,10 +1942,71 @@ function buildCalendarDayLayouts(
       layouts.set(day.date, {
         slots: slots.slice(0, lastOccupiedSlot + 1),
         hiddenCount,
+        allItems: [...activeScheduledItems, ...pointItems],
       });
     }
   }
   return layouts;
+}
+
+function getCalendarOverflowItems(
+  items: WeekCalendarItem[],
+  date: string,
+  scope: CalendarOverflowScope,
+) {
+  const scopedItems = items.filter((item) => {
+    if (getCalendarPreviewKind(item.id)) {
+      return false;
+    }
+    if (scope === "month") {
+      return true;
+    }
+    return item.marker === "scheduled"
+      ? item.isAllDay || isMultiDaySchedule(item)
+      : !item.time;
+  });
+  return (
+    buildCalendarDayLayouts([buildDay(date)], scopedItems).get(date)?.allItems ??
+    []
+  );
+}
+
+function getCalendarOverflowItemKey(item: WeekCalendarItem) {
+  return [
+    item.target.type,
+    item.target.id,
+    item.marker,
+    item.date,
+    item.time ?? "",
+    item.endDate ?? "",
+    item.endTime ?? "",
+  ].join(":");
+}
+
+function resolveCalendarOverflowPosition(
+  trigger: DOMRect,
+  panel: DOMRect,
+) {
+  const margin = 12;
+  const gap = 6;
+  const width = Math.min(360, Math.max(220, panel.width - margin * 2));
+  const panelMaxHeight = Math.max(160, panel.height - margin * 2);
+  const availableBelow = panel.bottom - trigger.bottom - margin - gap;
+  const availableAbove = trigger.top - panel.top - margin - gap;
+  const opensAbove = availableBelow < 240 && availableAbove > availableBelow;
+  const availableHeight = opensAbove ? availableAbove : availableBelow;
+  const maxHeight = Math.min(420, Math.max(160, availableHeight));
+  const maxLeft = Math.max(margin, panel.width - width - margin);
+  const left = Math.min(
+    Math.max(trigger.left - panel.left, margin),
+    maxLeft,
+  );
+  const preferredTop = opensAbove
+    ? trigger.top - panel.top - maxHeight - gap
+    : trigger.bottom - panel.top + gap;
+  const maxTop = Math.max(margin, panel.height - maxHeight - margin);
+  const top = Math.min(Math.max(preferredTop, margin), maxTop);
+  return { left, top, width, maxHeight: Math.min(maxHeight, panelMaxHeight) };
 }
 
 type TimedCalendarInterval = {
