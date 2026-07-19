@@ -1843,7 +1843,7 @@ button {
   color: var(--ink);
   display: grid;
   gap: 10px;
-  grid-template-columns: 34px 28px minmax(0, 1fr) 34px;
+  grid-template-columns: 34px 28px minmax(0, 1fr) 122px 34px;
   min-height: 58px;
   min-width: 0;
   padding: 8px;
@@ -1889,9 +1889,22 @@ button {
   color: var(--ink);
   display: grid;
   gap: 8px;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 122px;
   min-width: 0;
   padding: 7px 8px;
+  text-align: left;
+}
+
+.subtask-row-content {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  min-width: 0;
+  padding: 0;
   text-align: left;
 }
 
@@ -2052,6 +2065,50 @@ button {
 
 .favorite-button.is-favorite {
   color: var(--gold);
+}
+
+.task-timer-slot {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+  justify-content: flex-end;
+  min-height: 30px;
+  min-width: 122px;
+}
+
+.task-timer-slot.is-active {
+  color: var(--green);
+}
+
+.task-countdown-value {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1;
+  min-width: 48px;
+  text-align: right;
+}
+
+.task-timer-icon-button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  color: var(--green);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  min-width: 28px;
+  padding: 0;
+}
+
+.task-timer-icon-button:hover:not(:disabled) {
+  background: var(--soft-green);
+}
+
+.task-timer-icon-button:disabled {
+  color: #aab5bb;
+  cursor: not-allowed;
 }
 
 .task-composer {
@@ -3221,6 +3278,18 @@ button {
   gap: 12px;
 }
 
+.task-timer-settings-form {
+  align-items: end;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 220px) 112px;
+  margin-bottom: 10px;
+}
+
+.task-timer-settings-form .field-group {
+  margin-bottom: 0;
+}
+
 .pomodoro-settings-grid {
   display: grid;
   gap: 10px;
@@ -3546,13 +3615,22 @@ button {
 
   .date-fields,
   .calendar-create-grid,
+  .task-timer-settings-form,
   .recurrence-fields {
     grid-template-columns: 1fr;
   }
 
   .task-row {
-    grid-template-columns: 30px 24px minmax(0, 1fr) 30px;
+    grid-template-columns: 30px 24px minmax(0, 1fr) 108px 30px;
     gap: 8px;
+  }
+
+  .task-row-subtask {
+    grid-template-columns: minmax(0, 1fr) 108px;
+  }
+
+  .task-timer-slot {
+    min-width: 108px;
   }
 
   .task-row-subtasks {

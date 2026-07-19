@@ -67,7 +67,7 @@ TaskTimer-backup-YYYYMMDD-HHMMSS/
 }
 ```
 
-SQLiteバックアップは完全復元用であり、タスク名、サブタスク名、メモ本文、通知ルール、通知失敗履歴、タイマー履歴、ポモドーロ設定/履歴を含む。
+SQLiteバックアップは完全復元用であり、タスク名、サブタスク名、メモ本文、通知ルール、通知失敗履歴、タイマー履歴、通常タイマー設定、ポモドーロ設定/履歴を含む。
 
 ### JSONエクスポート
 
@@ -89,6 +89,7 @@ TaskTimer-export-YYYYMMDD-HHMMSS.json
 - `subtasks`
 - `timer_sessions`
 - `timer_pauses`
+- `task_timer_settings`
 - `pomodoro_settings`
 - `pomodoro_sessions`
 - `notification_rules`
@@ -100,7 +101,7 @@ TaskTimer-export-YYYYMMDD-HHMMSS.json
 ```json
 {
   "format": "tasktimer-json-export",
-  "formatVersion": 3,
+  "formatVersion": 4,
   "appVersion": "0.1.0",
   "createdAt": "2026-07-15T00:00:00+09:00",
   "platform": "windows",
@@ -132,8 +133,9 @@ TaskTimer-export-YYYYMMDD-HHMMSS-csv/
 - `task_tags.csv`: `task_id`, `tag_id`, `created_at`
 - `tasks.csv`: `board_column_id`、`lifecycle_status`、`scheduled_start_date/time`、`scheduled_end_date/time`、`scheduled_is_all_day` を含む
 - `subtasks.csv`: タスクと同じ予定期間列を含む
-- `timer_sessions.csv`
+- `timer_sessions.csv`: 開始時点の目標秒数、完了理由、完了通知時刻を含む
 - `timer_pauses.csv`
+- `task_timer_settings.csv`: 通常タイマーの既定目標秒数を含む
 - `pomodoro_settings.csv`
 - `pomodoro_sessions.csv`
 - `notification_rules.csv`

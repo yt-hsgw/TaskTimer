@@ -13,7 +13,7 @@ use crate::domain::{
         validate_task_list_color_token, validate_task_list_name, validate_title, WorkSchedule,
         WorkScheduleDestination, WorkStatus, DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID,
     },
-    timer::WorkTargetRef,
+    timer::{WorkTargetRef, MAX_TASK_TIMER_TARGET_SECONDS, MIN_TASK_TIMER_TARGET_SECONDS},
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
@@ -37,9 +37,10 @@ use super::{
         SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord, TagRepository, TagUpdate,
         TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskPageCursor,
         TaskPageQuery, TaskPageRecord, TaskPageScope, TaskReadRepository, TaskRecord,
-        TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, UiPreferenceRepository,
-        UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate, WorkScheduleMove,
-        WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, TaskTimerSettingsRecord,
+        TaskTimerSettingsUpdate, TimerRepository, UiPreferenceRepository, UiPreferencesRecord,
+        UiPreferencesUpdate, WorkItemCreate, WorkItemUpdate, WorkScheduleMove, WorkScheduleUpdate,
+        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
 
@@ -49,7 +50,6 @@ const NOTIFICATION_HISTORY_LIMIT: i64 = 20;
 const NOTIFICATION_OS_REGISTRATION_LIMIT: i64 = 50;
 #[allow(dead_code)]
 const OS_REGISTRATION_ID_MAX_CHARS: usize = 256;
-const TIMER_TARGET_MAX_SECONDS: i64 = 60 * 60 * 24 * 30;
 const RECURRENCE_INTERVAL_MAX: i64 = 365;
 const LOCAL_PATH_MAX_CHARS: usize = 4096;
 const TASK_PAGE_MAX_LIMIT: i64 = 200;
@@ -182,9 +182,20 @@ pub struct PomodoroSettingsDraft {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskTimerSettingsDraft {
+    pub default_target_seconds: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PomodoroExpirySyncResult {
     pub expired_pomodoro: Option<ActivePomodoro>,
     pub active_pomodoro: Option<ActivePomodoro>,
+    pub notification_summary: NotificationDispatchSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskCountdownExpirySyncResult {
+    pub expired_timer: Option<ActiveTimer>,
     pub notification_summary: NotificationDispatchSummary,
 }
 
@@ -518,6 +529,63 @@ pub fn start_timer(
 ) -> RepositoryResult<ActiveTimer> {
     let target = validate_work_target_ref(target)?;
     repository.start_timer(target, clock.now_utc_iso8601())
+}
+
+pub fn get_task_timer_settings(
+    repository: &impl TimerRepository,
+) -> RepositoryResult<TaskTimerSettingsRecord> {
+    repository.get_task_timer_settings()
+}
+
+pub fn update_task_timer_settings(
+    repository: &impl TimerRepository,
+    clock: &impl Clock,
+    draft: TaskTimerSettingsDraft,
+) -> RepositoryResult<TaskTimerSettingsRecord> {
+    repository.update_task_timer_settings(TaskTimerSettingsUpdate {
+        default_target_seconds: validate_task_timer_duration_seconds(
+            draft.default_target_seconds,
+            "既定のタイマー時間",
+        )?,
+        now: clock.now_utc_iso8601(),
+    })
+}
+
+pub fn sync_expired_task_countdown(
+    repository: &(impl TimerRepository + NotificationPreferenceRepository),
+    notification_gateway: &impl LocalNotificationGateway,
+    clock: &impl Clock,
+) -> RepositoryResult<TaskCountdownExpirySyncResult> {
+    let now = clock.now_utc_iso8601();
+    let Some(expiry) = repository.sync_expired_task_countdown(now.clone())? else {
+        return Ok(TaskCountdownExpirySyncResult {
+            expired_timer: None,
+            notification_summary: empty_notification_summary(),
+        });
+    };
+
+    let mut notification_summary = empty_notification_summary();
+    if repository.get_notifications_enabled()? {
+        notification_summary.attempted = 1;
+        let display_mode = repository.get_notification_display_mode()?;
+        let message = build_task_countdown_expiry_notification(&display_mode, &expiry.target_title);
+        match notification_gateway.send(&message) {
+            Ok(()) => {
+                repository
+                    .mark_task_countdown_notification_sent(expiry.expired_timer.id.clone(), now)?;
+                notification_summary.succeeded = 1;
+            }
+            Err(error) => {
+                notification_summary.failed = 1;
+                notification_summary.last_error = Some(error);
+            }
+        }
+    }
+
+    Ok(TaskCountdownExpirySyncResult {
+        expired_timer: Some(expiry.expired_timer),
+        notification_summary,
+    })
 }
 
 pub fn get_pomodoro_settings(
@@ -907,6 +975,23 @@ fn build_pomodoro_expiry_notification(
     }
 }
 
+fn build_task_countdown_expiry_notification(
+    mode: &NotificationDisplayMode,
+    target_title: &str,
+) -> LocalNotificationMessage {
+    let body = "タスクのタイマーが終了しました。".to_string();
+    match mode {
+        NotificationDisplayMode::TitleOnly => LocalNotificationMessage {
+            title: target_title.trim().to_string(),
+            body,
+        },
+        NotificationDisplayMode::Generic => LocalNotificationMessage {
+            title: "TaskTimer".to_string(),
+            body,
+        },
+    }
+}
+
 pub fn list_notification_failure_history(
     repository: &impl NotificationHistoryRepository,
 ) -> RepositoryResult<Vec<NotificationDeliveryAttemptRecord>> {
@@ -1242,13 +1327,14 @@ fn validate_timer_target_seconds(value: Option<i64>) -> RepositoryResult<Option<
     let Some(seconds) = value else {
         return Ok(None);
     };
-    if seconds <= 0 {
-        return Err("タイマー目標時間は1秒以上で入力してください".to_string());
+    validate_task_timer_duration_seconds(seconds, "タイマー目標時間").map(Some)
+}
+
+fn validate_task_timer_duration_seconds(seconds: i64, label: &str) -> RepositoryResult<i64> {
+    if !(MIN_TASK_TIMER_TARGET_SECONDS..=MAX_TASK_TIMER_TARGET_SECONDS).contains(&seconds) {
+        return Err(format!("{label}は1分以上24時間以内で入力してください"));
     }
-    if seconds > TIMER_TARGET_MAX_SECONDS {
-        return Err("タイマー目標時間は30日以内で入力してください".to_string());
-    }
-    Ok(Some(seconds))
+    Ok(seconds)
 }
 
 fn validate_recurrence_rule(

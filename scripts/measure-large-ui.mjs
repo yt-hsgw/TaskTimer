@@ -30,6 +30,7 @@ const profile = options.profile === "standard"
     };
 const thresholds = {
   initial_task_list: 5000,
+  task_countdown_controls: 3000,
   task_list_load_more: 1500,
   today: 1000,
   favorites: 1000,
@@ -59,9 +60,11 @@ const UNRELATED_WORKSPACE_COMMANDS = [
   "list_calendar_items",
   "list_tags",
   "get_active_timer",
+  "sync_expired_task_countdown",
   "get_active_pomodoro",
   "sync_expired_pomodoro",
   "get_pomodoro_settings",
+  "get_task_timer_settings",
   "get_notification_display_mode",
   "get_notifications_enabled",
 ];
@@ -124,6 +127,24 @@ try {
       "initial_task_list",
       performance.now() - initialStartedAt,
       thresholds.initial_task_list,
+    ),
+  );
+
+  const taskCountdownStartedAt = performance.now();
+  const taskCountdownResult = await verifyTaskCountdownControls(client, sessionId);
+  assertCommandScope("タスク行カウントダウン", taskCountdownResult.commands, {
+    required: [
+      "start_timer",
+      "pause_active_timer",
+      "resume_active_timer",
+      "stop_active_timer",
+    ],
+  });
+  measurements.push(
+    createMeasurement(
+      "task_countdown_controls",
+      performance.now() - taskCountdownStartedAt,
+      thresholds.task_countdown_controls,
     ),
   );
 
@@ -809,6 +830,82 @@ async function takeInvokeLog(client, sessionId) {
       })()`,
     )) ?? []
   );
+}
+
+async function verifyTaskCountdownControls(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.task-row .task-timer-icon-button:not([disabled])')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const row = document.querySelector('.task-row');
+      const content = row?.querySelector('.task-row-content');
+      const timer = row?.querySelector('.task-timer-slot.is-active');
+      const favorite = row?.querySelector('.favorite-button');
+      const pause = timer?.querySelector('button[title="一時停止"]');
+      if (!row || !content || !timer || !favorite || !pause) return false;
+      const contentRect = content.getBoundingClientRect();
+      const timerRect = timer.getBoundingClientRect();
+      const favoriteRect = favorite.getBoundingClientRect();
+      return timer.querySelector('.task-countdown-value') &&
+        contentRect.right <= timerRect.left + 1 &&
+        timerRect.right <= favoriteRect.left + 1 &&
+        !document.querySelector('.task-detail-pane');
+    })()`,
+  );
+
+  await resetRenderCounts(client, sessionId);
+  await evaluate(
+    client,
+    sessionId,
+    `new Promise((resolve) => window.setTimeout(resolve, 1100))`,
+  );
+  assertComponentsDidNotRender(
+    "カウントダウン1秒更新",
+    await takeRenderCounts(client, sessionId),
+    ["App", "TaskPanel"],
+  );
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.task-timer-slot.is-active button[title="一時停止"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.task-timer-slot.is-active button[title="再開"]'))`,
+  );
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.task-timer-slot.is-active button[title="再開"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.task-timer-slot.is-active button[title="一時停止"]'))`,
+  );
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.task-timer-slot.is-active button[title="終了"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.task-timer-slot.is-active') &&
+      !document.querySelector('.task-detail-pane')`,
+  );
+
+  return { commands: await takeInvokeLog(client, sessionId) };
 }
 
 async function resetRenderCounts(client, sessionId) {
@@ -2859,6 +2956,7 @@ function buildTauriInvokeMockSource(profile) {
       subtasks: subtasksFor(id, index)
     };
   });
+  let activeTimer = null;
   let scheduledStartDate = today;
   let scheduledStartTime = "09:00";
   let scheduledEndDate = today;
@@ -3159,7 +3257,58 @@ function buildTauriInvokeMockSource(profile) {
             resolve(null);
           }, 120);
         }),
-        get_active_timer: () => null,
+        get_active_timer: () => clone(activeTimer),
+        start_timer: () => {
+          const target = args.request?.target;
+          activeTimer = {
+            id: "timer-perf-active",
+            target,
+            startedAt: new Date().toISOString(),
+            stoppedAt: null,
+            elapsedSeconds: null,
+            pausedAt: null,
+            targetSeconds: 1500,
+            accumulatedPausedSeconds: 0,
+            completionReason: null,
+            completionNotifiedAt: null,
+            deletedAt: null,
+            createdAt: new Date().toISOString()
+          };
+          taskRows.forEach((row) => {
+            row.isTimerActive = row.id === target.id ||
+              tasks.find((task) => task.id === row.id)?.subtasks.some(
+                (subtask) => subtask.id === target.id
+              );
+            row.activeTimerTarget = row.isTimerActive ? clone(target) : null;
+          });
+          return clone(activeTimer);
+        },
+        pause_active_timer: () => {
+          activeTimer.pausedAt = new Date().toISOString();
+          return clone(activeTimer);
+        },
+        resume_active_timer: () => {
+          activeTimer.pausedAt = null;
+          return clone(activeTimer);
+        },
+        stop_active_timer: () => {
+          const stopped = {
+            ...activeTimer,
+            stoppedAt: new Date().toISOString(),
+            elapsedSeconds: 1,
+            completionReason: "manual"
+          };
+          activeTimer = null;
+          taskRows.forEach((row) => {
+            row.isTimerActive = false;
+            row.activeTimerTarget = null;
+          });
+          return stopped;
+        },
+        sync_expired_task_countdown: () => ({
+          expiredTimer: null,
+          notificationSummary: { attempted: 0, succeeded: 0, failed: 0, lastError: null }
+        }),
         get_active_pomodoro: () => null,
         sync_expired_pomodoro: () => ({
           expiredPomodoro: null,
@@ -3174,6 +3323,16 @@ function buildTauriInvokeMockSource(profile) {
           cyclesUntilLongBreak: 4,
           autoStartBreak: false,
           autoStartNextWork: false,
+          updatedAt: now
+        }),
+        get_task_timer_settings: () => ({
+          id: "default",
+          defaultTargetSeconds: 1800,
+          updatedAt: now
+        }),
+        update_task_timer_settings: () => ({
+          id: "default",
+          defaultTargetSeconds: args.request?.defaultTargetSeconds ?? 1800,
           updatedAt: now
         }),
         get_notification_display_mode: () => "title_only",

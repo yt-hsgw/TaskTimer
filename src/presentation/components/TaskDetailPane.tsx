@@ -857,7 +857,7 @@ export function TaskDetailPane({
               list="timer-target-presets"
               type="number"
               min="1"
-              max="43200"
+              max="1440"
               step="1"
               value={draft.timerTargetMinutes}
               onChange={(event) =>

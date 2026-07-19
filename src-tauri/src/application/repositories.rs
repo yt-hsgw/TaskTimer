@@ -7,7 +7,7 @@ use crate::domain::{
     pomodoro::{PomodoroPhase, PomodoroStatus},
     recurrence::RecurrenceFrequency,
     task::{WorkSchedule, WorkScheduleDestination, WorkStatus},
-    timer::{WorkTargetRef, WorkTargetType},
+    timer::{TimerCompletionReason, WorkTargetRef, WorkTargetType},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,8 +53,31 @@ pub struct ActiveTimer {
     pub stopped_at: Option<String>,
     pub elapsed_seconds: Option<i64>,
     pub paused_at: Option<String>,
+    pub target_seconds: Option<i64>,
+    pub accumulated_paused_seconds: i64,
+    pub completion_reason: Option<TimerCompletionReason>,
+    pub completion_notified_at: Option<String>,
     pub deleted_at: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskTimerSettingsRecord {
+    pub id: String,
+    pub default_target_seconds: i64,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskTimerSettingsUpdate {
+    pub default_target_seconds: i64,
+    pub now: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskCountdownExpiry {
+    pub expired_timer: ActiveTimer,
+    pub target_title: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -566,7 +589,7 @@ pub struct UiPreferencesUpdate {
 }
 
 pub type RepositoryResult<T> = Result<T, String>;
-pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 7;
+pub const CURRENT_SQLITE_BACKUP_SCHEMA_VERSION: i64 = 8;
 
 pub trait CalendarRepository {
     fn list_calendar_items(
@@ -583,6 +606,24 @@ pub trait CalendarRepository {
 
 pub trait TimerRepository {
     fn get_active_timer(&self) -> RepositoryResult<Option<ActiveTimer>>;
+
+    fn get_task_timer_settings(&self) -> RepositoryResult<TaskTimerSettingsRecord>;
+
+    fn update_task_timer_settings(
+        &self,
+        input: TaskTimerSettingsUpdate,
+    ) -> RepositoryResult<TaskTimerSettingsRecord>;
+
+    fn sync_expired_task_countdown(
+        &self,
+        now: String,
+    ) -> RepositoryResult<Option<TaskCountdownExpiry>>;
+
+    fn mark_task_countdown_notification_sent(
+        &self,
+        timer_session_id: String,
+        now: String,
+    ) -> RepositoryResult<()>;
 }
 
 pub trait PomodoroRepository {
