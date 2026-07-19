@@ -6,7 +6,7 @@ import {
   SkipForward,
   Square,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type {
   ActivePomodoro,
   PomodoroSettings,
@@ -93,6 +93,11 @@ export function PomodoroPanel({
       <div className={`pomodoro-focus is-${phase}${isPaused ? " is-paused" : ""}`}>
         <div
           className="pomodoro-progress"
+          style={
+            {
+              "--pomodoro-remaining-angle": `${remainingPercent * 3.6}deg`,
+            } as CSSProperties
+          }
           role="progressbar"
           aria-label={`${phaseLabel}の時間進捗`}
           aria-valuemin={0}
@@ -100,22 +105,7 @@ export function PomodoroPanel({
           aria-valuenow={Math.round(remainingPercent)}
           aria-valuetext={`${phaseLabel} 残り${formatDuration(remainingSeconds)}`}
         >
-          <svg
-            className="pomodoro-progress-ring"
-            viewBox="0 0 240 240"
-            aria-hidden="true"
-          >
-            <circle className="pomodoro-progress-track" cx="120" cy="120" r="104" />
-            <circle
-              className="pomodoro-progress-value"
-              cx="120"
-              cy="120"
-              r="104"
-              pathLength="100"
-              strokeDasharray="100"
-              strokeDashoffset={100 - remainingPercent}
-            />
-          </svg>
+          <span className="pomodoro-progress-face" aria-hidden="true" />
           <div className="pomodoro-progress-content">
             <p className="pomodoro-phase-label">
               {phaseLabel}

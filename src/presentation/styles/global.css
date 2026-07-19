@@ -483,56 +483,91 @@ button {
 }
 
 .pomodoro-progress {
-  aspect-ratio: 1;
-  display: grid;
+  --pomodoro-remaining-angle: 360deg;
+  align-items: center;
+  display: flex;
+  flex-direction: column;
   flex: 0 0 auto;
-  place-items: center;
-  position: relative;
+  gap: 10px;
   width: clamp(240px, 30vw, 292px);
 }
 
-.pomodoro-progress-ring {
-  height: 100%;
-  inset: 0;
-  overflow: visible;
+.pomodoro-progress-face {
+  aspect-ratio: 1;
+  background: conic-gradient(
+    from 0deg,
+    var(--pomodoro-progress-color) 0deg var(--pomodoro-remaining-angle),
+    #e7eeeb var(--pomodoro-remaining-angle) 360deg
+  );
+  border: 1px solid #cbd9d3;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 45%),
+    0 8px 24px rgb(35 52 45 / 8%);
+  display: block;
+  flex: 0 0 auto;
+  position: relative;
+  width: 82%;
+}
+
+.pomodoro-progress-face::before {
+  -webkit-mask: radial-gradient(
+    circle,
+    transparent 0 43%,
+    #000 44% 47%,
+    transparent 48% 100%
+  );
+  background: repeating-conic-gradient(
+    from -0.5deg,
+    rgb(24 33 39 / 34%) 0deg 1deg,
+    transparent 1deg 6deg
+  );
+  border-radius: 50%;
+  content: "";
+  inset: 5px;
+  mask: radial-gradient(
+    circle,
+    transparent 0 43%,
+    #000 44% 47%,
+    transparent 48% 100%
+  );
   position: absolute;
-  transform: rotate(-90deg);
-  width: 100%;
 }
 
-.pomodoro-progress-track,
-.pomodoro-progress-value {
-  fill: none;
-  stroke-width: 10;
+.pomodoro-progress-face::after {
+  background: var(--ink);
+  border: 3px solid rgb(255 255 255 / 72%);
+  border-radius: 50%;
+  box-shadow: 0 2px 7px rgb(24 33 39 / 28%);
+  content: "";
+  height: 18px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 18px;
 }
 
-.pomodoro-progress-track {
-  stroke: #e2ebe7;
+.pomodoro-focus.is-short_break .pomodoro-progress-face,
+.pomodoro-focus.is-long_break .pomodoro-progress-face {
+  background: conic-gradient(
+    from 0deg,
+    var(--pomodoro-progress-color) 0deg var(--pomodoro-remaining-angle),
+    #e5ebf3 var(--pomodoro-remaining-angle) 360deg
+  );
+  border-color: #cbd7e5;
 }
 
-.pomodoro-progress-value {
-  stroke: var(--pomodoro-progress-color);
-  stroke-linecap: round;
-  transition: stroke-dashoffset 1s linear;
-}
-
-.pomodoro-focus.is-short_break .pomodoro-progress-track,
-.pomodoro-focus.is-long_break .pomodoro-progress-track {
-  stroke: #e2e9f2;
-}
-
-.pomodoro-focus.is-paused .pomodoro-progress-value {
+.pomodoro-focus.is-paused .pomodoro-progress-face {
   opacity: 0.72;
-  transition: none;
 }
 
 .pomodoro-progress-content {
   align-items: center;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-width: 78%;
-  position: relative;
+  gap: 6px;
+  width: 100%;
   text-align: center;
 }
 
@@ -564,7 +599,7 @@ button {
 
 .pomodoro-focus-countdown {
   color: var(--ink);
-  font-size: 58px;
+  font-size: 52px;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   letter-spacing: 0;
@@ -3828,8 +3863,12 @@ button {
     width: 224px;
   }
 
+  .pomodoro-progress-face {
+    width: 78%;
+  }
+
   .pomodoro-focus-countdown {
-    font-size: 48px;
+    font-size: 44px;
   }
 
   .pomodoro-focus-actions {
