@@ -88,10 +88,54 @@ type PendingCalendarMove = {
   isSaved: boolean;
 };
 
+type CalendarCreateSelectionSurface = "timed" | "all-day" | "month";
+
+type CalendarCreateSelectionPreviewRect = {
+  key: string;
+  label: string | null;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  connectsBefore: boolean;
+  connectsAfter: boolean;
+};
+
+type CalendarCreateSelectionBase = {
+  surface: CalendarCreateSelectionSurface;
+  pointerId: number;
+  captureElement: HTMLElement;
+  originX: number;
+  originY: number;
+  didDrag: boolean;
+  previewRects: CalendarCreateSelectionPreviewRect[];
+};
+
+type TimedCalendarCreateSelection = CalendarCreateSelectionBase & {
+  surface: "timed";
+  date: string;
+  anchorMinutes: number;
+  startMinutes: number;
+  endMinutes: number;
+  sourceHour: number;
+};
+
+type DateCalendarCreateSelection = CalendarCreateSelectionBase & {
+  surface: "all-day" | "month";
+  anchorDate: string;
+  startDate: string;
+  endDate: string;
+};
+
+type CalendarCreateSelection =
+  | TimedCalendarCreateSelection
+  | DateCalendarCreateSelection;
+
 type CalendarItemVariant = "all-day" | "timed" | "month";
 const RESIZE_PREVIEW_ID_SUFFIX = ":resize-preview";
 const MOVE_PREVIEW_ID_SUFFIX = ":move-preview";
 const CALENDAR_VISIBLE_ITEM_LIMIT = 3;
+const CREATE_SELECTION_DRAG_THRESHOLD = 6;
 
 export function WeekCalendar({
   viewMode,
@@ -115,7 +159,10 @@ export function WeekCalendar({
 }: WeekCalendarProps) {
   usePresentationRenderProbe("WeekCalendar");
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const createSelectionRef = useRef<CalendarCreateSelection | null>(null);
   const [createDraft, setCreateDraft] = useState<CalendarTaskDraft | null>(null);
+  const [createSelection, setCreateSelection] =
+    useState<CalendarCreateSelection | null>(null);
   const [draggedItem, setDraggedItem] = useState<WeekCalendarItem | null>(null);
   const [dropTarget, setDropTarget] = useState<CalendarDropTarget | null>(null);
   const [pendingMove, setPendingMove] = useState<PendingCalendarMove | null>(null);
@@ -174,19 +221,24 @@ export function WeekCalendar({
   }, [createDraft?.sourceLabel]);
 
   useEffect(() => {
-    if (!createDraft) {
+    if (!createDraft && !createSelection) {
       return;
     }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setCreateDraft(null);
+        clearCreateSelection();
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [createDraft]);
+  }, [createDraft, createSelection]);
+
+  useEffect(() => {
+    clearCreateSelection();
+  }, [anchorDate, viewMode]);
 
   useEffect(() => {
     if (
@@ -201,17 +253,214 @@ export function WeekCalendar({
     const end = startTime
       ? addMinutesToLocalDateTime(startDate, startTime, 60)
       : { date: startDate, time: "" };
-    setCreateDraft({
-      title: "",
-      listId: fallbackListId,
+    openCreateFormForSchedule({
       startDate,
       startTime: startTime ?? "",
       endDate: end.date,
       endTime: end.time,
       isAllDay: !startTime,
-      memo: "",
       sourceLabel: formatCreateSourceLabel(startDate, startTime),
     });
+  }
+
+  function openCreateFormForSchedule({
+    startDate,
+    startTime,
+    endDate,
+    endTime,
+    isAllDay,
+    sourceLabel,
+  }: {
+    startDate: string;
+    startTime: string;
+    endDate: string;
+    endTime: string;
+    isAllDay: boolean;
+    sourceLabel: string;
+  }) {
+    clearCreateSelection();
+    setCreateDraft({
+      title: "",
+      listId: fallbackListId,
+      startDate,
+      startTime,
+      endDate,
+      endTime,
+      isAllDay,
+      memo: "",
+      sourceLabel,
+    });
+  }
+
+  function setActiveCreateSelection(selection: CalendarCreateSelection | null) {
+    createSelectionRef.current = selection;
+    setCreateSelection(selection);
+  }
+
+  function clearCreateSelection() {
+    const current = createSelectionRef.current;
+    createSelectionRef.current = null;
+    setCreateSelection(null);
+    if (current?.captureElement.hasPointerCapture(current.pointerId)) {
+      current.captureElement.releasePointerCapture(current.pointerId);
+    }
+  }
+
+  function handleCreateSelectionPointerDown(
+    event: ReactPointerEvent<HTMLElement>,
+  ) {
+    if (
+      event.button !== 0 ||
+      !event.isPrimary ||
+      createDraft ||
+      isLoading ||
+      isCreatingTaskPending ||
+      isReschedulingItem ||
+      draggedItem
+    ) {
+      return;
+    }
+
+    const target = resolveCalendarCreateSelectionTarget(event.target);
+    if (!target) {
+      return;
+    }
+
+    const rootBounds = event.currentTarget.getBoundingClientRect();
+    const cellBounds = target.element.getBoundingClientRect();
+    const base = {
+      surface: target.surface,
+      pointerId: event.pointerId,
+      captureElement: target.element,
+      originX: event.clientX,
+      originY: event.clientY,
+      didDrag: false,
+      previewRects: [],
+    };
+    let selection: CalendarCreateSelection;
+    if (target.surface === "timed") {
+      const anchorMinutes = getTimeSelectionSlotMinutes(
+        target.hour,
+        event.clientY,
+        cellBounds.top,
+        cellBounds.height,
+      );
+      selection = {
+        ...base,
+        surface: "timed",
+        date: target.date,
+        anchorMinutes,
+        startMinutes: anchorMinutes,
+        endMinutes: anchorMinutes + 15,
+        sourceHour: target.hour,
+      };
+    } else {
+      selection = {
+        ...base,
+        surface: target.surface,
+        anchorDate: target.date,
+        startDate: target.date,
+        endDate: target.date,
+      };
+    }
+
+    target.element.setPointerCapture(event.pointerId);
+    setActiveCreateSelection(
+      updateCalendarCreateSelectionPreview(
+        selection,
+        event.currentTarget,
+        rootBounds,
+      ),
+    );
+  }
+
+  function handleCreateSelectionPointerMove(
+    event: ReactPointerEvent<HTMLElement>,
+  ) {
+    const current = createSelectionRef.current;
+    if (!current || current.pointerId !== event.pointerId) {
+      return;
+    }
+    const next = updateCalendarCreateSelection(
+      current,
+      event.clientX,
+      event.clientY,
+      event.currentTarget,
+    );
+    if (next !== current) {
+      setActiveCreateSelection(next);
+    }
+    if (next.didDrag) {
+      event.preventDefault();
+    }
+  }
+
+  function handleCreateSelectionPointerUp(
+    event: ReactPointerEvent<HTMLElement>,
+  ) {
+    const current = createSelectionRef.current;
+    if (!current || current.pointerId !== event.pointerId) {
+      return;
+    }
+    const completed = updateCalendarCreateSelection(
+      current,
+      event.clientX,
+      event.clientY,
+      event.currentTarget,
+    );
+    createSelectionRef.current = null;
+    setCreateSelection(null);
+    if (current.captureElement.hasPointerCapture(current.pointerId)) {
+      current.captureElement.releasePointerCapture(current.pointerId);
+    }
+    if (!completed.didDrag) {
+      return;
+    }
+
+    event.preventDefault();
+    if (completed.surface === "timed") {
+      const startTime = minutesToTimeInput(completed.startMinutes);
+      const endTime = minutesToTimeInput(completed.endMinutes);
+      openCreateFormForSchedule({
+        startDate: completed.date,
+        startTime,
+        endDate: completed.date,
+        endTime,
+        isAllDay: false,
+        sourceLabel: `${formatDateLabel(completed.date)} ${startTime}-${endTime}`,
+      });
+      return;
+    }
+
+    openCreateFormForSchedule({
+      startDate: completed.startDate,
+      startTime: "",
+      endDate: completed.endDate,
+      endTime: "",
+      isAllDay: true,
+      sourceLabel:
+        completed.startDate === completed.endDate
+          ? formatDateLabel(completed.startDate)
+          : `${formatDateLabel(completed.startDate)}-${formatDateLabel(
+              completed.endDate,
+            )}`,
+    });
+  }
+
+  function handleCreateSelectionPointerCancel(
+    event: ReactPointerEvent<HTMLElement>,
+  ) {
+    if (createSelectionRef.current?.pointerId === event.pointerId) {
+      clearCreateSelection();
+    }
+  }
+
+  function handleCreateSelectionLostPointerCapture(
+    event: ReactPointerEvent<HTMLElement>,
+  ) {
+    if (createSelectionRef.current?.pointerId === event.pointerId) {
+      setActiveCreateSelection(null);
+    }
   }
 
   function handleDragStart(
@@ -387,7 +636,42 @@ export function WeekCalendar({
   }
 
   return (
-    <section className="panel calendar-panel" aria-labelledby="calendar-title">
+    <section
+      className={`panel calendar-panel ${
+        createSelection?.didDrag ? "is-creating-range" : ""
+      }`}
+      aria-labelledby="calendar-title"
+      onPointerDown={handleCreateSelectionPointerDown}
+      onPointerMove={handleCreateSelectionPointerMove}
+      onPointerUp={handleCreateSelectionPointerUp}
+      onPointerCancel={handleCreateSelectionPointerCancel}
+      onLostPointerCapture={handleCreateSelectionLostPointerCapture}
+    >
+      {createSelection?.didDrag ? (
+        <>
+          <div className="calendar-create-selection-layer" aria-hidden="true">
+            {createSelection.previewRects.map((rect) => (
+              <div
+                className={`calendar-create-selection is-${createSelection.surface} ${
+                  rect.connectsBefore ? "connects-before" : ""
+                } ${rect.connectsAfter ? "connects-after" : ""}`}
+                key={rect.key}
+                style={{
+                  left: `${rect.left}px`,
+                  top: `${rect.top}px`,
+                  width: `${rect.width}px`,
+                  height: `${rect.height}px`,
+                }}
+              >
+                {rect.label ? <span>{rect.label}</span> : null}
+              </div>
+            ))}
+          </div>
+          <span className="visually-hidden" aria-live="polite">
+            {formatCalendarCreateSelectionAnnouncement(createSelection)}
+          </span>
+        </>
+      ) : null}
       <div className="calendar-toolbar">
         <div className="calendar-toolbar-left">
           <button
@@ -779,6 +1063,7 @@ function TimeGridCalendar({
             }`}
             key={`${day.date}:all-day`}
             data-calendar-date={day.date}
+            data-calendar-create-surface="all-day"
             role="gridcell"
             tabIndex={0}
             aria-label={`${formatCreateSourceLabel(day.date, null)}。ダブルクリックまたはEnterでタスクを追加`}
@@ -927,6 +1212,8 @@ function TimeGridRow({
             }`}
             key={`${day.date}:${hour}`}
             data-calendar-date={day.date}
+            data-calendar-hour={hour}
+            data-calendar-create-surface="timed"
             role="gridcell"
             tabIndex={0}
             aria-label={`${formatCreateSourceLabel(day.date, formatHourInput(hour))}。ダブルクリックまたはEnterでタスクを追加`}
@@ -1151,6 +1438,7 @@ function MonthCalendar({
               }`}
               key={day.date}
               data-calendar-date={day.date}
+              data-calendar-create-surface="month"
               role="gridcell"
               tabIndex={0}
               aria-label={`${formatCreateSourceLabel(day.date, null)}。ダブルクリックまたはEnterでタスクを追加`}
@@ -1823,6 +2111,241 @@ function handleCreateCellKeyDown(
 
 function canMoveCalendarItem(item: WeekCalendarItem) {
   return item.marker === "due" || (item.marker === "scheduled" && !!item.endDate);
+}
+
+type CalendarCreateSelectionTarget =
+  | {
+      surface: "timed";
+      element: HTMLElement;
+      date: string;
+      hour: number;
+    }
+  | {
+      surface: "all-day" | "month";
+      element: HTMLElement;
+      date: string;
+    };
+
+function resolveCalendarCreateSelectionTarget(
+  target: EventTarget | null,
+): CalendarCreateSelectionTarget | null {
+  const element = target instanceof Element ? target : null;
+  if (!element || element.closest(".calendar-item, .calendar-more")) {
+    return null;
+  }
+  const cell = element.closest<HTMLElement>(
+    "[data-calendar-create-surface][data-calendar-date]",
+  );
+  if (!cell) {
+    return null;
+  }
+  const date = cell.dataset.calendarDate;
+  const surface = cell.dataset
+    .calendarCreateSurface as CalendarCreateSelectionSurface | undefined;
+  if (!date || !surface) {
+    return null;
+  }
+  if (surface === "timed") {
+    const hour = Number(cell.dataset.calendarHour);
+    return Number.isInteger(hour)
+      ? { surface, element: cell, date, hour }
+      : null;
+  }
+  return surface === "all-day" || surface === "month"
+    ? { surface, element: cell, date }
+    : null;
+}
+
+function updateCalendarCreateSelection(
+  current: CalendarCreateSelection,
+  clientX: number,
+  clientY: number,
+  root: HTMLElement,
+): CalendarCreateSelection {
+  if (current.surface === "timed") {
+    const didDrag =
+      current.didDrag ||
+      Math.abs(clientY - current.originY) >= CREATE_SELECTION_DRAG_THRESHOLD;
+    if (!didDrag) {
+      return current;
+    }
+    const cellBounds = current.captureElement.getBoundingClientRect();
+    const currentMinutes = getTimeSelectionSlotMinutes(
+      current.sourceHour,
+      clientY,
+      cellBounds.top,
+      cellBounds.height,
+    );
+    const startMinutes = Math.min(current.anchorMinutes, currentMinutes);
+    const endMinutes = Math.max(current.anchorMinutes, currentMinutes) + 15;
+    if (
+      current.didDrag &&
+      current.startMinutes === startMinutes &&
+      current.endMinutes === endMinutes
+    ) {
+      return current;
+    }
+    return updateCalendarCreateSelectionPreview(
+      { ...current, didDrag: true, startMinutes, endMinutes },
+      root,
+    );
+  }
+
+  const didDrag =
+    current.didDrag ||
+    Math.abs(clientX - current.originX) >= CREATE_SELECTION_DRAG_THRESHOLD;
+  if (!didDrag) {
+    return current;
+  }
+  const hit = document.elementFromPoint(clientX, clientY);
+  const target = hit?.closest<HTMLElement>(
+    `[data-calendar-create-surface="${current.surface}"][data-calendar-date]`,
+  );
+  const targetDate = target?.dataset.calendarDate;
+  if (!targetDate) {
+    return current;
+  }
+  const startDate =
+    current.anchorDate <= targetDate ? current.anchorDate : targetDate;
+  const endDate =
+    current.anchorDate <= targetDate ? targetDate : current.anchorDate;
+  if (
+    current.didDrag &&
+    current.startDate === startDate &&
+    current.endDate === endDate
+  ) {
+    return current;
+  }
+  return updateCalendarCreateSelectionPreview(
+    { ...current, didDrag: true, startDate, endDate },
+    root,
+  );
+}
+
+function updateCalendarCreateSelectionPreview(
+  selection: CalendarCreateSelection,
+  root: HTMLElement,
+  rootBounds = root.getBoundingClientRect(),
+): CalendarCreateSelection {
+  if (!selection.didDrag) {
+    return selection;
+  }
+  if (selection.surface === "timed") {
+    const cellBounds = selection.captureElement.getBoundingClientRect();
+    const offsetMinutes = selection.startMinutes - selection.sourceHour * 60;
+    const durationMinutes = selection.endMinutes - selection.startMinutes;
+    return {
+      ...selection,
+      previewRects: [
+        {
+          key: `${selection.date}:${selection.startMinutes}`,
+          label: `${minutesToTimeInput(selection.startMinutes)}-${minutesToTimeInput(
+            selection.endMinutes,
+          )}`,
+          left: cellBounds.left - rootBounds.left + 6,
+          top:
+            cellBounds.top -
+            rootBounds.top +
+            (offsetMinutes / 60) * cellBounds.height,
+          width: Math.max(cellBounds.width - 12, 1),
+          height: Math.max((durationMinutes / 60) * cellBounds.height, 18),
+          connectsBefore: false,
+          connectsAfter: false,
+        },
+      ],
+    };
+  }
+
+  const selector = `[data-calendar-create-surface="${selection.surface}"][data-calendar-date]`;
+  const cellGeometries = [...root.querySelectorAll<HTMLElement>(selector)]
+    .filter((cell) => {
+      const date = cell.dataset.calendarDate;
+      return !!date && date >= selection.startDate && date <= selection.endDate;
+    })
+    .sort((first, second) =>
+      (first.dataset.calendarDate ?? "").localeCompare(
+        second.dataset.calendarDate ?? "",
+      ),
+    )
+    .map((cell) => ({
+      date: cell.dataset.calendarDate ?? "",
+      bounds: cell.getBoundingClientRect(),
+    }));
+  const rangeLabel =
+    selection.startDate === selection.endDate
+      ? "新規 終日"
+      : `新規 ${formatShortDate(selection.startDate)}-${formatShortDate(
+          selection.endDate,
+        )}`;
+  const previewRects = cellGeometries.map((geometry, index) => {
+    const previous = cellGeometries[index - 1];
+    const next = cellGeometries[index + 1];
+    const connectsBefore =
+      !!previous &&
+      Math.abs(previous.bounds.top - geometry.bounds.top) <= 2 &&
+      differenceInCalendarDays(previous.date, geometry.date) === 1;
+    const connectsAfter =
+      !!next &&
+      Math.abs(next.bounds.top - geometry.bounds.top) <= 2 &&
+      differenceInCalendarDays(geometry.date, next.date) === 1;
+    const baseLeft = geometry.bounds.left - rootBounds.left + 6;
+    const left = connectsBefore ? baseLeft - 7 : baseLeft;
+    return {
+      key: `${selection.surface}:${geometry.date}`,
+      label: connectsBefore ? null : rangeLabel,
+      left,
+      top:
+        geometry.bounds.top -
+        rootBounds.top +
+        (selection.surface === "month" ? 36 : 3),
+      width:
+        Math.max(geometry.bounds.width - 12, 1) +
+        (connectsBefore ? 7 : 0) +
+        (connectsAfter ? 7 : 0),
+      height: 26,
+      connectsBefore,
+      connectsAfter,
+    };
+  });
+  return { ...selection, previewRects };
+}
+
+function getTimeSelectionSlotMinutes(
+  sourceHour: number,
+  clientY: number,
+  cellTop: number,
+  cellHeight: number,
+) {
+  const businessStartMinutes = (businessHours[0] ?? 8) * 60;
+  const businessEndMinutes = ((businessHours.at(-1) ?? 22) + 1) * 60;
+  const relativeMinutes = ((clientY - cellTop) / Math.max(cellHeight, 1)) * 60;
+  const slotMinutes =
+    Math.floor((sourceHour * 60 + relativeMinutes) / 15) * 15;
+  return Math.min(
+    Math.max(slotMinutes, businessStartMinutes),
+    businessEndMinutes - 15,
+  );
+}
+
+function minutesToTimeInput(minutes: number) {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function formatCalendarCreateSelectionAnnouncement(
+  selection: CalendarCreateSelection,
+) {
+  if (selection.surface === "timed") {
+    return `${formatDateLabel(selection.date)} ${minutesToTimeInput(
+      selection.startMinutes,
+    )}から${minutesToTimeInput(selection.endMinutes)}を選択中`;
+  }
+  return selection.startDate === selection.endDate
+    ? `${formatDateLabel(selection.startDate)}の終日を選択中`
+    : `${formatDateLabel(selection.startDate)}から${formatDateLabel(
+        selection.endDate,
+      )}の終日を選択中`;
 }
 
 function resolveCalendarDropTarget(

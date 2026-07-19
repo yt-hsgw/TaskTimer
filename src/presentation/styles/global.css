@@ -2233,6 +2233,62 @@ button {
   min-height: 0;
   overflow: hidden;
   padding: 0;
+  position: relative;
+}
+
+.calendar-panel.is-creating-range {
+  cursor: crosshair;
+  user-select: none;
+}
+
+.calendar-create-selection-layer {
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: absolute;
+  z-index: 20;
+}
+
+.calendar-create-selection {
+  align-items: center;
+  background: rgb(38 132 94 / 22%);
+  border: 2px solid #25835f;
+  border-radius: 5px;
+  color: #174d39;
+  display: flex;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  overflow: hidden;
+  padding: 2px 5px;
+  position: absolute;
+  white-space: nowrap;
+}
+
+.calendar-create-selection.is-all-day,
+.calendar-create-selection.is-month {
+  background: #d9eee5;
+}
+
+.calendar-create-selection.connects-before {
+  border-bottom-left-radius: 0;
+  border-left-color: transparent;
+  border-top-left-radius: 0;
+}
+
+.calendar-create-selection.connects-after {
+  border-bottom-right-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.visually-hidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
 }
 
 .calendar-toolbar {

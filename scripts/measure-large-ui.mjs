@@ -40,11 +40,13 @@ const thresholds = {
   completion_refresh: 1200,
   task_detail_save: 1200,
   calendar_week: 1500,
+  calendar_drag_create: 1500,
   calendar_move: 1500,
   calendar_resize: 1500,
   calendar_day: 1500,
   calendar_day_move: 1500,
   calendar_month: 2000,
+  calendar_month_drag_create: 1500,
   calendar_month_date_change: 1500,
   calendar_multiday_header: 2000,
   task_detail: 1000,
@@ -237,6 +239,25 @@ try {
         })()`,
     }),
   );
+  const calendarDragCreateStartedAt = performance.now();
+  const calendarDragCreateResult = await verifyCalendarDragCreate(
+    client,
+    sessionId,
+  );
+  if (calendarDragCreateResult.commands.length > 0) {
+    throw new Error(
+      `カレンダードラッグ作成の保存前にcommandが呼ばれました: ${JSON.stringify(
+        calendarDragCreateResult.commands,
+      )}`,
+    );
+  }
+  measurements.push(
+    createMeasurement(
+      "calendar_drag_create",
+      performance.now() - calendarDragCreateStartedAt,
+      thresholds.calendar_drag_create,
+    ),
+  );
   const calendarMoveStartedAt = performance.now();
   const calendarMoveResult = await verifyCalendarScheduledMove(client, sessionId);
   assertCommandScope("カレンダー予定移動", calendarMoveResult.commands, {
@@ -350,6 +371,25 @@ try {
           return visibleCount + hiddenCount === ${profile.taskCount};
         })()`,
     }),
+  );
+  const calendarMonthDragCreateStartedAt = performance.now();
+  const calendarMonthDragCreateResult = await verifyCalendarMonthDragCreate(
+    client,
+    sessionId,
+  );
+  if (calendarMonthDragCreateResult.commands.length > 0) {
+    throw new Error(
+      `月カレンダードラッグ作成の保存前にcommandが呼ばれました: ${JSON.stringify(
+        calendarMonthDragCreateResult.commands,
+      )}`,
+    );
+  }
+  measurements.push(
+    createMeasurement(
+      "calendar_month_drag_create",
+      performance.now() - calendarMonthDragCreateStartedAt,
+      thresholds.calendar_month_drag_create,
+    ),
   );
   const calendarMonthDateChangeStartedAt = performance.now();
   const calendarMonthDateChangeResult =
@@ -957,6 +997,359 @@ async function verifyKanbanCardDrag(client, sessionId) {
     commands: await takeInvokeLog(client, sessionId),
     renderCounts: await takeRenderCounts(client, sessionId),
   };
+}
+
+async function verifyCalendarDragCreate(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  const geometry = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const cells = [...document.querySelectorAll(
+        '.calendar-time-cell[data-calendar-create-surface="timed"]'
+      )];
+      const source = cells.find((cell) => {
+        const hour = Number(cell.dataset.calendarHour);
+        const bounds = cell.getBoundingClientRect();
+        const x = bounds.left + bounds.width * 0.72;
+        const y = bounds.top + bounds.height * 0.3;
+        const hit = document.elementFromPoint(x, y);
+        return hour <= 20 && hit?.closest('.calendar-time-cell') === cell &&
+          !hit.closest('.calendar-item');
+      });
+      if (!source) {
+        return null;
+      }
+      const bounds = source.getBoundingClientRect();
+      const hour = Number(source.dataset.calendarHour);
+      const formatTime = (minutes) =>
+        String(Math.floor(minutes / 60)).padStart(2, '0') + ':' +
+        String(minutes % 60).padStart(2, '0');
+      return {
+        date: source.dataset.calendarDate,
+        startX: bounds.left + bounds.width * 0.72,
+        startY: bounds.top + bounds.height * 0.3,
+        endX: bounds.left + bounds.width * 0.72,
+        endY: bounds.top + bounds.height * 1.8,
+        expectedStartTime: formatTime(hour * 60 + 15),
+        expectedEndTime: formatTime(hour * 60 + 120)
+      };
+    })()`,
+  );
+  if (!geometry?.date) {
+    throw new Error("カレンダードラッグ作成に使える空き時間帯がありません");
+  }
+
+  await dragPointer(
+    client,
+    sessionId,
+    geometry.startX,
+    geometry.startY,
+    geometry.endX,
+    geometry.endY,
+    {
+      beforeRelease: async () => {
+        await waitForPaintedExpression(
+          client,
+          sessionId,
+          `(() => {
+            const preview = document.querySelector(
+              '.calendar-create-selection.is-timed'
+            );
+            return Boolean(
+              preview?.textContent?.includes(${JSON.stringify(
+                geometry.expectedStartTime,
+              )}) &&
+              preview?.textContent?.includes(${JSON.stringify(
+                geometry.expectedEndTime,
+              )}) &&
+              !document.querySelector('.calendar-create-form') &&
+              (window.__taskTimerInvokeLog?.length ?? 0) === 0
+            );
+          })()`,
+        );
+      },
+    },
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.calendar-create-form'))`,
+  );
+  const draft = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const form = document.querySelector('.calendar-create-form');
+      const field = (label) => [...(form?.querySelectorAll('label') ?? [])]
+        .find((element) => element.querySelector(':scope > span')?.textContent === label)
+        ?.querySelector('input');
+      return {
+        startDate: field('開始日')?.value ?? null,
+        startTime: field('開始時刻')?.value ?? null,
+        endDate: field('終了日')?.value ?? null,
+        endTime: field('終了時刻')?.value ?? null,
+        isAllDay: Boolean(form?.querySelector('.calendar-all-day-toggle input')?.checked),
+        sourceLabel: form?.querySelector('.calendar-create-form-heading span')?.textContent ?? null
+      };
+    })()`,
+  );
+  if (
+    draft?.startDate !== geometry.date ||
+    draft?.endDate !== geometry.date ||
+    draft?.startTime !== geometry.expectedStartTime ||
+    draft?.endTime !== geometry.expectedEndTime ||
+    draft?.isAllDay ||
+    !draft?.sourceLabel?.includes(geometry.expectedStartTime) ||
+    !draft.sourceLabel.includes(geometry.expectedEndTime)
+  ) {
+    throw new Error(
+      `カレンダードラッグ作成フォームの初期値が不正です: ${JSON.stringify(
+        draft,
+      )}`,
+    );
+  }
+  await evaluate(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.calendar-create-form button')]
+      .find((button) => button.textContent?.trim() === 'キャンセル')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.calendar-create-form')`,
+  );
+
+  await dragPointer(
+    client,
+    sessionId,
+    geometry.startX,
+    geometry.startY,
+    geometry.startX,
+    geometry.startY + 3,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.calendar-create-form') &&
+      !document.querySelector('.calendar-create-selection')`,
+  );
+
+  const allDayGeometry = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const cells = [...document.querySelectorAll(
+        '.calendar-all-day-cell[data-calendar-create-surface="all-day"]'
+      )];
+      for (let index = 0; index < cells.length - 2; index += 1) {
+        const first = cells[index];
+        const last = cells[index + 2];
+        const firstBounds = first.getBoundingClientRect();
+        const lastBounds = last.getBoundingClientRect();
+        const firstX = firstBounds.left + 3;
+        const firstY = firstBounds.top + firstBounds.height / 2;
+        const lastX = lastBounds.left + 3;
+        const lastY = lastBounds.top + lastBounds.height / 2;
+        const firstHit = document.elementFromPoint(firstX, firstY);
+        const lastHit = document.elementFromPoint(lastX, lastY);
+        if (
+          firstHit?.closest('.calendar-all-day-cell') === first &&
+          !firstHit.closest('.calendar-item, .calendar-more') &&
+          lastHit?.closest('.calendar-all-day-cell') === last
+        ) {
+          return {
+            startDate: first.dataset.calendarDate,
+            endDate: last.dataset.calendarDate,
+            startX: lastX,
+            startY: lastY,
+            endX: firstX,
+            endY: firstY
+          };
+        }
+      }
+      return null;
+    })()`,
+  );
+  if (!allDayGeometry?.startDate || !allDayGeometry?.endDate) {
+    throw new Error("上部予定行のドラッグ作成に使える日付範囲がありません");
+  }
+  await dragPointer(
+    client,
+    sessionId,
+    allDayGeometry.startX,
+    allDayGeometry.startY,
+    allDayGeometry.endX,
+    allDayGeometry.endY,
+    {
+      beforeRelease: async () => {
+        await waitForPaintedExpression(
+          client,
+          sessionId,
+          `document.querySelectorAll(
+            '.calendar-create-selection.is-all-day'
+          ).length === 3 &&
+            !document.querySelector('.calendar-create-form') &&
+            (window.__taskTimerInvokeLog?.length ?? 0) === 0`,
+        );
+      },
+    },
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.calendar-create-form'))`,
+  );
+  const allDayDraft = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const form = document.querySelector('.calendar-create-form');
+      const field = (label) => [...(form?.querySelectorAll('label') ?? [])]
+        .find((element) => element.querySelector(':scope > span')?.textContent === label)
+        ?.querySelector('input');
+      return {
+        startDate: field('開始日')?.value ?? null,
+        endDate: field('終了日')?.value ?? null,
+        isAllDay: Boolean(form?.querySelector('.calendar-all-day-toggle input')?.checked)
+      };
+    })()`,
+  );
+  if (
+    allDayDraft?.startDate !== allDayGeometry.startDate ||
+    allDayDraft?.endDate !== allDayGeometry.endDate ||
+    !allDayDraft?.isAllDay
+  ) {
+    throw new Error(
+      `上部予定行ドラッグ作成フォームの初期値が不正です: ${JSON.stringify(
+        allDayDraft,
+      )}`,
+    );
+  }
+  await evaluate(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.calendar-create-form button')]
+      .find((button) => button.textContent?.trim() === 'キャンセル')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.calendar-create-form')`,
+  );
+  return { commands: await takeInvokeLog(client, sessionId) };
+}
+
+async function verifyCalendarMonthDragCreate(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  const geometry = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const cells = [...document.querySelectorAll(
+        '.calendar-month-day[data-calendar-create-surface="month"]'
+      )];
+      for (let index = 0; index < cells.length - 2; index += 1) {
+        const first = cells[index];
+        const last = cells[index + 2];
+        const firstBounds = first.getBoundingClientRect();
+        const lastBounds = last.getBoundingClientRect();
+        if (Math.abs(firstBounds.top - lastBounds.top) > 2) {
+          continue;
+        }
+        const firstX = firstBounds.left + 3;
+        const firstY = firstBounds.top + firstBounds.height / 2;
+        const lastX = lastBounds.left + 3;
+        const lastY = lastBounds.top + lastBounds.height / 2;
+        const firstHit = document.elementFromPoint(firstX, firstY);
+        const lastHit = document.elementFromPoint(lastX, lastY);
+        if (
+          firstHit?.closest('.calendar-month-day') === first &&
+          !firstHit.closest('.calendar-item, .calendar-more') &&
+          lastHit?.closest('.calendar-month-day') === last
+        ) {
+          return {
+            startDate: first.dataset.calendarDate,
+            endDate: last.dataset.calendarDate,
+            startX: lastX,
+            startY: lastY,
+            endX: firstX,
+            endY: firstY
+          };
+        }
+      }
+      return null;
+    })()`,
+  );
+  if (!geometry?.startDate || !geometry?.endDate) {
+    throw new Error("月カレンダードラッグ作成に使える日付範囲がありません");
+  }
+
+  await dragPointer(
+    client,
+    sessionId,
+    geometry.startX,
+    geometry.startY,
+    geometry.endX,
+    geometry.endY,
+    {
+      beforeRelease: async () => {
+        await waitForPaintedExpression(
+          client,
+          sessionId,
+          `document.querySelectorAll(
+            '.calendar-create-selection.is-month'
+          ).length === 3 &&
+            !document.querySelector('.calendar-create-form') &&
+            (window.__taskTimerInvokeLog?.length ?? 0) === 0`,
+        );
+      },
+    },
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.calendar-create-form'))`,
+  );
+  const draft = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const form = document.querySelector('.calendar-create-form');
+      const field = (label) => [...(form?.querySelectorAll('label') ?? [])]
+        .find((element) => element.querySelector(':scope > span')?.textContent === label)
+        ?.querySelector('input');
+      return {
+        startDate: field('開始日')?.value ?? null,
+        endDate: field('終了日')?.value ?? null,
+        isAllDay: Boolean(form?.querySelector('.calendar-all-day-toggle input')?.checked)
+      };
+    })()`,
+  );
+  if (
+    draft?.startDate !== geometry.startDate ||
+    draft?.endDate !== geometry.endDate ||
+    !draft?.isAllDay
+  ) {
+    throw new Error(
+      `月カレンダードラッグ作成フォームの初期値が不正です: ${JSON.stringify(
+        draft,
+      )}`,
+    );
+  }
+  await evaluate(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.calendar-create-form button')]
+      .find((button) => button.textContent?.trim() === 'キャンセル')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.calendar-create-form')`,
+  );
+  return { commands: await takeInvokeLog(client, sessionId) };
 }
 
 async function verifyCalendarScheduledMove(client, sessionId) {
