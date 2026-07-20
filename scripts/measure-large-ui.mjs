@@ -1443,12 +1443,109 @@ async function verifyNavigationListEdit(client, sessionId) {
     throw new Error("左ペインにタグ一覧が残っています");
   }
 
+  const listMenuTriggerCount = await evaluateValue(
+    client,
+    sessionId,
+    `document.querySelectorAll(".nav-list-menu-trigger").length`,
+  );
+  if (listMenuTriggerCount < 2) {
+    throw new Error("リスト操作メニューの検証対象が不足しています");
+  }
+
+  await evaluate(
+    client,
+    sessionId,
+    `(() => {
+      const triggers = document.querySelectorAll(".nav-list-menu-trigger");
+      const trigger = triggers[1];
+      trigger.dataset.listMenuTestTrigger = "custom";
+      trigger.click();
+    })()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelectorAll('.nav-list-menu [role="menuitem"]').length === 2 &&
+      document.querySelector('.nav-list-menu [role="menuitem"]') === document.activeElement &&
+      !document.querySelector(".nav-list-actions")`,
+  );
+  const customMenuLayout = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const menu = document.querySelector(".nav-list-menu");
+      const trigger = document.querySelector('[data-list-menu-test-trigger="custom"]');
+      const menuBounds = menu?.getBoundingClientRect();
+      const triggerBounds = trigger?.getBoundingClientRect();
+      return {
+        insideViewport: Boolean(
+          menuBounds && menuBounds.top >= 8 && menuBounds.left >= 8 &&
+          menuBounds.right <= window.innerWidth - 8 &&
+          menuBounds.bottom <= window.innerHeight - 8
+        ),
+        anchored: Boolean(
+          menuBounds && triggerBounds &&
+          Math.abs(menuBounds.right - triggerBounds.right) <= 1
+        )
+      };
+    })()`,
+  );
+  if (!customMenuLayout.insideViewport || !customMenuLayout.anchored) {
+    throw new Error(
+      `リスト操作メニューの配置が不正です: ${JSON.stringify(customMenuLayout)}`,
+    );
+  }
+  const customMenuLabels = await evaluateValue(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.nav-list-menu [role="menuitem"]')]
+      .map((item) => item.textContent?.trim())`,
+  );
+  if (
+    !customMenuLabels.includes("編集") ||
+    !customMenuLabels.includes("削除")
+  ) {
+    throw new Error("カスタムリストの管理操作が不足しています");
+  }
+
+  await client.send(
+    "Input.dispatchKeyEvent",
+    { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+    sessionId,
+  );
+  await client.send(
+    "Input.dispatchKeyEvent",
+    { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 },
+    sessionId,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.nav-list-menu') &&
+      document.activeElement?.dataset.listMenuTestTrigger === "custom"`,
+  );
+
   await resetInvokeLog(client, sessionId);
   const startedAt = performance.now();
   await evaluate(
     client,
     sessionId,
-    `document.querySelector('button[aria-label="タスクを編集"]')?.click()`,
+    `(() => {
+      const trigger = document.querySelector('button[aria-label="タスクの操作"]');
+      trigger.dataset.listMenuTestTrigger = "default";
+      trigger.click();
+    })()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelectorAll('.nav-list-menu [role="menuitem"]').length === 1 &&
+      document.querySelector('.nav-list-menu [role="menuitem"]')?.textContent?.trim() === "編集"`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.nav-list-menu [role="menuitem"]')?.click()`,
   );
   await waitForExpression(
     client,
@@ -1481,6 +1578,7 @@ async function verifyNavigationListEdit(client, sessionId) {
     sessionId,
     `document.querySelector('.nav-list-row .nav-list-color-swatch.color-violet') &&
       !document.querySelector(".nav-list-editor") &&
+      document.activeElement?.getAttribute("aria-label") === "タスクの操作" &&
       !document.querySelector(".app-alert")`,
   );
   return {

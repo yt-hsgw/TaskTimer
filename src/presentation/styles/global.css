@@ -511,37 +511,98 @@ button {
 }
 
 .nav-list-row {
+  align-items: center;
   display: grid;
   gap: 4px;
+  grid-template-columns: minmax(0, 1fr) 28px;
   min-width: 0;
   position: relative;
 }
 
-.nav-list-row.has-actions .nav-item {
-  padding-right: 8px;
-}
-
 .is-nav-collapsed .nav-list-row .nav-item,
-.is-nav-collapsed .nav-list-row.has-actions .nav-item {
+.is-nav-collapsed .nav-list-row.has-menu .nav-item {
   padding-right: 0;
 }
 
 .is-nav-collapsed .nav-list-row {
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   width: 100%;
 }
 
-.nav-list-actions {
+.nav-list-menu-trigger {
   align-items: center;
-  display: flex;
-  gap: 4px;
-  justify-content: flex-end;
-  padding: 0 4px 4px 42px;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--muted);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  min-width: 28px;
+  padding: 0;
+  width: 28px;
 }
 
-.nav-list-actions .nav-mini-button {
-  height: 28px;
-  min-width: 28px;
+.nav-list-menu-trigger:hover,
+.nav-list-menu-trigger:focus-visible,
+.nav-list-menu-trigger[aria-expanded="true"] {
+  background: #e5eeeb;
+  color: var(--ink);
+  outline: 0;
+}
+
+.nav-list-menu-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.nav-list-menu {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgb(23 32 38 / 18%);
+  display: grid;
+  padding: 4px;
+  position: fixed;
+  width: 148px;
+  z-index: 120;
+}
+
+.nav-list-menu button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink);
+  display: grid;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 8px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  min-height: 36px;
+  padding: 0 9px;
+  text-align: left;
+}
+
+.nav-list-menu button:hover,
+.nav-list-menu button:focus-visible {
+  background: #edf3f1;
+  outline: 0;
+}
+
+.nav-list-menu button.is-danger {
+  color: var(--red);
+}
+
+.nav-list-menu button.is-danger:hover,
+.nav-list-menu button.is-danger:focus-visible {
+  background: #fff0ed;
+}
+
+.nav-list-menu button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .nav-list-color-swatch {
@@ -616,6 +677,7 @@ button {
   background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 6px;
+  grid-column: 1 / -1;
   padding: 8px;
 }
 
