@@ -301,6 +301,23 @@ export function App() {
     );
   }, [lastTaskListId, taskLists, workspaceScope]);
 
+  const defaultTaskCreatePreset = useMemo<
+    Extract<TaskCreatePreset, { kind: "standard" }>
+  >(
+    () => ({
+      kind: "standard",
+      listId: defaultTaskCreateList?.id ?? DEFAULT_TASK_LIST_ID,
+      plannedStartDate: workspaceScope.kind === "today" ? todayDate : null,
+      dueDate: null,
+      dueTime: null,
+      sourceLabel:
+        workspaceScope.kind === "today"
+          ? "今日のタスクとして追加"
+          : `${defaultTaskCreateList?.name ?? "タスク"}に追加`,
+    }),
+    [defaultTaskCreateList, todayDate, workspaceScope.kind],
+  );
+
   const calendarRange = useMemo(
     () => getCalendarQueryRange(calendarViewMode, calendarAnchorDate),
     [calendarAnchorDate, calendarViewMode],
@@ -796,20 +813,14 @@ export function App() {
         event.preventDefault();
         setTaskCreateErrorMessage(null);
         setTaskCreatePreset((current) =>
-          current ?? {
-            kind: "standard",
-            listId: defaultTaskCreateList?.id ?? DEFAULT_TASK_LIST_ID,
-            dueDate: null,
-            dueTime: null,
-            sourceLabel: `${defaultTaskCreateList?.name ?? "タスク"}に追加`,
-          },
+          current ?? { ...defaultTaskCreatePreset },
         );
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeView.kind, defaultTaskCreateList, taskCreatePreset]);
+  }, [activeView.kind, defaultTaskCreatePreset, taskCreatePreset]);
 
   useEffect(() => {
     const syncAfterResume = () => {
@@ -1220,15 +1231,9 @@ export function App() {
   const handleRequestTaskCreate = useCallback(() => {
     setTaskCreateErrorMessage(null);
     setTaskCreatePreset((current) =>
-      current ?? {
-        kind: "standard",
-        listId: defaultTaskCreateList?.id ?? DEFAULT_TASK_LIST_ID,
-        dueDate: null,
-        dueTime: null,
-        sourceLabel: `${defaultTaskCreateList?.name ?? "タスク"}に追加`,
-      },
+      current ?? { ...defaultTaskCreatePreset },
     );
-  }, [defaultTaskCreateList]);
+  }, [defaultTaskCreatePreset]);
 
   const handleRequestScheduledTaskCreate = useCallback(
     ({ schedule, sourceLabel }: CalendarTaskCreatePreset) => {
@@ -2218,12 +2223,14 @@ export function App() {
                 }
                 emptyMessage={
                   workspaceScope.kind === "today"
-                    ? "今日が期限のタスクはありません。"
+                    ? "今日が開始予定または期限のタスクはありません。"
                     : workspaceScope.kind === "favorites"
                       ? "お気に入りにしたタスクはまだありません。"
                       : "まだタスクはありません。"
                 }
-                showTaskAdd={workspaceScope.kind === "list"}
+                showTaskAdd={
+                  workspaceScope.kind === "list" || workspaceScope.kind === "today"
+                }
                 isLoading={isLoading || isTaskPageLoading}
                 isMutating={isDetailMutating}
                 isCreatingTaskPending={isCreatingTaskPending}

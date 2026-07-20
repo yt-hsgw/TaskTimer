@@ -8,7 +8,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
-import { X } from "lucide-react";
+import { CalendarDays, X } from "lucide-react";
 import type { TaskListItem } from "../../application/usecases/contracts";
 import type {
   TaskCreatePreset,
@@ -166,7 +166,7 @@ export function TaskCreateDialog({
             input: {
               title: draft.title,
               listId: draft.listId,
-              plannedStartDate: null,
+              plannedStartDate: preset.plannedStartDate,
               dueDate: draft.dueDate || null,
               dueTime: draft.dueDate && draft.dueTime ? draft.dueTime : null,
               memo: draft.memo,
@@ -254,6 +254,15 @@ export function TaskCreateDialog({
               ))}
             </select>
           </label>
+
+          {preset.kind === "standard" && preset.plannedStartDate ? (
+            <p className="task-create-planned-start">
+              <CalendarDays aria-hidden="true" size={16} />
+              <span>
+                開始予定 今日（{preset.plannedStartDate.replaceAll("-", "/")}）
+              </span>
+            </p>
+          ) : null}
 
           {preset.kind === "scheduled" ? (
             <>

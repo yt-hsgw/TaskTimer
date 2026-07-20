@@ -225,8 +225,13 @@ try {
           taskPageSize,
           Math.ceil(profile.taskCount / 2),
         )}`,
-    }),
+      }),
   );
+  const todayTaskCreateResult = await verifyTodayTaskCreate(client, sessionId);
+  assertCommandScope("今日からのタスク作成", todayTaskCreateResult.commands, {
+    required: ["create_task", "list_task_page", "list_task_lists"],
+    forbidden: ["create_scheduled_task", "update_task", "update_subtask"],
+  });
   await evaluate(client, sessionId, clickNavigation("タスク"));
   await waitForPaintedExpression(
     client,
@@ -263,8 +268,13 @@ try {
       action: clickWorkspaceMode("かんばん"),
       ready: `document.querySelector('.workspace-mode-switcher [role="tab"][aria-selected="true"]')?.textContent === "かんばん" &&
         document.querySelectorAll(".kanban-card").length === ${initialTaskPageCount}`,
-    }),
+      }),
   );
+  const kanbanTaskCreateResult = await verifyKanbanTaskCreate(client, sessionId);
+  assertCommandScope("かんばんからのタスク作成", kanbanTaskCreateResult.commands, {
+    required: ["create_task", "list_task_page", "list_task_lists"],
+    forbidden: ["create_scheduled_task", "update_task", "update_subtask"],
+  });
   const kanbanRenameBlurResult = await verifyKanbanRenameOnBlur(
     client,
     sessionId,
@@ -1117,6 +1127,101 @@ async function verifyTaskCreateDialog(client, sessionId) {
     );
   }
   return { commands };
+}
+
+async function verifyTodayTaskCreate(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  await evaluate(
+    client,
+    sessionId,
+    `(() => {
+      window.__lastCreateTaskRequest = null;
+      document.querySelector('.task-panel .task-add-button')?.click();
+    })()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector('.task-create-dialog') &&
+      document.querySelector('.task-create-dialog-heading p')?.textContent ===
+        '今日のタスクとして追加' &&
+      document.querySelector('.task-create-planned-start')?.textContent?.includes('開始予定 今日')
+    )`,
+  );
+  await setTaskCreateTitle(client, sessionId, "今日から作成テスト");
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.task-create-dialog button[type="submit"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.task-create-dialog')`,
+  );
+  const request = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const date = new Date();
+      const today = [
+        date.getFullYear(),
+        String(date.getMonth() + 1).padStart(2, '0'),
+        String(date.getDate()).padStart(2, '0')
+      ].join('-');
+      return { request: window.__lastCreateTaskRequest, today };
+    })()`,
+  );
+  if (
+    request?.request?.plannedStartDate !== request?.today ||
+    request?.request?.dueDate !== null ||
+    request?.request?.dueTime !== null
+  ) {
+    throw new Error(
+      `今日からの作成日付が不正です: ${JSON.stringify(request)}`,
+    );
+  }
+  return { commands: await takeInvokeLog(client, sessionId) };
+}
+
+async function verifyKanbanTaskCreate(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  await evaluate(
+    client,
+    sessionId,
+    `(() => {
+      window.__lastCreateTaskRequest = null;
+      document.querySelector('.kanban-panel .task-add-button')?.click();
+    })()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.task-create-dialog'))`,
+  );
+  await setTaskCreateTitle(client, sessionId, "かんばんから作成テスト");
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.task-create-dialog button[type="submit"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.task-create-dialog')`,
+  );
+  const request = await evaluateValue(
+    client,
+    sessionId,
+    `window.__lastCreateTaskRequest`,
+  );
+  if (!request || request.plannedStartDate !== null) {
+    throw new Error(
+      `かんばんからの作成プリセットが不正です: ${JSON.stringify(request)}`,
+    );
+  }
+  return { commands: await takeInvokeLog(client, sessionId) };
 }
 
 async function setTaskCreateTitle(client, sessionId, value) {
@@ -3474,8 +3579,12 @@ function buildTauriInvokeMockSource(profile) {
         return task.listId === scope.listId;
       }
       if (scope.type === "today") {
-        return task.dueDate === request.todayDate ||
-          task.subtasks.some((subtask) => subtask.dueDate === request.todayDate);
+        return task.plannedStartDate === request.todayDate ||
+          task.dueDate === request.todayDate ||
+          task.subtasks.some((subtask) =>
+            subtask.plannedStartDate === request.todayDate ||
+            subtask.dueDate === request.todayDate
+          );
       }
       if (scope.type === "favorites") {
         return task.isFavorite;
@@ -3508,8 +3617,12 @@ function buildTauriInvokeMockSource(profile) {
       navigationCounts: {
         todayCount: tasks.filter((task) =>
           task.status !== "done" &&
-          (task.dueDate === request.todayDate ||
-            task.subtasks.some((subtask) => subtask.dueDate === request.todayDate))
+          (task.plannedStartDate === request.todayDate ||
+            task.dueDate === request.todayDate ||
+            task.subtasks.some((subtask) =>
+              subtask.plannedStartDate === request.todayDate ||
+              subtask.dueDate === request.todayDate
+            ))
         ).length,
         favoriteCount: tasks.filter((task) => task.isFavorite).length
       }
@@ -3596,6 +3709,7 @@ function buildTauriInvokeMockSource(profile) {
         list_calendar_items: () => clone(calendarItems),
         list_week_calendar_items: () => clone(calendarItems),
         create_task: () => {
+          window.__lastCreateTaskRequest = clone(args.request);
           if (args.request?.title === "失敗保持テスト") {
             throw new Error("作成失敗の入力保持テスト");
           }

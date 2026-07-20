@@ -790,8 +790,12 @@ function buildTauriInvokeMockSource() {
         return task.listId === scope.listId;
       }
       if (scope.type === "today") {
-        return task.dueDate === request.todayDate ||
-          task.subtasks.some((subtask) => subtask.dueDate === request.todayDate);
+        return task.plannedStartDate === request.todayDate ||
+          task.dueDate === request.todayDate ||
+          task.subtasks.some((subtask) =>
+            subtask.plannedStartDate === request.todayDate ||
+            subtask.dueDate === request.todayDate
+          );
       }
       if (scope.type === "favorites") {
         return task.isFavorite;
@@ -824,8 +828,12 @@ function buildTauriInvokeMockSource() {
       navigationCounts: {
         todayCount: tasks.filter((task) =>
           task.status !== "done" &&
-          (task.dueDate === request.todayDate ||
-            task.subtasks.some((subtask) => subtask.dueDate === request.todayDate))
+          (task.plannedStartDate === request.todayDate ||
+            task.dueDate === request.todayDate ||
+            task.subtasks.some((subtask) =>
+              subtask.plannedStartDate === request.todayDate ||
+              subtask.dueDate === request.todayDate
+            ))
         ).length,
         favoriteCount: tasks.filter((task) => task.isFavorite).length
       }
