@@ -6,7 +6,11 @@ import {
   useRef,
   useState,
 } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
+import type {
+  FocusEvent as ReactFocusEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   CircleDot,
@@ -269,18 +273,15 @@ export function LeftNavigation({
     }
   };
 
-  const handleEdit = async (
-    event: FormEvent<HTMLFormElement>,
-    listId: string,
-  ) => {
-    event.preventDefault();
+  const saveEditingList = async (listId: string, restoreFocus = false) => {
     const list = taskLists.find((candidate) => candidate.id === listId);
     const name = editingListName.trim();
-    if (!list || !name) {
+    if (!list) {
       return;
     }
 
-    const nextName = list.id === DEFAULT_TASK_LIST_ID ? list.name : name;
+    const nextName =
+      list.id === DEFAULT_TASK_LIST_ID || !name ? list.name : name;
     if (
       (nextName !== list.name || editingListColor !== list.colorToken) &&
       !(await onUpdateTaskList(listId, nextName, editingListColor))
@@ -289,8 +290,29 @@ export function LeftNavigation({
     }
 
     setEditingListId(null);
-    setEditingListName("");
-    focusListMenuTrigger(listId);
+    setEditingListName(list.name);
+    if (restoreFocus) {
+      focusListMenuTrigger(listId);
+    }
+  };
+
+  const handleEditSubmit = (
+    event: FormEvent<HTMLFormElement>,
+    listId: string,
+  ) => {
+    event.preventDefault();
+    void saveEditingList(listId, true);
+  };
+
+  const handleEditorBlur = (
+    event: ReactFocusEvent<HTMLFormElement>,
+    listId: string,
+  ) => {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+    void saveEditingList(listId);
   };
 
   const startEditing = (list: TaskListItem) => {
@@ -418,7 +440,8 @@ export function LeftNavigation({
               {editingListId === list.id ? (
                 <form
                   className="nav-list-form nav-list-editor"
-                  onSubmit={(event) => void handleEdit(event, list.id)}
+                  onSubmit={(event) => handleEditSubmit(event, list.id)}
+                  onBlur={(event) => handleEditorBlur(event, list.id)}
                 >
                   <input
                     value={editingListName}
@@ -429,23 +452,6 @@ export function LeftNavigation({
                     aria-label={`${list.name}の名前`}
                     autoFocus
                   />
-                  <button
-                    type="submit"
-                    disabled={isMutating || !editingListName.trim()}
-                  >
-                    保存
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isMutating}
-                    onClick={() => {
-                      setEditingListId(null);
-                      setEditingListName("");
-                      focusListMenuTrigger(list.id);
-                    }}
-                  >
-                    ×
-                  </button>
                   <div className="nav-list-color-field">
                     <span>リストの色</span>
                     <div className="nav-list-color-picker" aria-label="リストの色">

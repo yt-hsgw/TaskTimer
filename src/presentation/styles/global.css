@@ -678,6 +678,7 @@ button {
   border: 1px solid var(--line);
   border-radius: 6px;
   grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr);
   padding: 8px;
 }
 

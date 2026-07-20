@@ -1526,15 +1526,83 @@ async function verifyNavigationListEdit(client, sessionId) {
   );
 
   await resetInvokeLog(client, sessionId);
-  const startedAt = performance.now();
+  const customListName = await evaluateValue(
+    client,
+    sessionId,
+    `document.querySelector('[data-list-menu-test-trigger="custom"]')
+      ?.getAttribute("aria-label")?.replace(/の操作$/, "")`,
+  );
+  if (!customListName) {
+    throw new Error("空白名称を検証するカスタムリストがありません");
+  }
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('[data-list-menu-test-trigger="custom"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelectorAll('.nav-list-menu [role="menuitem"]').length === 2`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.nav-list-menu [role="menuitem"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector('.nav-list-editor input:not([readonly])') &&
+      !document.querySelector('.nav-list-editor > button')
+    )`,
+  );
   await evaluate(
     client,
     sessionId,
     `(() => {
-      const trigger = document.querySelector('button[aria-label="タスクの操作"]');
-      trigger.dataset.listMenuTestTrigger = "default";
-      trigger.click();
+      const input = document.querySelector('.nav-list-editor input:not([readonly])');
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set;
+      setter?.call(input, "   ");
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
     })()`,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `document.querySelector('.nav-list-editor input:not([readonly])')?.value === "   "`,
+    5000,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('button.nav-item[aria-label="今日"]')?.focus()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.nav-list-editor') &&
+      [...document.querySelectorAll('button.nav-item')].some(
+        (button) => button.getAttribute("aria-label") === ${JSON.stringify(customListName)}
+      ) &&
+      document.activeElement?.getAttribute("aria-label") === "今日" &&
+      !document.querySelector(".app-alert")`,
+  );
+  const blankNameCommands = await takeInvokeLog(client, sessionId);
+  assertCommandScope("空白リスト名の復元", blankNameCommands, {
+    forbidden: ["update_task_list"],
+  });
+
+  await resetInvokeLog(client, sessionId);
+  const startedAt = performance.now();
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('button[aria-label="タスクの操作"]')?.click()`,
   );
   await waitForPaintedExpression(
     client,
@@ -1550,7 +1618,10 @@ async function verifyNavigationListEdit(client, sessionId) {
   await waitForExpression(
     client,
     sessionId,
-    `Boolean(document.querySelector('.nav-list-editor .nav-list-color-button.color-violet'))`,
+    `Boolean(
+      document.querySelector('.nav-list-editor .nav-list-color-button.color-violet') &&
+      !document.querySelector('.nav-list-editor > button')
+    )`,
     5000,
   );
   await evaluate(
@@ -1571,14 +1642,14 @@ async function verifyNavigationListEdit(client, sessionId) {
   await evaluate(
     client,
     sessionId,
-    `document.querySelector('.nav-list-editor button[type="submit"]')?.click()`,
+    `document.querySelector('button.nav-item[aria-label="今日"]')?.focus()`,
   );
   await waitForPaintedExpression(
     client,
     sessionId,
     `document.querySelector('.nav-list-row .nav-list-color-swatch.color-violet') &&
       !document.querySelector(".nav-list-editor") &&
-      document.activeElement?.getAttribute("aria-label") === "タスクの操作" &&
+      document.activeElement?.getAttribute("aria-label") === "今日" &&
       !document.querySelector(".app-alert")`,
   );
   return {
