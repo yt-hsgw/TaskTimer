@@ -20,7 +20,15 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Check, GripVertical, Pencil, Plus, Trash2, X } from "lucide-react";
+import {
+  Check,
+  GripVertical,
+  ListPlus,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 import type {
@@ -37,11 +45,13 @@ type KanbanBoardProps = {
   selectedTaskId: string | null;
   isLoading: boolean;
   isMutating: boolean;
+  isCreatingTaskPending: boolean;
   isLoadingMore: boolean;
   totalTaskCount: number;
   hasMoreTasks: boolean;
   pendingTaskActionIds: ReadonlySet<string>;
   onSelectTask(taskId: string): void;
+  onRequestCreateTask(): void;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onCreateColumn(title: string): Promise<boolean>;
   onRenameColumn(columnId: string, title: string): Promise<boolean>;
@@ -67,11 +77,13 @@ export function KanbanBoard({
   selectedTaskId,
   isLoading,
   isMutating,
+  isCreatingTaskPending,
   isLoadingMore,
   totalTaskCount,
   hasMoreTasks,
   pendingTaskActionIds,
   onSelectTask,
+  onRequestCreateTask,
   onToggleTaskCompletion,
   onCreateColumn,
   onRenameColumn,
@@ -264,6 +276,20 @@ export function KanbanBoard({
           >
             {totalTaskCount}
           </span>
+          <button
+            className="task-add-button"
+            type="button"
+            data-task-create-trigger
+            aria-label="タスクを追加"
+            title="タスクを追加"
+            disabled={isMutating || isCreatingTaskPending}
+            onClick={(event) => {
+              event.currentTarget.focus();
+              onRequestCreateTask();
+            }}
+          >
+            <ListPlus aria-hidden="true" size={18} />
+          </button>
           <button
             className="icon-button"
             type="button"

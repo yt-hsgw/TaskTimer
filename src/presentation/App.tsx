@@ -51,7 +51,13 @@ import {
 } from "./components/LeftNavigation";
 import { PomodoroPanel } from "./components/PomodoroPanel";
 import { GlobalSearch } from "./components/GlobalSearch";
+import { TaskCreateDialog } from "./components/TaskCreateDialog";
 import { usePresentationRenderProbe } from "./renderProbe";
+import type {
+  CalendarTaskCreatePreset,
+  TaskCreatePreset,
+  TaskCreateSubmission,
+} from "./taskCreate";
 
 const MemoizedWeekCalendar = memo(WeekCalendar);
 const MemoizedTaskPanel = memo(TaskPanel);
@@ -172,6 +178,11 @@ export function App() {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("list");
   const [selectedTaskOverride, setSelectedTaskOverride] =
     useState<TaskWithSubtasks | null>(null);
+  const [taskCreatePreset, setTaskCreatePreset] =
+    useState<TaskCreatePreset | null>(null);
+  const [taskCreateErrorMessage, setTaskCreateErrorMessage] = useState<
+    string | null
+  >(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<WorkItemSearchResult[]>([]);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
@@ -279,6 +290,16 @@ export function App() {
     }
     return taskLists.find((list) => list.id === workspaceScope.listId) ?? null;
   }, [taskLists, workspaceScope]);
+
+  const defaultTaskCreateList = useMemo(() => {
+    const preferredListId =
+      workspaceScope.kind === "list" ? workspaceScope.listId : lastTaskListId;
+    return (
+      taskLists.find((list) => list.id === preferredListId) ??
+      taskLists[0] ??
+      null
+    );
+  }, [lastTaskListId, taskLists, workspaceScope]);
 
   const calendarRange = useMemo(
     () => getCalendarQueryRange(calendarViewMode, calendarAnchorDate),
@@ -760,13 +781,35 @@ export function App() {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.ctrlKey && event.key.toLowerCase() === "b") {
         event.preventDefault();
+        if (taskCreatePreset) {
+          return;
+        }
         setIsNavigationOpen((current) => !current);
+        return;
+      }
+      if (
+        event.ctrlKey &&
+        event.key.toLowerCase() === "n" &&
+        activeView.kind !== "settings" &&
+        activeView.kind !== "pomodoro"
+      ) {
+        event.preventDefault();
+        setTaskCreateErrorMessage(null);
+        setTaskCreatePreset((current) =>
+          current ?? {
+            kind: "standard",
+            listId: defaultTaskCreateList?.id ?? DEFAULT_TASK_LIST_ID,
+            dueDate: null,
+            dueTime: null,
+            sourceLabel: `${defaultTaskCreateList?.name ?? "タスク"}に追加`,
+          },
+        );
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [activeView.kind, defaultTaskCreateList, taskCreatePreset]);
 
   useEffect(() => {
     const syncAfterResume = () => {
@@ -1130,13 +1173,16 @@ export function App() {
     ) => {
       setIsCreatingTaskPending(true);
       setErrorMessage(null);
+      setTaskCreateErrorMessage(null);
 
       try {
         await operation();
         await refreshAfterMutation(options);
         return true;
       } catch (error) {
-        setErrorMessage(toErrorMessage(error));
+        const message = toErrorMessage(error);
+        setErrorMessage(message);
+        setTaskCreateErrorMessage(message);
         return false;
       } finally {
         setIsCreatingTaskPending(false);
@@ -1170,6 +1216,49 @@ export function App() {
       }, TASK_LIFECYCLE_REFRESH),
     [runCreateTaskMutation],
   );
+
+  const handleRequestTaskCreate = useCallback(() => {
+    setTaskCreateErrorMessage(null);
+    setTaskCreatePreset((current) =>
+      current ?? {
+        kind: "standard",
+        listId: defaultTaskCreateList?.id ?? DEFAULT_TASK_LIST_ID,
+        dueDate: null,
+        dueTime: null,
+        sourceLabel: `${defaultTaskCreateList?.name ?? "タスク"}に追加`,
+      },
+    );
+  }, [defaultTaskCreateList]);
+
+  const handleRequestScheduledTaskCreate = useCallback(
+    ({ schedule, sourceLabel }: CalendarTaskCreatePreset) => {
+      setTaskCreateErrorMessage(null);
+      setTaskCreatePreset((current) =>
+        current ?? {
+          kind: "scheduled",
+          listId: defaultTaskCreateList?.id ?? DEFAULT_TASK_LIST_ID,
+          schedule,
+          sourceLabel,
+        },
+      );
+    },
+    [defaultTaskCreateList],
+  );
+
+  const handleSubmitTaskCreate = useCallback(
+    (submission: TaskCreateSubmission) =>
+      submission.kind === "standard"
+        ? handleCreateTask(submission.input)
+        : handleCreateScheduledTask(submission.input),
+    [handleCreateScheduledTask, handleCreateTask],
+  );
+
+  const handleCloseTaskCreate = useCallback(() => {
+    if (!isCreatingTaskPending) {
+      setTaskCreateErrorMessage(null);
+      setTaskCreatePreset(null);
+    }
+  }, [isCreatingTaskPending]);
 
   const handleCreateTaskList = useCallback(
     (name: string) =>
@@ -2134,7 +2223,7 @@ export function App() {
                       ? "お気に入りにしたタスクはまだありません。"
                       : "まだタスクはありません。"
                 }
-                showTaskForm={workspaceScope.kind === "list"}
+                showTaskAdd={workspaceScope.kind === "list"}
                 isLoading={isLoading || isTaskPageLoading}
                 isMutating={isDetailMutating}
                 isCreatingTaskPending={isCreatingTaskPending}
@@ -2145,7 +2234,7 @@ export function App() {
                 selectedSubtaskId={selectedSubtaskId}
                 onSelectTask={handleSelectTask}
                 onSelectSubtask={handleSelectSubtask}
-                onCreateTask={handleCreateTask}
+                onRequestCreateTask={handleRequestTaskCreate}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
                 onToggleTaskFavorite={handleToggleTaskFavorite}
                 onStartTimer={handleStartTimer}
@@ -2200,11 +2289,13 @@ export function App() {
                 selectedTaskId={selectedTaskId}
                 isLoading={isLoading || isTaskPageLoading}
                 isMutating={isBoardMutating}
+                isCreatingTaskPending={isCreatingTaskPending}
                 isLoadingMore={isLoadingMoreTasks}
                 totalTaskCount={taskPageState.totalCount}
                 hasMoreTasks={taskPageState.nextCursor !== null}
                 pendingTaskActionIds={visiblePendingTaskActionIds}
                 onSelectTask={handleSelectTask}
+                onRequestCreateTask={handleRequestTaskCreate}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
                 onCreateColumn={handleCreateBoardColumn}
                 onRenameColumn={handleRenameBoardColumn}
@@ -2256,10 +2347,8 @@ export function App() {
                 viewMode={calendarViewMode}
                 anchorDate={calendarAnchorDate}
                 items={items}
-                taskLists={taskLists}
-                defaultTaskListId={lastTaskListId}
                 isLoading={isLoading || isCalendarLoading}
-                isCreatingTaskPending={isCreatingTaskPending}
+                isTaskCreateOpen={taskCreatePreset !== null}
                 isReschedulingItem={isCalendarMutating || isDetailMutating}
                 selectedTarget={selectedCalendarTarget}
                 onChangeViewMode={handleChangeCalendarViewMode}
@@ -2267,7 +2356,7 @@ export function App() {
                 onNextRange={handleNextCalendarRange}
                 onToday={handleTodayCalendarRange}
                 onSelectItem={handleSelectCalendarItem}
-                onCreateTask={handleCreateScheduledTask}
+                onRequestCreateTask={handleRequestScheduledTaskCreate}
                 onRescheduleItem={handleRescheduleCalendarItem}
                 onResizeItem={handleResizeCalendarItem}
                 onMoveScheduledItem={handleMoveScheduledCalendarItem}
@@ -2342,6 +2431,16 @@ export function App() {
           ) : null}
         </section>
       </div>
+      {taskCreatePreset ? (
+        <TaskCreateDialog
+          preset={taskCreatePreset}
+          taskLists={taskLists}
+          isSubmitting={isCreatingTaskPending}
+          errorMessage={taskCreateErrorMessage}
+          onSubmit={handleSubmitTaskCreate}
+          onClose={handleCloseTaskCreate}
+        />
+      ) : null}
     </main>
   );
 }

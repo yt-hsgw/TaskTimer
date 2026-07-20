@@ -2592,11 +2592,6 @@ button {
   cursor: not-allowed;
 }
 
-.task-composer {
-  display: grid;
-  margin-top: 4px;
-}
-
 .task-add-button {
   align-items: center;
   background: var(--soft-green);
@@ -2611,14 +2606,6 @@ button {
   min-height: 32px;
   min-width: 32px;
   padding: 0;
-}
-
-.inline-create-form {
-  background: #f8fafb;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  margin: 0;
-  padding: 12px;
 }
 
 .composer-actions {
@@ -2947,62 +2934,109 @@ button {
   background: #f5f8fa;
 }
 
-.calendar-create-form-shell {
-  border-bottom: 1px solid #e4e8eb;
-  flex: 0 0 auto;
-  padding: 12px 16px;
-}
-
-.calendar-create-form.work-form {
-  background: #f8fbfa;
-  border: 1px solid #cfe0d8;
-  border-radius: 8px;
-  margin: 0;
-  padding: 12px;
-}
-
-.calendar-create-form-heading {
+.task-create-dialog-backdrop {
   align-items: center;
+  background: rgb(23 32 38 / 34%);
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 100;
 }
 
-.calendar-create-form-heading div {
+.task-create-dialog {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 20px 56px rgb(23 32 38 / 26%);
   display: grid;
-  gap: 2px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  width: min(620px, 100%);
+}
+
+.task-create-dialog-heading {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+}
+
+.task-create-dialog-heading div {
+  display: grid;
+  gap: 3px;
   min-width: 0;
 }
 
-.calendar-create-form-heading strong {
-  color: var(--ink);
-  font-size: 15px;
-  line-height: 1.2;
+.task-create-dialog-heading h2,
+.task-create-dialog-heading p {
+  margin: 0;
 }
 
-.calendar-create-form-heading span {
+.task-create-dialog-heading h2 {
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.task-create-dialog-heading p {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
-.calendar-create-grid {
+.task-create-dialog-form.work-form {
+  border: 0;
+  gap: 14px;
+  margin: 0;
+  padding: 18px 20px 20px;
+}
+
+.task-create-dialog-error {
+  background: var(--soft-red);
+  border: 1px solid #e7bbb3;
+  border-radius: 6px;
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 9px 10px;
+}
+
+.task-create-dialog-grid {
   display: grid;
-  gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.calendar-all-day-toggle {
+.task-create-all-day-toggle {
   align-items: center;
-  display: inline-flex;
-  gap: 7px;
+  display: inline-flex !important;
+  gap: 8px;
   justify-self: start;
 }
 
-.calendar-all-day-toggle input {
-  height: 16px;
+.task-create-all-day-toggle input {
+  height: 17px;
   margin: 0;
-  width: 16px;
+  min-height: 17px;
+  padding: 0;
+  width: 17px;
+}
+
+.task-create-dialog-actions {
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 2px;
+  padding-top: 14px;
 }
 
 .calendar-time-grid {
@@ -4147,7 +4181,6 @@ button {
   }
 
   .date-fields,
-  .calendar-create-grid,
   .task-timer-settings-form,
   .recurrence-fields {
     grid-template-columns: 1fr;
@@ -4198,5 +4231,17 @@ button {
   .app-alert {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .task-create-dialog-backdrop {
+    padding: 12px;
+  }
+
+  .task-create-dialog {
+    max-height: calc(100vh - 24px);
+  }
+
+  .task-create-dialog-grid {
+    grid-template-columns: 1fr;
   }
 }
