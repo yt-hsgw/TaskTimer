@@ -1658,6 +1658,19 @@ export function App() {
     [runMutation],
   );
 
+  const handleDeleteCompletedBoardColumnTasks = useCallback(
+    (boardColumnId: string) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.deleteCompletedTasksInBoardColumn(
+          boardColumnId,
+        );
+      }, {
+        scope: "board",
+        ...TASK_LIFECYCLE_REFRESH,
+      }),
+    [runMutation],
+  );
+
   const handleMoveTaskToBoardColumn = useCallback(
     (taskId: string, boardColumnId: string) =>
       runTaskActionMutation(taskId, async () => {
@@ -2327,6 +2340,7 @@ export function App() {
                 onRenameColumn={handleRenameBoardColumn}
                 onReorderColumns={handleReorderBoardColumns}
                 onDeleteColumn={handleDeleteBoardColumn}
+                onDeleteCompletedTasks={handleDeleteCompletedBoardColumnTasks}
                 onMoveTask={handleMoveTaskToBoardColumn}
                 onLoadMoreTasks={handleLoadMoreTasks}
               />

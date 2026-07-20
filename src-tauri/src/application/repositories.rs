@@ -836,6 +836,12 @@ pub trait TaskTimerCommandRepository {
 
     fn delete_task(&self, task_id: String, now: String) -> RepositoryResult<()>;
 
+    fn delete_completed_tasks_in_board_column(
+        &self,
+        board_column_id: String,
+        now: String,
+    ) -> RepositoryResult<i64>;
+
     fn delete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<()>;
 }
 

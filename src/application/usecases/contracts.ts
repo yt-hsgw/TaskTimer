@@ -395,6 +395,7 @@ export type TaskTimerGateway = {
   updateBoardColumn(columnId: string, title: string): Promise<BoardColumn>;
   reorderBoardColumns(orderedColumnIds: string[]): Promise<BoardColumn[]>;
   deleteBoardColumn(columnId: string, moveTasksToColumnId: string): Promise<void>;
+  deleteCompletedTasksInBoardColumn(boardColumnId: string): Promise<number>;
   moveTaskToBoardColumn(taskId: string, boardColumnId: string): Promise<void>;
   createTag(input: TagDraft): Promise<TagItem>;
   updateTag(tagId: string, input: TagDraft): Promise<TagItem>;

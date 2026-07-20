@@ -110,6 +110,10 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<void>("delete_board_column", {
       request: { columnId, moveTasksToColumnId },
     }),
+  deleteCompletedTasksInBoardColumn: (boardColumnId: string) =>
+    invoke<number>("delete_completed_tasks_in_board_column", {
+      request: { boardColumnId },
+    }),
   moveTaskToBoardColumn: (taskId: string, boardColumnId: string) =>
     invoke<void>("move_task_to_board_column", {
       request: { taskId, boardColumnId },

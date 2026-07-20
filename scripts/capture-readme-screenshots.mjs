@@ -399,18 +399,53 @@ try {
       const board = document.querySelector(".kanban-board");
       const columns = [...document.querySelectorAll(".kanban-column")];
       const cards = [...document.querySelectorAll(".kanban-card")];
+      const handles = [...document.querySelectorAll(".kanban-column-drag-handle")];
       return Boolean(
         board &&
         columns.length === 2 &&
         cards.length === 3 &&
-        document.querySelectorAll(".kanban-column-drag-handle").length === 2 &&
+        handles.length === 2 &&
         document.querySelectorAll(".kanban-column-add-task").length === 2 &&
         document.querySelectorAll(".kanban-column-add-slot").length === 1 &&
         document.querySelector(".kanban-column-add-trigger") &&
+        document.querySelectorAll(".kanban-column-menu-trigger").length === 2 &&
         document.querySelector(".kanban-card .task-check-button") &&
         !document.querySelector(".kanban-card-actions") &&
+        handles.every((handle, index) =>
+          Math.abs(
+            handle.getBoundingClientRect().width -
+            columns[index].getBoundingClientRect().width
+          ) <= 2
+        ) &&
         columns.every((column) => column.scrollWidth <= column.clientWidth + 1) &&
         cards.every((card) => card.scrollWidth <= card.clientWidth + 1)
+      );
+    })()`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".kanban-column-menu-trigger")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `(() => {
+      const menu = document.querySelector(".kanban-column-menu");
+      const labels = [...(menu?.querySelectorAll("button") ?? [])]
+        .map((button) => button.textContent?.trim());
+      return Boolean(
+        menu &&
+        labels.includes("タイトルを編集") &&
+        labels.some((label) => label?.startsWith("完了タスクを全件削除")) &&
+        labels.includes("既定順") &&
+        labels.includes("期限が近い順") &&
+        labels.includes("作成日の新しい順") &&
+        labels.includes("タイトル順") &&
+        labels.includes("状態を削除")
       );
     })()`,
   );
@@ -422,6 +457,21 @@ try {
   await writeFile(
     kanbanOutputPath,
     Buffer.from(kanbanScreenshot.data, "base64"),
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      )`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `!document.querySelector(".kanban-column-menu")`,
   );
   await client.send(
     "Runtime.evaluate",

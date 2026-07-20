@@ -312,6 +312,12 @@ pub struct DeleteTaskRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DeleteCompletedTasksInBoardColumnRequestDto {
+    pub board_column_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeleteSubtaskRequestDto {
     pub subtask_id: String,
 }

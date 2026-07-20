@@ -739,6 +739,19 @@ pub fn delete_task(
 }
 
 #[tauri::command]
+pub fn delete_completed_tasks_in_board_column(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::DeleteCompletedTasksInBoardColumnRequestDto,
+) -> Result<i64, String> {
+    super::usecases::delete_completed_tasks_in_board_column(
+        database.inner(),
+        clock.inner(),
+        request.board_column_id,
+    )
+}
+
+#[tauri::command]
 pub fn delete_subtask(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,

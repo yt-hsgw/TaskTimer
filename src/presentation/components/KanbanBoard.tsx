@@ -22,11 +22,10 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   Check,
+  EllipsisVertical,
   ListPlus,
   Minus,
-  Pencil,
   Plus,
-  Trash2,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
@@ -57,6 +56,7 @@ type KanbanBoardProps = {
   onRenameColumn(columnId: string, title: string): Promise<boolean>;
   onReorderColumns(orderedColumnIds: string[]): Promise<boolean>;
   onDeleteColumn(columnId: string, moveTasksToColumnId: string): Promise<boolean>;
+  onDeleteCompletedTasks(boardColumnId: string): Promise<boolean>;
   onMoveTask(taskId: string, boardColumnId: string): Promise<boolean>;
   onLoadMoreTasks(): Promise<void>;
 };
@@ -69,6 +69,50 @@ type PendingTaskMove = {
   taskId: string;
   destinationColumnId: string;
 };
+
+type KanbanSortMode = "default" | "due" | "created-desc" | "title";
+
+const kanbanSortOptions: { value: KanbanSortMode; label: string }[] = [
+  { value: "default", label: "既定順" },
+  { value: "due", label: "期限が近い順" },
+  { value: "created-desc", label: "作成日の新しい順" },
+  { value: "title", label: "タイトル順" },
+];
+
+function sortKanbanRows(rows: TaskRow[], sortMode: KanbanSortMode) {
+  if (sortMode === "default") {
+    return rows;
+  }
+
+  const sortedRows = [...rows];
+  sortedRows.sort((left, right) => {
+    if (sortMode === "due") {
+      const leftDue = left.dueDate
+        ? `${left.dueDate}T${left.dueTime ?? "23:59"}`
+        : null;
+      const rightDue = right.dueDate
+        ? `${right.dueDate}T${right.dueTime ?? "23:59"}`
+        : null;
+      if (leftDue !== rightDue) {
+        if (!leftDue) {
+          return 1;
+        }
+        if (!rightDue) {
+          return -1;
+        }
+        return leftDue.localeCompare(rightDue);
+      }
+    }
+    if (sortMode === "created-desc" && left.createdAt !== right.createdAt) {
+      return right.createdAt.localeCompare(left.createdAt);
+    }
+    return left.title.localeCompare(right.title, "ja", {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
+  return sortedRows;
+}
 
 export function KanbanBoard({
   columns,
@@ -89,6 +133,7 @@ export function KanbanBoard({
   onRenameColumn,
   onReorderColumns,
   onDeleteColumn,
+  onDeleteCompletedTasks,
   onMoveTask,
   onLoadMoreTasks,
 }: KanbanBoardProps) {
@@ -319,6 +364,7 @@ export function KanbanBoard({
                     onToggleTaskCompletion={onToggleTaskCompletion}
                     onRenameColumn={onRenameColumn}
                     onRequestDelete={openDeleteDialog}
+                    onDeleteCompletedTasks={onDeleteCompletedTasks}
                   />
                 ))
               : null}
@@ -470,6 +516,7 @@ type SortableKanbanColumnProps = {
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onRenameColumn(columnId: string, title: string): Promise<boolean>;
   onRequestDelete(columnId: string): void;
+  onDeleteCompletedTasks(boardColumnId: string): Promise<boolean>;
 };
 
 function SortableKanbanColumn({
@@ -487,10 +534,15 @@ function SortableKanbanColumn({
   onToggleTaskCompletion,
   onRenameColumn,
   onRequestDelete,
+  onDeleteCompletedTasks,
 }: SortableKanbanColumnProps) {
   const [isEditing, setIsEditing] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [sortMode, setSortMode] = useState<KanbanSortMode>("default");
   const [title, setTitle] = useState(column.title);
   const isRenameCommittingRef = useRef(false);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const {
     attributes,
     listeners,
@@ -508,14 +560,56 @@ function SortableKanbanColumn({
     data: { type: "column-drop", columnId: column.id },
     disabled: isMutating,
   });
-  const activeRows = rows.filter((row) => row.status !== "done");
-  const completedRows = rows.filter((row) => row.status === "done");
+  const sortedRows = useMemo(
+    () => sortKanbanRows(rows, sortMode),
+    [rows, sortMode],
+  );
+  const activeRows = sortedRows.filter((row) => row.status !== "done");
+  const completedRows = sortedRows.filter((row) => row.status === "done");
 
   useEffect(() => {
     if (!isEditing) {
       setTitle(column.title);
     }
   }, [column.title, isEditing]);
+
+  useEffect(() => {
+    if (!isMenuOpen) {
+      return;
+    }
+
+    const focusFrame = window.requestAnimationFrame(() => {
+      menuRef.current
+        ?.querySelector<HTMLElement>(
+          '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])',
+        )
+        ?.focus();
+    });
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        !menuRef.current?.contains(target) &&
+        !menuTriggerRef.current?.contains(target)
+      ) {
+        setIsMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsMenuOpen(false);
+        menuTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isMenuOpen]);
 
   async function commitRename() {
     if (isRenameCommittingRef.current) {
@@ -551,10 +645,34 @@ function SortableKanbanColumn({
     void commitRename();
   }
 
+  function startRename() {
+    setIsMenuOpen(false);
+    setTitle(column.title);
+    setIsEditing(true);
+  }
+
+  async function handleDeleteCompletedTasks() {
+    setIsMenuOpen(false);
+    if (column.completedTaskCount <= 0) {
+      return;
+    }
+    if (
+      !window.confirm(
+        `「${column.title}」の完了タスク${column.completedTaskCount}件をすべて削除しますか？\n関連するサブタスクと履歴も削除されます。`,
+      )
+    ) {
+      menuTriggerRef.current?.focus();
+      return;
+    }
+    await onDeleteCompletedTasks(column.id);
+  }
+
   return (
     <section
       ref={setNodeRef}
-      className={`kanban-column ${isDragging ? "is-dragging" : ""}`}
+      className={`kanban-column ${isDragging ? "is-dragging" : ""} ${
+        isMenuOpen ? "has-open-menu" : ""
+      }`}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -591,16 +709,9 @@ function SortableKanbanColumn({
             />
           </form>
         ) : (
-          <button
-            className="kanban-column-title"
-            type="button"
-            title="状態名を編集"
-            disabled={isMutating}
-            onClick={() => setIsEditing(true)}
-          >
+          <div className="kanban-column-title" title={column.title}>
             <span>{column.title}</span>
-            <Pencil aria-hidden="true" size={13} />
-          </button>
+          </div>
         )}
         <span
           className="kanban-column-count"
@@ -609,15 +720,76 @@ function SortableKanbanColumn({
           {column.activeTaskCount}
         </span>
         <button
-          className="kanban-column-delete"
+          ref={menuTriggerRef}
+          className="kanban-column-menu-trigger"
           type="button"
-          aria-label={`${column.title}を削除`}
-          title={canDelete ? "状態を削除" : "最後の状態は削除できません"}
-          disabled={isMutating || !canDelete}
-          onClick={() => onRequestDelete(column.id)}
+          aria-label={`${column.title}のメニューを開く`}
+          aria-haspopup="menu"
+          aria-expanded={isMenuOpen}
+          title="状態の操作"
+          disabled={isMutating}
+          onClick={() => setIsMenuOpen((current) => !current)}
         >
-          <Trash2 aria-hidden="true" size={15} />
+          <EllipsisVertical aria-hidden="true" size={17} />
         </button>
+        {isMenuOpen ? (
+          <div
+            ref={menuRef}
+            className="kanban-column-menu"
+            role="menu"
+            aria-label={`${column.title}の操作`}
+          >
+            <button type="button" role="menuitem" onClick={startRename}>
+              タイトルを編集
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={column.completedTaskCount <= 0}
+              onClick={() => void handleDeleteCompletedTasks()}
+            >
+              <span>完了タスクを全件削除</span>
+              <small>{column.completedTaskCount}</small>
+            </button>
+            <div className="kanban-column-menu-separator" role="separator" />
+            <span className="kanban-column-menu-label">タスクの並べ替え</span>
+            {kanbanSortOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="menuitemradio"
+                aria-checked={sortMode === option.value}
+                onClick={() => {
+                  setSortMode(option.value);
+                  setIsMenuOpen(false);
+                  menuTriggerRef.current?.focus();
+                }}
+              >
+                <span
+                  className={`kanban-column-sort-indicator ${
+                    sortMode === option.value ? "is-selected" : ""
+                  }`}
+                  aria-hidden="true"
+                />
+                {option.label}
+              </button>
+            ))}
+            <div className="kanban-column-menu-separator" role="separator" />
+            <button
+              className="is-danger"
+              type="button"
+              role="menuitem"
+              disabled={!canDelete}
+              title={canDelete ? undefined : "最後の状態は削除できません"}
+              onClick={() => {
+                setIsMenuOpen(false);
+                onRequestDelete(column.id);
+              }}
+            >
+              状態を削除
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <div
@@ -627,7 +799,7 @@ function SortableKanbanColumn({
         }`}
       >
         <SortableContext
-          items={rows.map((row) => taskDragId(row.id))}
+          items={sortedRows.map((row) => taskDragId(row.id))}
           strategy={verticalListSortingStrategy}
         >
           <div className="kanban-active-tasks">

@@ -306,6 +306,7 @@ try {
       thresholds.kanban_rename_blur,
     ),
   );
+  await verifyKanbanColumnSort(client, sessionId);
   const kanbanDragStartedAt = performance.now();
   const kanbanDragResult = await verifyKanbanCardDrag(client, sessionId);
   assertCommandScope("かんばんD&D", kanbanDragResult.commands, {
@@ -1672,7 +1673,33 @@ async function verifyKanbanRenameOnBlur(client, sessionId) {
   await evaluate(
     client,
     sessionId,
-    `document.querySelector(".kanban-column-title")?.click()`,
+    `document.querySelector(".kanban-column-menu-trigger")?.click()`,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `(() => {
+      const menu = document.querySelector(".kanban-column-menu");
+      const labels = [...(menu?.querySelectorAll("button") ?? [])]
+        .map((button) => button.textContent?.trim());
+      return Boolean(
+        menu &&
+        labels.includes("タイトルを編集") &&
+        labels.some((label) => label?.startsWith("完了タスクを全件削除")) &&
+        labels.includes("既定順") &&
+        labels.includes("期限が近い順") &&
+        labels.includes("作成日の新しい順") &&
+        labels.includes("タイトル順") &&
+        labels.includes("状態を削除")
+      );
+    })()`,
+    5000,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.kanban-column-menu [role="menuitem"]')]
+      .find((button) => button.textContent?.trim() === "タイトルを編集")?.click()`,
   );
   await waitForExpression(
     client,
@@ -1713,6 +1740,84 @@ async function verifyKanbanRenameOnBlur(client, sessionId) {
     commands: await takeInvokeLog(client, sessionId),
     durationMs: performance.now() - startedAt,
   };
+}
+
+async function verifyKanbanColumnSort(client, sessionId) {
+  const originalTitles = await evaluateValue(
+    client,
+    sessionId,
+    `[...document.querySelectorAll(
+      ".kanban-column:first-of-type .kanban-active-tasks .kanban-card-title"
+    )].map((node) => node.textContent ?? "")`,
+  );
+  if (!Array.isArray(originalTitles) || originalTitles.length < 2) {
+    throw new Error("かんばん列ソートの検証対象が不足しています");
+  }
+  const expectedTitles = [...originalTitles].sort((left, right) =>
+    left.localeCompare(right, "ja", { numeric: true, sensitivity: "base" }),
+  );
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector(
+      ".kanban-column:first-of-type .kanban-column-menu-trigger"
+    )?.click()`,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(".kanban-column-menu"))`,
+    5000,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.kanban-column-menu [role="menuitemradio"]')]
+      .find((button) => button.textContent?.trim() === "タイトル順")?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `JSON.stringify([...document.querySelectorAll(
+      ".kanban-column:first-of-type .kanban-active-tasks .kanban-card-title"
+    )].map((node) => node.textContent ?? "")) === ${JSON.stringify(
+      JSON.stringify(expectedTitles),
+    )}`,
+  );
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector(
+      ".kanban-column:first-of-type .kanban-column-menu-trigger"
+    )?.click()`,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.kanban-column-menu [role="menuitemradio"]')]
+      .some((button) =>
+        button.textContent?.trim() === "タイトル順" &&
+        button.getAttribute("aria-checked") === "true"
+      )`,
+    5000,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.kanban-column-menu [role="menuitemradio"]')]
+      .find((button) => button.textContent?.trim() === "既定順")?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `JSON.stringify([...document.querySelectorAll(
+      ".kanban-column:first-of-type .kanban-active-tasks .kanban-card-title"
+    )].map((node) => node.textContent ?? "")) === ${JSON.stringify(
+      JSON.stringify(originalTitles),
+    )}`,
+  );
 }
 
 async function verifyKanbanCardDrag(client, sessionId) {
