@@ -175,7 +175,7 @@ jobs:
 
       - name: 計測ログを保存
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-large-dataset-measurement
           path: |
