@@ -332,6 +332,18 @@ pub fn validate_task_list_color_token(value: &str) -> Result<String, String> {
     Err("リスト色は許可済みの色から選択してください".to_string())
 }
 
+pub fn validate_optional_task_color_token(value: Option<&str>) -> Result<Option<String>, String> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let trimmed = value.trim();
+    if TASK_LIST_COLOR_TOKENS.contains(&trimmed) {
+        return Ok(Some(trimmed.to_string()));
+    }
+
+    Err("タスク色は許可済みの色から選択してください".to_string())
+}
+
 pub fn validate_tag_name(name: &str) -> Result<String, String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -383,6 +395,23 @@ pub fn assert_completable(status: &WorkStatus) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_task_color_accepts_inheritance_and_rejects_arbitrary_css() {
+        assert_eq!(
+            validate_optional_task_color_token(None).expect("inherit list color"),
+            None
+        );
+        assert_eq!(
+            validate_optional_task_color_token(Some(" blue ")).expect("allowed color"),
+            Some("blue".to_string())
+        );
+        assert!(
+            validate_optional_task_color_token(Some("url(https://example.com)"))
+                .expect_err("arbitrary css")
+                .contains("許可済み")
+        );
+    }
 
     #[test]
     fn work_schedule_accepts_timed_and_all_day_ranges() {

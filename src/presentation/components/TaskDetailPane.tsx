@@ -13,6 +13,7 @@ import type { ActiveTimer } from "../../domain/timer/types";
 import type {
   Subtask,
   Task,
+  TaskColorToken,
   WorkStatus,
   WorkTargetRef,
 } from "../../domain/task/types";
@@ -53,6 +54,7 @@ type TaskDetailPaneProps = {
 type DetailFormDraft = {
   title: string;
   listId: string;
+  colorToken: TaskColorToken | null;
   dueDate: string;
   dueTime: string;
   timerTargetMinutes: string;
@@ -85,6 +87,14 @@ const recurrenceLabels: Record<RecurrenceFrequency, string> = {
 };
 
 const timerTargetPresets = ["15", "25", "30", "45", "60", "90", "120"];
+const taskColorOptions: Array<{ token: TaskColorToken; label: string }> = [
+  { token: "green", label: "緑" },
+  { token: "blue", label: "青" },
+  { token: "amber", label: "黄" },
+  { token: "rose", label: "赤" },
+  { token: "violet", label: "紫" },
+  { token: "gray", label: "グレー" },
+];
 
 export function TaskDetailPane({
   task,
@@ -131,7 +141,11 @@ export function TaskDetailPane({
   const taskList = taskLists.find((list) => list.id === task.listId) ?? null;
   const taskListName = taskList?.name ?? "タスク";
   const [draft, setDraft] = useState(() =>
-    toDetailFormDraft(detailItem, task.listId),
+    toDetailFormDraft(
+      detailItem,
+      task.listId,
+      isTaskDetail ? task.colorToken : null,
+    ),
   );
   const [isCoreEditOpen, setIsCoreEditOpen] = useState(false);
   const [isDuePopoverOpen, setIsDuePopoverOpen] = useState(false);
@@ -167,12 +181,18 @@ export function TaskDetailPane({
   );
 
   useEffect(() => {
-    setDraft(toDetailFormDraft(detailItem, task.listId));
+    setDraft(
+      toDetailFormDraft(
+        detailItem,
+        task.listId,
+        isTaskDetail ? task.colorToken : null,
+      ),
+    );
     setCustomDueDraft({
       dueDate: detailItem.dueDate ?? getTodayDateInputValue(),
       dueTime: detailItem.dueTime ?? "",
     });
-  }, [detailItem, task.listId]);
+  }, [detailItem, isTaskDetail, task.colorToken, task.listId]);
 
   useEffect(() => {
     setIsCoreEditOpen(false);
@@ -310,9 +330,28 @@ export function TaskDetailPane({
     if (listId === task.listId) {
       return;
     }
-    const nextDraft = toDetailFormDraft(task, listId);
+    const nextDraft = toDetailFormDraft(task, listId, task.colorToken);
     setDraft(nextDraft);
     await onUpdateTask(task.id, toWorkItemUpdateDraft(nextDraft));
+  }
+
+  async function handleTaskColorChange(colorToken: TaskColorToken | null) {
+    if (colorToken === draft.colorToken) {
+      return;
+    }
+    const previousColorToken = draft.colorToken;
+    setDraft((current) => ({ ...current, colorToken }));
+    const persistedDraft = toDetailFormDraft(task, task.listId, colorToken);
+    const updated = await onUpdateTask(
+      task.id,
+      toWorkItemUpdateDraft(persistedDraft),
+    );
+    if (!updated) {
+      setDraft((current) => ({
+        ...current,
+        colorToken: previousColorToken,
+      }));
+    }
   }
 
   function toggleSection(section: DetailSectionKey) {
@@ -441,7 +480,10 @@ export function TaskDetailPane({
       </section>
 
       {isTaskDetail ? (
-        <section className="detail-list-card" aria-label="所属リスト">
+        <section
+          className="detail-list-card"
+          aria-label="所属リストとタスク表示色"
+        >
           <label>
             <span>所属リスト</span>
             <select
@@ -456,6 +498,41 @@ export function TaskDetailPane({
               ))}
             </select>
           </label>
+          <fieldset className="detail-task-color-field">
+            <legend>タスクの表示色</legend>
+            <div className="detail-task-color-picker">
+              <button
+                className="detail-task-color-inherit"
+                type="button"
+                aria-pressed={draft.colorToken === null}
+                disabled={isMutating || isCoreEditOpen}
+                onClick={() => void handleTaskColorChange(null)}
+              >
+                リスト色を継承
+                <span
+                  className={`detail-task-color-swatch color-${taskList?.colorToken ?? "green"}`}
+                  aria-hidden="true"
+                />
+              </button>
+              {taskColorOptions.map(({ token, label }) => (
+                <button
+                  className={`detail-task-color-button color-${token}`}
+                  type="button"
+                  key={token}
+                  aria-label={`${label}をタスクの表示色に設定`}
+                  title={label}
+                  aria-pressed={draft.colorToken === token}
+                  disabled={isMutating || isCoreEditOpen}
+                  onClick={() => void handleTaskColorChange(token)}
+                >
+                  <span aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+            <small>
+              未設定時は「{taskListName}」の色を使用します。
+            </small>
+          </fieldset>
         </section>
       ) : null}
 
@@ -1190,10 +1267,12 @@ function toDetailFormDraft(
     | "memo"
   >,
   listId: string,
+  colorToken: TaskColorToken | null,
 ): DetailFormDraft {
   return {
     title: item.title,
     listId,
+    colorToken,
     dueDate: item.dueDate ?? "",
     dueTime: item.dueTime ?? "",
     timerTargetMinutes: secondsToMinutesText(item.timerTargetSeconds),
@@ -1215,6 +1294,7 @@ function toWorkItemUpdateDraft(input: DetailFormDraft): WorkItemUpdateDraft {
     dueDate,
     dueTime: dueDate ? normalizeOptionalText(input.dueTime) : null,
     timerTargetSeconds: minutesToSeconds(input.timerTargetMinutes),
+    colorToken: input.colorToken,
     recurrenceRule: input.recurrenceEnabled
       ? toRecurrenceRuleDraft(input)
       : null,

@@ -3500,6 +3500,7 @@ function buildTauriInvokeMockSource(profile) {
       title: "性能検証タスク " + pad(index),
       status: index % 4 === 0 ? "in_progress" : "todo",
       isFavorite: index % 3 === 0,
+      colorToken: index % 5 === 0 ? "blue" : null,
       plannedStartDate: null,
       dueDate: index % 2 === 0 ? today : addDays(today, 1),
       dueTime: index % 5 === 0 ? "16:00" : null,
@@ -3660,7 +3661,8 @@ function buildTauriInvokeMockSource(profile) {
             isAllDay: false,
             marker: "scheduled",
             status: task.status,
-            colorToken: "blue"
+            colorToken: "blue",
+            listColorToken: "green"
           };
         }
         const overlap = overlapSchedules.get(index);
@@ -3680,7 +3682,8 @@ function buildTauriInvokeMockSource(profile) {
             isAllDay: false,
             marker: "scheduled",
             status: subtask?.status ?? task.status,
-            colorToken: subtask ? "violet" : "blue"
+            colorToken: subtask ? "violet" : "blue",
+            listColorToken: "green"
           };
         }
         return {
@@ -3695,7 +3698,8 @@ function buildTauriInvokeMockSource(profile) {
           isAllDay: true,
           marker: "due",
           status: task.status,
-          colorToken: "green"
+          colorToken: "green",
+          listColorToken: "green"
         };
       });
       const commands = {

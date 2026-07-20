@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     lifecycle_status IN ('active', 'done', 'archived')
   ),
   is_favorite INTEGER NOT NULL DEFAULT 0 CHECK (is_favorite IN (0, 1)),
+  color_token TEXT NULL CHECK (
+    color_token IS NULL OR color_token IN ('green', 'blue', 'amber', 'rose', 'violet', 'gray')
+  ),
   planned_start_date TEXT NULL,
   due_date TEXT NULL,
   due_time TEXT NULL CHECK (

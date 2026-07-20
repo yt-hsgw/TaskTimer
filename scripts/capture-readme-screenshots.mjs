@@ -549,6 +549,7 @@ function buildTauriInvokeMockSource() {
       title: "週次レビュー資料を作成",
       status: "in_progress",
       isFavorite: true,
+      colorToken: "blue",
       plannedStartDate: "2026-07-06",
       dueDate: "2026-07-10",
       dueTime: "16:00",
@@ -604,6 +605,7 @@ function buildTauriInvokeMockSource() {
       title: "リリース前チェック",
       status: "todo",
       isFavorite: false,
+      colorToken: null,
       plannedStartDate: "2026-07-09",
       dueDate: "2026-07-10",
       dueTime: null,
@@ -624,6 +626,7 @@ function buildTauriInvokeMockSource() {
       title: "設計メモを整理",
       status: "done",
       isFavorite: false,
+      colorToken: null,
       plannedStartDate: null,
       dueDate: "2026-07-08",
       dueTime: null,
@@ -857,7 +860,8 @@ function buildTauriInvokeMockSource() {
           isAllDay: false,
           marker: "scheduled",
           status: "in_progress",
-          colorToken: "green"
+          colorToken: "blue",
+          listColorToken: "green"
         },
         {
           id: "cal-review-start",
@@ -871,7 +875,8 @@ function buildTauriInvokeMockSource() {
           isAllDay: true,
           marker: "planned_start",
           status: "in_progress",
-          colorToken: "green"
+          colorToken: "blue",
+          listColorToken: "green"
         },
         {
           id: "cal-summary-active",
@@ -885,7 +890,8 @@ function buildTauriInvokeMockSource() {
           isAllDay: false,
           marker: "active_timer",
           status: "in_progress",
-          colorToken: "green"
+          colorToken: "blue",
+          listColorToken: "green"
         },
         {
           id: "cal-release-due",
@@ -899,7 +905,8 @@ function buildTauriInvokeMockSource() {
           isAllDay: true,
           marker: "due",
           status: "todo",
-          colorToken: "green"
+          colorToken: "green",
+          listColorToken: "green"
         }
       ];
       const commands = {

@@ -191,6 +191,7 @@ pub struct UpdateTaskRequestDto {
     pub due_date: Option<String>,
     pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
+    pub color_token: Option<String>,
     pub recurrence_rule: Option<RecurrenceRuleRequestDto>,
     pub memo: Option<String>,
 }
@@ -362,6 +363,7 @@ pub struct WeekCalendarItemDto {
     pub marker: String,
     pub status: String,
     pub color_token: String,
+    pub list_color_token: String,
 }
 
 #[derive(Serialize)]
@@ -476,6 +478,7 @@ pub struct TaskDto {
     pub title: String,
     pub status: String,
     pub is_favorite: bool,
+    pub color_token: Option<String>,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub due_time: Option<String>,
@@ -518,6 +521,7 @@ pub struct TaskWithSubtasksDto {
     pub title: String,
     pub status: String,
     pub is_favorite: bool,
+    pub color_token: Option<String>,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub due_time: Option<String>,
@@ -914,6 +918,7 @@ impl From<UpdateTaskRequestDto> for WorkItemUpdateDraft {
             due_date: value.due_date,
             due_time: value.due_time,
             timer_target_seconds: value.timer_target_seconds,
+            color_token: value.color_token,
             recurrence_rule: value.recurrence_rule.map(Into::into),
             memo: value.memo,
         }
@@ -929,6 +934,7 @@ impl From<UpdateSubtaskRequestDto> for WorkItemUpdateDraft {
             due_date: value.due_date,
             due_time: value.due_time,
             timer_target_seconds: value.timer_target_seconds,
+            color_token: None,
             recurrence_rule: value.recurrence_rule.map(Into::into),
             memo: value.memo,
         }
@@ -1060,6 +1066,7 @@ impl From<WeekCalendarItem> for WeekCalendarItemDto {
             marker: value.marker.as_str().to_string(),
             status: value.status.as_str().to_string(),
             color_token: value.color_token,
+            list_color_token: value.list_color_token,
         }
     }
 }
@@ -1072,6 +1079,7 @@ impl From<TaskRecord> for TaskDto {
             title: value.title,
             status: value.status.as_str().to_string(),
             is_favorite: value.is_favorite,
+            color_token: value.color_token,
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
             due_time: value.due_time,
@@ -1155,6 +1163,7 @@ impl From<TaskWithSubtasksRecord> for TaskWithSubtasksDto {
             title: value.task.title,
             status: value.task.status.as_str().to_string(),
             is_favorite: value.task.is_favorite,
+            color_token: value.task.color_token,
             planned_start_date: value.task.planned_start_date,
             due_date: value.task.due_date,
             due_time: value.task.due_time,

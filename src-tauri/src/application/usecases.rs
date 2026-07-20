@@ -9,9 +9,10 @@ use crate::domain::{
     recurrence::RecurrenceFrequency,
     task::{
         validate_board_column_name, validate_date_range, validate_due_time_requires_due_date,
-        validate_memo, validate_optional_date, validate_optional_time, validate_tag_name,
-        validate_task_list_color_token, validate_task_list_name, validate_title, WorkSchedule,
-        WorkScheduleDestination, WorkStatus, DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID,
+        validate_memo, validate_optional_date, validate_optional_task_color_token,
+        validate_optional_time, validate_tag_name, validate_task_list_color_token,
+        validate_task_list_name, validate_title, WorkSchedule, WorkScheduleDestination, WorkStatus,
+        DEFAULT_TASK_LIST_COLOR_TOKEN, DEFAULT_TASK_LIST_ID,
     },
     timer::{WorkTargetRef, MAX_TASK_TIMER_TARGET_SECONDS, MIN_TASK_TIMER_TARGET_SECONDS},
 };
@@ -85,6 +86,7 @@ pub struct WorkItemUpdateDraft {
     pub due_date: Option<String>,
     pub due_time: Option<String>,
     pub timer_target_seconds: Option<i64>,
+    pub color_token: Option<String>,
     pub recurrence_rule: Option<RecurrenceRuleDraft>,
     pub memo: Option<String>,
 }
@@ -1316,6 +1318,7 @@ fn validate_work_item_update_draft(
     validate_date_range(&planned_start_date, &due_date)?;
     validate_due_time_requires_due_date(&due_date, &due_time)?;
     let timer_target_seconds = validate_timer_target_seconds(draft.timer_target_seconds)?;
+    let color_token = validate_optional_task_color_token(draft.color_token.as_deref())?;
     let recurrence_rule =
         validate_recurrence_rule(draft.recurrence_rule, &planned_start_date, &due_date)?;
     let memo = validate_memo(draft.memo.as_deref())?;
@@ -1328,6 +1331,7 @@ fn validate_work_item_update_draft(
         due_date,
         due_time,
         timer_target_seconds,
+        color_token,
         recurrence_rule,
         memo,
         now,
