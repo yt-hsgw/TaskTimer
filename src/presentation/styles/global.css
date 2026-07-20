@@ -304,7 +304,7 @@ button {
   border: 1px solid var(--line);
   border-radius: 6px;
   display: inline-grid;
-  grid-template-columns: repeat(3, minmax(68px, 1fr));
+  grid-template-columns: repeat(4, minmax(68px, 1fr));
   padding: 2px;
 }
 
@@ -820,10 +820,427 @@ button {
 
 .task-panel,
 .kanban-panel,
+.timeline-panel,
 .settings-panel {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.timeline-panel {
+  --timeline-label-width: 220px;
+  height: 100%;
+}
+
+.timeline-heading {
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.timeline-heading h2 {
+  font-size: 20px;
+  margin: 2px 0 0;
+}
+
+.timeline-heading-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.timeline-range-navigation {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.timeline-range-label {
+  color: var(--ink);
+  font-size: 13px;
+  min-width: 92px;
+  text-align: center;
+}
+
+.timeline-scale-switch {
+  background: #eef2f3;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  display: inline-grid;
+  grid-template-columns: repeat(3, 38px);
+  padding: 2px;
+}
+
+.timeline-scale-switch button {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 28px;
+  padding: 0;
+}
+
+.timeline-scale-switch button:hover,
+.timeline-scale-switch button:focus-visible {
+  color: var(--ink);
+}
+
+.timeline-scale-switch button.is-active {
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgb(23 32 38 / 12%);
+  color: var(--green);
+}
+
+.timeline-today-button {
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.timeline-summary {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 12px;
+  justify-content: flex-end;
+  min-height: 20px;
+  padding: 0 2px 6px;
+}
+
+.timeline-scroll {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  flex: 1 1 auto;
+  min-height: 180px;
+  overflow: auto;
+  position: relative;
+}
+
+.timeline-grid {
+  align-content: start;
+  display: grid;
+  grid-auto-rows: 48px;
+  min-width: max-content;
+}
+
+.timeline-corner,
+.timeline-axis {
+  background: #f8fafb;
+  border-bottom: 1px solid var(--line);
+  min-height: 48px;
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+
+.timeline-corner {
+  align-items: center;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  font-weight: 800;
+  left: 0;
+  padding: 0 12px;
+  z-index: 6;
+}
+
+.timeline-axis {
+  display: grid;
+}
+
+.timeline-axis > div {
+  align-items: center;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  font-weight: 800;
+  gap: 1px;
+  justify-content: center;
+  min-width: 0;
+  padding: 4px;
+}
+
+.timeline-axis > div:first-child {
+  border-left: 0;
+}
+
+.timeline-axis > div.is-today {
+  color: #165d9b;
+}
+
+.timeline-axis small {
+  color: #165d9b;
+  font-size: 9px;
+}
+
+.timeline-row {
+  display: contents;
+}
+
+.timeline-row-label,
+.timeline-row-track {
+  border-bottom: 1px solid var(--line);
+  height: 48px;
+  min-height: 48px;
+}
+
+.timeline-row-label {
+  align-content: center;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  display: grid;
+  gap: 2px;
+  left: 0;
+  overflow: hidden;
+  padding: 6px 12px;
+  position: sticky;
+  z-index: 3;
+}
+
+.timeline-row-label strong,
+.timeline-row-label small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-row-label strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.timeline-row-label small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.timeline-row-label.is-completed strong {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.timeline-row-track {
+  display: grid;
+  position: relative;
+}
+
+.timeline-track-cell {
+  border-left: 1px solid #e3e9ec;
+  min-width: 0;
+}
+
+.timeline-track-cell:first-child {
+  border-left: 0;
+}
+
+.timeline-track-cell.is-today {
+  background: #f2f8fc;
+  box-shadow: inset 2px 0 0 #6ea8d7;
+}
+
+.timeline-task-bar {
+  --timeline-list-color: #49a17a;
+  --timeline-task-color: #49a17a;
+  align-items: center;
+  background: color-mix(in srgb, var(--timeline-task-color) 24%, white);
+  border: 1px solid color-mix(in srgb, var(--timeline-task-color) 60%, white);
+  border-left: 4px solid var(--timeline-list-color);
+  border-radius: 4px;
+  color: #243139;
+  display: flex;
+  gap: 6px;
+  height: 32px;
+  min-width: 22px;
+  overflow: hidden;
+  padding: 0 7px;
+  position: absolute;
+  text-align: left;
+  top: 8px;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.timeline-task-bar:hover,
+.timeline-task-bar:focus-visible {
+  border-color: var(--timeline-task-color);
+  z-index: 3;
+}
+
+.timeline-task-bar.is-selected {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--timeline-task-color) 34%, white);
+}
+
+.timeline-task-bar.continues-before {
+  border-bottom-left-radius: 0;
+  border-left-style: dashed;
+  border-top-left-radius: 0;
+}
+
+.timeline-task-bar.continues-after {
+  border-bottom-right-radius: 0;
+  border-right-style: dashed;
+  border-top-right-radius: 0;
+}
+
+.timeline-task-bar.is-completed {
+  opacity: 0.55;
+}
+
+.timeline-task-bar.is-completed span {
+  text-decoration: line-through;
+}
+
+.timeline-task-bar span {
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-task-bar small {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.timeline-task-bar.is-compact small {
+  display: none;
+}
+
+.timeline-task-bar.is-milestone {
+  height: 24px;
+  padding: 0;
+  top: 12px;
+}
+
+.timeline-task-bar.is-milestone span {
+  display: none;
+}
+
+.timeline-task-bar.color-green {
+  --timeline-task-color: #49a17a;
+}
+
+.timeline-task-bar.color-blue {
+  --timeline-task-color: #4d8fd8;
+}
+
+.timeline-task-bar.color-amber {
+  --timeline-task-color: #d39b1f;
+}
+
+.timeline-task-bar.color-rose {
+  --timeline-task-color: #cb6673;
+}
+
+.timeline-task-bar.color-violet {
+  --timeline-task-color: #8068c9;
+}
+
+.timeline-task-bar.color-gray {
+  --timeline-task-color: #77868e;
+}
+
+.timeline-task-bar.list-color-green {
+  --timeline-list-color: #49a17a;
+}
+
+.timeline-task-bar.list-color-blue {
+  --timeline-list-color: #4d8fd8;
+}
+
+.timeline-task-bar.list-color-amber {
+  --timeline-list-color: #d39b1f;
+}
+
+.timeline-task-bar.list-color-rose {
+  --timeline-list-color: #cb6673;
+}
+
+.timeline-task-bar.list-color-violet {
+  --timeline-list-color: #8068c9;
+}
+
+.timeline-task-bar.list-color-gray {
+  --timeline-list-color: #77868e;
+}
+
+.timeline-empty {
+  padding: 16px;
+}
+
+.timeline-unscheduled {
+  border-top: 1px solid var(--line);
+  flex: 0 0 auto;
+  margin-top: 10px;
+  max-height: 156px;
+  overflow-y: auto;
+  padding-top: 8px;
+}
+
+.timeline-unscheduled summary {
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 3px 2px 7px;
+}
+
+.timeline-unscheduled-list {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+.timeline-unscheduled-list button {
+  align-items: center;
+  background: #f8fafb;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  min-height: 34px;
+  min-width: 0;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.timeline-unscheduled-list button:hover,
+.timeline-unscheduled-list button:focus-visible,
+.timeline-unscheduled-list button.is-selected {
+  border-color: #8dbfae;
+  background: #f1f8f5;
+}
+
+.timeline-unscheduled-list span {
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-unscheduled-list small {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 10px;
+}
+
+.timeline-load-more {
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  padding-top: 8px;
 }
 
 .settings-panel {
@@ -4564,6 +4981,31 @@ button {
   }
 
   .workspace-mode-switcher {
+    width: 100%;
+  }
+
+  .workspace-mode-switcher button {
+    min-width: 0;
+    padding: 0 4px;
+  }
+
+  .timeline-panel {
+    --timeline-label-width: 148px;
+    padding: 12px;
+  }
+
+  .timeline-heading {
+    gap: 8px;
+  }
+
+  .timeline-heading-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .timeline-range-label {
+    order: -1;
+    text-align: left;
     width: 100%;
   }
 

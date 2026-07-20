@@ -62,6 +62,7 @@ const UI_VIEW_TODAY: &str = "today";
 const UI_VIEW_FAVORITES: &str = "favorites";
 const UI_VIEW_BOARD: &str = "board";
 const UI_VIEW_CALENDAR: &str = "calendar";
+const UI_VIEW_TIMELINE: &str = "timeline";
 const UI_VIEW_POMODORO: &str = "pomodoro";
 const UI_VIEW_SETTINGS: &str = "settings";
 const CALENDAR_VIEW_WEEK: &str = "week";
@@ -1502,7 +1503,7 @@ fn validate_ui_view(value: &str) -> RepositoryResult<String> {
     let trimmed = value.trim();
     match trimmed {
         UI_VIEW_LIST | UI_VIEW_TODAY | UI_VIEW_FAVORITES | UI_VIEW_BOARD | UI_VIEW_CALENDAR
-        | UI_VIEW_POMODORO | UI_VIEW_SETTINGS => Ok(trimmed.to_string()),
+        | UI_VIEW_TIMELINE | UI_VIEW_POMODORO | UI_VIEW_SETTINGS => Ok(trimmed.to_string()),
         _ => Err("最後のビュー設定が不正です".to_string()),
     }
 }
@@ -1642,6 +1643,10 @@ mod tests {
     #[test]
     fn validate_ui_preferences_rejects_unknown_values() {
         assert_eq!(validate_ui_view("board").expect("board view"), "board");
+        assert_eq!(
+            validate_ui_view("timeline").expect("timeline view"),
+            "timeline"
+        );
         assert!(validate_ui_view("unknown")
             .expect_err("invalid view")
             .contains("ビュー"));

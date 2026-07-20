@@ -48,6 +48,7 @@ export type AppView =
   | { kind: "tag"; tagId: string }
   | { kind: "board" }
   | { kind: "calendar" }
+  | { kind: "timeline" }
   | { kind: "pomodoro" }
   | { kind: "settings" };
 
