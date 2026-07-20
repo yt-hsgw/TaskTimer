@@ -8,6 +8,7 @@ export type TaskCreatePreset =
   | {
       kind: "standard";
       listId: string;
+      plannedStartDate: string | null;
       dueDate: string | null;
       dueTime: string | null;
       sourceLabel: string;

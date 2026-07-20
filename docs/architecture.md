@@ -205,6 +205,8 @@ Issue #82 では、カレンダーからのタスク作成を既存の `CreateTa
 
 GitHub #158では、親タスク作成の開閉状態と `TaskCreatePreset` をApp Shellが所有する。一覧とかんばんは所属リストを持つ `standard`、カレンダーは所属リストと予定期間を持つ `scheduled` プリセットだけを通知し、入力、フォーカス、失敗表示、二重送信防止は共通ダイアログへ集約する。保存時は通常作成を `CreateTask`、予定付き作成を `CreateScheduledTask` へ振り分ける。タスク作成後に予定または期限を追加更新する方式は、複数トランザクション間の部分失敗を生むため採用しない。
 
+今日ビューからの作成では `standard` プリセットへローカル日付の `planned_start_date` を設定し、最後に選択した実リストへ `CreateTask` で保存する。Today Read Modelは親タスクまたは未削除サブタスクの `planned_start_date` / `due_date` が今日かをRepositoryで判定し、ページ、総件数、左ナビ件数、カレンダー、アクティブタイマーのスコープで同じ意味を使う。期限を自動設定する案は、開始予定と期限通知を混同するため採用しない。
+
 Issue #83 では、カレンダー上の期限マーカー移動も既存の `UpdateTask` / `UpdateSubtask` を使う。Presentationはドラッグ中の対象とドロップ先セルを一時状態として持ち、新しい `due_date` と `due_time` を組み立てる。開始予定日、タイトル、メモ、繰り返し設定、目標時間は既存値を保持し、保存と通知ルール同期はApplication/Infrastructureの既存境界に委ねる。リサイズや開始/終了期間モデルはGitHub #127で先行設計してから扱う。
 
 GitHub #127では、期限と独立したローカル予定期間を `scheduled_start_date/time`、`scheduled_end_date/time`、`scheduled_is_all_day` でタスクとサブタスクに追加する。`ResizeScheduledWorkItem` が対象と期間を検証して1トランザクションで保存し、Calendar Read Modelは表示範囲と重なる期間を返す。週/日は15分、終日/月は1日単位で両端を調整する。予定期間の変更では `planned_start_date`、`due_date/time`、期限通知を変更しない。

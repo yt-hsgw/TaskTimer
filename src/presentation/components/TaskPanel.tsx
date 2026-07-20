@@ -315,6 +315,11 @@ function TaskRowItem({
           <span className="task-row-title">{row.title}</span>
           <span className="task-row-meta">
             <span>{statusLabels[row.status]}</span>
+            {row.plannedStartDate ? (
+              <span className="task-start-label" title="開始予定あり">
+                開始 {formatDateLabel(row.plannedStartDate)}
+              </span>
+            ) : null}
             {row.dueDate ? (
               <span className="task-due-label" title="期限あり">
                 期限 {formatDateLabel(row.dueDate)}

@@ -2493,6 +2493,11 @@ button {
   font-weight: 700;
 }
 
+.task-start-label {
+  color: var(--green);
+  font-weight: 700;
+}
+
 .task-row-memo {
   color: var(--muted);
   font-size: 12px;
@@ -3007,6 +3012,17 @@ button {
   margin: 0;
   overflow-wrap: anywhere;
   padding: 9px 10px;
+}
+
+.task-create-planned-start {
+  align-items: center;
+  color: var(--green);
+  display: flex;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 7px;
+  line-height: 1.4;
+  margin: -2px 0 0;
 }
 
 .task-create-dialog-grid {

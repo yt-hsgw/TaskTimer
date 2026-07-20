@@ -4684,13 +4684,17 @@ fn select_task_page_tasks(
               AND (
                 (?1 = 'list' AND tasks.list_id = ?2)
                 OR (?1 = 'today' AND (
-                  tasks.due_date = ?4
+                  tasks.planned_start_date = ?4
+                  OR tasks.due_date = ?4
                   OR EXISTS (
                     SELECT 1
                     FROM subtasks
                     WHERE subtasks.task_id = tasks.id
                       AND subtasks.deleted_at IS NULL
-                      AND subtasks.due_date = ?4
+                      AND (
+                        subtasks.planned_start_date = ?4
+                        OR subtasks.due_date = ?4
+                      )
                   )
                 ))
                 OR (?1 = 'favorites' AND tasks.is_favorite = 1)
@@ -4776,13 +4780,17 @@ fn select_task_page_count(connection: &Connection, query: &TaskPageQuery) -> Rep
               AND (
                 (?1 = 'list' AND tasks.list_id = ?2)
                 OR (?1 = 'today' AND (
-                  tasks.due_date = ?4
+                  tasks.planned_start_date = ?4
+                  OR tasks.due_date = ?4
                   OR EXISTS (
                     SELECT 1
                     FROM subtasks
                     WHERE subtasks.task_id = tasks.id
                       AND subtasks.deleted_at IS NULL
-                      AND subtasks.due_date = ?4
+                      AND (
+                        subtasks.planned_start_date = ?4
+                        OR subtasks.due_date = ?4
+                      )
                   )
                 ))
                 OR (?1 = 'favorites' AND tasks.is_favorite = 1)
@@ -4820,13 +4828,17 @@ fn select_task_navigation_counts(
             SELECT COALESCE(SUM(CASE
                      WHEN tasks.status <> 'done'
                       AND (
-                        tasks.due_date = ?1
+                        tasks.planned_start_date = ?1
+                        OR tasks.due_date = ?1
                         OR EXISTS (
                           SELECT 1
                           FROM subtasks
                           WHERE subtasks.task_id = tasks.id
                             AND subtasks.deleted_at IS NULL
-                            AND subtasks.due_date = ?1
+                            AND (
+                              subtasks.planned_start_date = ?1
+                              OR subtasks.due_date = ?1
+                            )
                         )
                       )
                      THEN 1 ELSE 0 END), 0) AS today_count,
@@ -9636,13 +9648,17 @@ fn collect_task_calendar_items(
               AND (
                 (?3 = 'list' AND tasks.list_id = ?4)
                 OR (?3 = 'today' AND (
-                  tasks.due_date = ?6
+                  tasks.planned_start_date = ?6
+                  OR tasks.due_date = ?6
                   OR EXISTS (
                     SELECT 1
                     FROM subtasks
                     WHERE subtasks.task_id = tasks.id
                       AND subtasks.deleted_at IS NULL
-                      AND subtasks.due_date = ?6
+                      AND (
+                        subtasks.planned_start_date = ?6
+                        OR subtasks.due_date = ?6
+                      )
                   )
                 ))
                 OR (?3 = 'favorites' AND tasks.is_favorite = 1)
@@ -9748,13 +9764,17 @@ fn collect_subtask_calendar_items(
               AND (
                 (?3 = 'list' AND tasks.list_id = ?4)
                 OR (?3 = 'today' AND (
-                  tasks.due_date = ?6
+                  tasks.planned_start_date = ?6
+                  OR tasks.due_date = ?6
                   OR EXISTS (
                     SELECT 1
                     FROM subtasks AS scope_subtasks
                     WHERE scope_subtasks.task_id = tasks.id
                       AND scope_subtasks.deleted_at IS NULL
-                      AND scope_subtasks.due_date = ?6
+                      AND (
+                        scope_subtasks.planned_start_date = ?6
+                        OR scope_subtasks.due_date = ?6
+                      )
                   )
                 ))
                 OR (?3 = 'favorites' AND tasks.is_favorite = 1)
@@ -9880,13 +9900,17 @@ fn collect_active_timer_calendar_item(
               AND (
                 (?3 = 'list' AND COALESCE(task_targets.list_id, parent_tasks.list_id) = ?4)
                 OR (?3 = 'today' AND (
-                  COALESCE(task_targets.due_date, parent_tasks.due_date) = ?6
+                  COALESCE(task_targets.planned_start_date, parent_tasks.planned_start_date) = ?6
+                  OR COALESCE(task_targets.due_date, parent_tasks.due_date) = ?6
                   OR EXISTS (
                     SELECT 1
                     FROM subtasks AS scope_subtasks
                     WHERE scope_subtasks.task_id = COALESCE(task_targets.id, parent_tasks.id)
                       AND scope_subtasks.deleted_at IS NULL
-                      AND scope_subtasks.due_date = ?6
+                      AND (
+                        scope_subtasks.planned_start_date = ?6
+                        OR scope_subtasks.due_date = ?6
+                      )
                   )
                 ))
                 OR (?3 = 'favorites' AND COALESCE(task_targets.is_favorite, parent_tasks.is_favorite) = 1)
@@ -13111,6 +13135,36 @@ mod tests {
             },
         )
         .expect("create due subtask");
+        let planned_task = usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "今日から開始".to_string(),
+                planned_start_date: Some("2026-07-18".to_string()),
+                due_date: None,
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create planned task");
+        let subtask_planned_task =
+            usecases::create_task(&database, &clock, draft("サブタスクが開始"))
+                .expect("create planned subtask parent");
+        usecases::create_subtask(
+            &database,
+            &clock,
+            subtask_planned_task.id.clone(),
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "今日開始のサブタスク".to_string(),
+                planned_start_date: Some("2026-07-18".to_string()),
+                due_date: None,
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create planned subtask");
         let favorite_task = usecases::create_task(&database, &clock, draft("お気に入り"))
             .expect("create favorite task");
         usecases::toggle_task_favorite(&database, &clock, favorite_task.id.clone(), true)
@@ -13175,15 +13229,20 @@ mod tests {
             },
         )
         .expect("today page");
-        assert_eq!(today_page.total_count, 2);
-        assert_eq!(today_page.navigation_counts.today_count, 2);
+        assert_eq!(today_page.total_count, 4);
+        assert_eq!(today_page.navigation_counts.today_count, 4);
         assert_eq!(
             today_page
                 .rows
                 .iter()
                 .map(|row| row.id.as_str())
                 .collect::<HashSet<_>>(),
-            HashSet::from([due_task.id.as_str(), subtask_due_task.id.as_str()])
+            HashSet::from([
+                due_task.id.as_str(),
+                subtask_due_task.id.as_str(),
+                planned_task.id.as_str(),
+                subtask_planned_task.id.as_str(),
+            ])
         );
 
         let favorite_page = usecases::list_task_page(
@@ -15757,6 +15816,19 @@ mod tests {
             },
         )
         .expect("create custom task");
+        let planned_task = usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: None,
+                title: "今日から開始".to_string(),
+                planned_start_date: Some("2026-07-20".to_string()),
+                due_date: None,
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create planned task");
         let favorite_task = usecases::create_task(
             &database,
             &clock,
@@ -15798,8 +15870,14 @@ mod tests {
             },
         )
         .expect("today calendar");
-        assert_eq!(today_items.len(), 1);
-        assert_eq!(today_items[0].target.id, custom_task.id);
+        assert_eq!(today_items.len(), 2);
+        assert_eq!(
+            today_items
+                .iter()
+                .map(|item| item.target.id.as_str())
+                .collect::<HashSet<_>>(),
+            HashSet::from([custom_task.id.as_str(), planned_task.id.as_str()])
+        );
 
         let favorite_items = usecases::list_calendar_items(
             &database,
