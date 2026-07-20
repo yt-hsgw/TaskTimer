@@ -272,7 +272,11 @@ try {
   );
   const kanbanTaskCreateResult = await verifyKanbanTaskCreate(client, sessionId);
   assertCommandScope("かんばんからのタスク作成", kanbanTaskCreateResult.commands, {
-    required: ["create_task", "list_task_page", "list_task_lists"],
+    required: [
+      "create_task_in_board_column",
+      "list_task_page",
+      "list_task_lists",
+    ],
     forbidden: ["create_scheduled_task", "update_task", "update_subtask"],
   });
   const kanbanRenameBlurResult = await verifyKanbanRenameOnBlur(
@@ -1193,7 +1197,7 @@ async function verifyKanbanTaskCreate(client, sessionId) {
     sessionId,
     `(() => {
       window.__lastCreateTaskRequest = null;
-      document.querySelector('.kanban-panel .task-add-button')?.click();
+      document.querySelector('.kanban-column-add-task')?.click();
     })()`,
   );
   await waitForPaintedExpression(
@@ -1217,7 +1221,11 @@ async function verifyKanbanTaskCreate(client, sessionId) {
     sessionId,
     `window.__lastCreateTaskRequest`,
   );
-  if (!request || request.plannedStartDate !== null) {
+  if (
+    !request ||
+    request.task?.plannedStartDate !== null ||
+    request.boardColumnId !== "board-todo"
+  ) {
     throw new Error(
       `かんばんからの作成プリセットが不正です: ${JSON.stringify(request)}`,
     );
@@ -3887,6 +3895,10 @@ function buildTauriInvokeMockSource(profile) {
           if (args.request?.title === "失敗保持テスト") {
             throw new Error("作成失敗の入力保持テスト");
           }
+          return clone(tasks[0]);
+        },
+        create_task_in_board_column: () => {
+          window.__lastCreateTaskRequest = clone(args.request);
           return clone(tasks[0]);
         },
         create_scheduled_task: () => clone(tasks[0]),

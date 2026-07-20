@@ -758,6 +758,12 @@ pub trait BoardColumnRepository {
 pub trait TaskTimerCommandRepository {
     fn create_task(&self, input: WorkItemCreate) -> RepositoryResult<TaskRecord>;
 
+    fn create_task_in_board_column(
+        &self,
+        input: WorkItemCreate,
+        board_column_id: String,
+    ) -> RepositoryResult<TaskRecord>;
+
     fn create_scheduled_task(
         &self,
         input: WorkItemCreate,

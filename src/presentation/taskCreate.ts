@@ -12,6 +12,7 @@ export type TaskCreatePreset =
       dueDate: string | null;
       dueTime: string | null;
       sourceLabel: string;
+      boardColumnId?: string | null;
     }
   | {
       kind: "scheduled";
@@ -24,6 +25,7 @@ export type TaskCreateSubmission =
   | {
       kind: "standard";
       input: WorkItemDraft;
+      boardColumnId?: string | null;
     }
   | {
       kind: "scheduled";

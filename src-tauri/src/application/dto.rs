@@ -45,6 +45,13 @@ pub struct CreateTaskRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateTaskInBoardColumnRequestDto {
+    pub task: CreateTaskRequestDto,
+    pub board_column_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateSubtaskRequestDto {
     pub task_id: String,
     pub title: String,

@@ -84,6 +84,10 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<UiPreferences>("update_ui_preferences", { request: input }),
   createTask: (input: WorkItemDraft) =>
     invoke<Task>("create_task", { request: input }),
+  createTaskInBoardColumn: (input: WorkItemDraft, boardColumnId: string) =>
+    invoke<Task>("create_task_in_board_column", {
+      request: { task: input, boardColumnId },
+    }),
   createScheduledTask: (input: ScheduledTaskDraft) =>
     invoke<Task>("create_scheduled_task", { request: input }),
   createTaskList: (input: TaskListDraft) =>

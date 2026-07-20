@@ -78,6 +78,12 @@ try {
       document.querySelector(".left-navigation") &&
       document.querySelector(".task-row-content") &&
       document.querySelector(".global-search input") &&
+      document.querySelector('.nav-section-toggle[aria-expanded="true"]') &&
+      document.querySelector(".nav-list-add-button") &&
+      [...document.querySelectorAll('.nav-sections .nav-item')]
+        .slice(0, 2)
+        .map((button) => button.getAttribute("aria-label"))
+        .join(",") === "今日,お気に入り" &&
       document.querySelectorAll(".workspace-mode-switcher [role=tab]").length === 3 &&
       !document.querySelector('button.nav-item[aria-label="カレンダー"]') &&
       !document.querySelector('button.nav-item[aria-label="かんばん"]') &&
@@ -85,6 +91,38 @@ try {
       ![...document.querySelectorAll(".nav-section-heading")]
         .some((heading) => heading.textContent?.trim() === "タグ") &&
       !document.querySelector(".app-alert")
+    )`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".nav-section-toggle")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector('.nav-section-toggle[aria-expanded="false"]') &&
+      document.querySelector("#navigation-task-lists")?.hidden
+    )`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".nav-section-toggle")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector('.nav-section-toggle[aria-expanded="true"]') &&
+      !document.querySelector("#navigation-task-lists")?.hidden
     )`,
   );
   await client.send(
@@ -365,7 +403,10 @@ try {
         board &&
         columns.length === 2 &&
         cards.length === 3 &&
-        document.querySelectorAll(".kanban-drag-handle").length === 2 &&
+        document.querySelectorAll(".kanban-column-drag-handle").length === 2 &&
+        document.querySelectorAll(".kanban-column-add-task").length === 2 &&
+        document.querySelectorAll(".kanban-column-add-slot").length === 1 &&
+        document.querySelector(".kanban-column-add-trigger") &&
         document.querySelector(".kanban-card .task-check-button") &&
         !document.querySelector(".kanban-card-actions") &&
         columns.every((column) => column.scrollWidth <= column.clientWidth + 1) &&
@@ -381,6 +422,32 @@ try {
   await writeFile(
     kanbanOutputPath,
     Buffer.from(kanbanScreenshot.data, "base64"),
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelectorAll(".kanban-column-add-task")[1]?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `document.querySelector("#task-create-dialog-source")?.textContent === "状態: 進行中"`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector('.task-create-dialog-heading .inline-icon-button')?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.task-create-dialog')`,
   );
   await client.send(
     "Runtime.evaluate",
@@ -518,6 +585,30 @@ try {
     sessionId,
   );
   await writeFile(outputPath, Buffer.from(screenshot.data, "base64"));
+  await client.send(
+    "Emulation.setDeviceMetricsOverride",
+    {
+      width: 1024,
+      height: 768,
+      deviceScaleFactor: 1,
+      mobile: false,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `(() => {
+      const shell = document.querySelector(".app-shell");
+      const navigation = document.querySelector(".left-navigation");
+      return Boolean(
+        shell &&
+        navigation &&
+        document.documentElement.scrollWidth <= window.innerWidth + 1 &&
+        navigation.scrollWidth <= navigation.clientWidth + 1
+      );
+    })()`,
+  );
   await client.close();
   console.log(`README screenshot written: ${path.relative(repoRoot, outputPath)}`);
   console.log(

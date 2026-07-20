@@ -1653,6 +1653,16 @@ impl TaskTimerCommandRepository for SqliteDatabase {
         self.with_transaction(|transaction| insert_task(transaction, input))
     }
 
+    fn create_task_in_board_column(
+        &self,
+        input: WorkItemCreate,
+        board_column_id: String,
+    ) -> RepositoryResult<TaskRecord> {
+        self.with_transaction(|transaction| {
+            insert_task_in_board_column(transaction, input, Some(&board_column_id))
+        })
+    }
+
     fn create_scheduled_task(
         &self,
         input: WorkItemCreate,
@@ -2555,12 +2565,25 @@ fn insert_task(
     transaction: &Transaction<'_>,
     input: WorkItemCreate,
 ) -> RepositoryResult<TaskRecord> {
+    insert_task_in_board_column(transaction, input, None)
+}
+
+fn insert_task_in_board_column(
+    transaction: &Transaction<'_>,
+    input: WorkItemCreate,
+    requested_board_column_id: Option<&str>,
+) -> RepositoryResult<TaskRecord> {
     let id = Uuid::new_v4().to_string();
     ensure_default_task_list(transaction, &input.now)?;
     ensure_task_list_exists(transaction, &input.list_id)?;
     ensure_default_board_columns(transaction, &input.now)?;
-    let board_column_id =
-        select_preferred_active_board_column_id(transaction, DEFAULT_BOARD_COLUMN_ID)?;
+    let board_column_id = match requested_board_column_id {
+        Some(column_id) => {
+            ensure_board_column_exists(transaction, column_id)?;
+            column_id.to_string()
+        }
+        None => select_preferred_active_board_column_id(transaction, DEFAULT_BOARD_COLUMN_ID)?,
+    };
     let sort_order = next_task_sort_order(transaction, &input.list_id)?;
     let planned_start_date = input.planned_start_date.clone();
     let due_date = input.due_date.clone();
@@ -13987,6 +14010,67 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].status, WorkStatus::InProgress);
         assert_eq!(rows[0].completed_at, None);
+    }
+
+    #[test]
+    fn create_task_in_board_column_is_transactional() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-18T00:00:00Z",
+        };
+        let review = usecases::create_board_column(
+            &database,
+            &clock,
+            usecases::BoardColumnDraft {
+                title: "レビュー".to_string(),
+            },
+        )
+        .expect("create review column");
+
+        let task = usecases::create_task_in_board_column(
+            &database,
+            &clock,
+            draft("列指定タスク"),
+            review.id.clone(),
+        )
+        .expect("create task in review column");
+        let persisted_column_id: String = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT board_column_id FROM tasks WHERE id = ?1",
+                        params![task.id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("task board column: {error}"))
+            })
+            .expect("task board column");
+        assert_eq!(persisted_column_id, review.id);
+
+        usecases::delete_board_column(
+            &database,
+            &clock,
+            review.id.clone(),
+            DEFAULT_BOARD_COLUMN_ID.to_string(),
+        )
+        .expect("delete review column");
+
+        let before_count = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("rows before failure")
+            .len();
+        let rejected = usecases::create_task_in_board_column(
+            &database,
+            &clock,
+            draft("保存されないタスク"),
+            review.id,
+        );
+        assert!(rejected.expect_err("deleted column").contains("状態"));
+        let after_count = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("rows after failure")
+            .len();
+        assert_eq!(after_count, before_count);
     }
 
     #[test]

@@ -22,8 +22,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   Check,
-  GripVertical,
   ListPlus,
+  Minus,
   Pencil,
   Plus,
   Trash2,
@@ -51,7 +51,7 @@ type KanbanBoardProps = {
   hasMoreTasks: boolean;
   pendingTaskActionIds: ReadonlySet<string>;
   onSelectTask(taskId: string): void;
-  onRequestCreateTask(): void;
+  onRequestCreateTask(boardColumnId: string, boardColumnTitle: string): void;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onCreateColumn(title: string): Promise<boolean>;
   onRenameColumn(columnId: string, title: string): Promise<boolean>;
@@ -276,62 +276,8 @@ export function KanbanBoard({
           >
             {totalTaskCount}
           </span>
-          <button
-            className="task-add-button"
-            type="button"
-            data-task-create-trigger
-            aria-label="タスクを追加"
-            title="タスクを追加"
-            disabled={isMutating || isCreatingTaskPending}
-            onClick={(event) => {
-              event.currentTarget.focus();
-              onRequestCreateTask();
-            }}
-          >
-            <ListPlus aria-hidden="true" size={18} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="状態を追加"
-            title="状態を追加"
-            disabled={isMutating}
-            onClick={() => setIsCreatingColumn(true)}
-          >
-            <Plus aria-hidden="true" size={19} />
-          </button>
         </div>
       </div>
-
-      {isCreatingColumn ? (
-        <form className="kanban-column-create" onSubmit={handleCreateColumn}>
-          <input
-            autoFocus
-            value={newColumnTitle}
-            maxLength={80}
-            aria-label="新しい状態名"
-            placeholder="状態名"
-            disabled={isMutating}
-            onChange={(event) => setNewColumnTitle(event.target.value)}
-          />
-          <button type="submit" disabled={isMutating || !newColumnTitle.trim()}>
-            追加
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="追加をキャンセル"
-            title="キャンセル"
-            disabled={isMutating}
-            onClick={() => {
-              setNewColumnTitle("");
-              setIsCreatingColumn(false);
-            }}
-          >
-            <X aria-hidden="true" size={18} />
-          </button>
-        </form>
-      ) : null}
 
       <DndContext
         sensors={sensors}
@@ -365,15 +311,69 @@ export function KanbanBoard({
                     selectedTaskId={selectedTaskId}
                     isTaskDragOver={dragOverColumnId === column.id}
                     isMutating={isMutating}
+                    isCreatingTaskPending={isCreatingTaskPending}
                     canDelete={columns.length > 1}
                     pendingTaskActionIds={pendingTaskActionIds}
                     onSelectTask={onSelectTask}
+                    onRequestCreateTask={onRequestCreateTask}
                     onToggleTaskCompletion={onToggleTaskCompletion}
                     onRenameColumn={onRenameColumn}
                     onRequestDelete={openDeleteDialog}
                   />
                 ))
               : null}
+            {!isLoading ? (
+              <div className="kanban-column-add-slot">
+                {isCreatingColumn ? (
+                  <form
+                    className="kanban-column-create"
+                    onSubmit={handleCreateColumn}
+                  >
+                    <input
+                      autoFocus
+                      value={newColumnTitle}
+                      maxLength={80}
+                      aria-label="新しい状態名"
+                      placeholder="状態名"
+                      disabled={isMutating}
+                      onChange={(event) => setNewColumnTitle(event.target.value)}
+                    />
+                    <div className="kanban-column-create-actions">
+                      <button
+                        type="submit"
+                        disabled={isMutating || !newColumnTitle.trim()}
+                      >
+                        追加
+                      </button>
+                      <button
+                        className="icon-button"
+                        type="button"
+                        aria-label="追加をキャンセル"
+                        title="キャンセル"
+                        disabled={isMutating}
+                        onClick={() => {
+                          setNewColumnTitle("");
+                          setIsCreatingColumn(false);
+                        }}
+                      >
+                        <X aria-hidden="true" size={18} />
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    className="kanban-column-add-trigger"
+                    type="button"
+                    aria-label="状態を追加"
+                    disabled={isMutating}
+                    onClick={() => setIsCreatingColumn(true)}
+                  >
+                    <Plus aria-hidden="true" size={20} />
+                    <span>状態を追加</span>
+                  </button>
+                )}
+              </div>
+            ) : null}
           </div>
         </SortableContext>
         {createPortal(
@@ -462,9 +462,11 @@ type SortableKanbanColumnProps = {
   selectedTaskId: string | null;
   isTaskDragOver: boolean;
   isMutating: boolean;
+  isCreatingTaskPending: boolean;
   canDelete: boolean;
   pendingTaskActionIds: ReadonlySet<string>;
   onSelectTask(taskId: string): void;
+  onRequestCreateTask(boardColumnId: string, boardColumnTitle: string): void;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onRenameColumn(columnId: string, title: string): Promise<boolean>;
   onRequestDelete(columnId: string): void;
@@ -477,9 +479,11 @@ function SortableKanbanColumn({
   selectedTaskId,
   isTaskDragOver,
   isMutating,
+  isCreatingTaskPending,
   canDelete,
   pendingTaskActionIds,
   onSelectTask,
+  onRequestCreateTask,
   onToggleTaskCompletion,
   onRenameColumn,
   onRequestDelete,
@@ -556,18 +560,18 @@ function SortableKanbanColumn({
         transition,
       }}
     >
+      <button
+        className="kanban-column-drag-handle"
+        type="button"
+        aria-label={`${column.title}を並べ替え`}
+        title="状態を並べ替え"
+        disabled={isMutating}
+        {...attributes}
+        {...listeners}
+      >
+        <Minus aria-hidden="true" size={24} strokeWidth={3} />
+      </button>
       <div className="kanban-column-heading">
-        <button
-          className="kanban-drag-handle"
-          type="button"
-          aria-label={`${column.title}を並べ替え`}
-          title="状態を並べ替え"
-          disabled={isMutating}
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical aria-hidden="true" size={17} />
-        </button>
         {isEditing ? (
           <form className="kanban-column-title-form" onSubmit={handleRename}>
             <input
@@ -627,6 +631,20 @@ function SortableKanbanColumn({
           strategy={verticalListSortingStrategy}
         >
           <div className="kanban-active-tasks">
+            <button
+              className="kanban-column-add-task"
+              type="button"
+              data-task-create-trigger
+              aria-label={`${column.title}にタスクを追加`}
+              disabled={isMutating || isCreatingTaskPending}
+              onClick={(event) => {
+                event.currentTarget.focus();
+                onRequestCreateTask(column.id, column.title);
+              }}
+            >
+              <ListPlus aria-hidden="true" size={16} />
+              <span>タスクを追加</span>
+            </button>
             {activeRows.length === 0 ? (
               <p className="kanban-empty">タスクはありません。</p>
             ) : null}

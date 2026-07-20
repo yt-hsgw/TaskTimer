@@ -13,6 +13,7 @@ import type {
 } from "react";
 import { createPortal } from "react-dom";
 import {
+  ChevronDown,
   CircleDot,
   EllipsisVertical,
   PanelLeftClose,
@@ -90,6 +91,7 @@ export function LeftNavigation({
 }: LeftNavigationProps) {
   usePresentationRenderProbe("LeftNavigation");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isListSectionOpen, setIsListSectionOpen] = useState(true);
   const [newListName, setNewListName] = useState("");
   const [editingListId, setEditingListId] = useState<string | null>(null);
   const [editingListName, setEditingListName] = useState("");
@@ -363,6 +365,16 @@ export function LeftNavigation({
     onSelectView(view);
   };
 
+  const toggleListSection = () => {
+    const nextIsOpen = !isListSectionOpen;
+    setIsListSectionOpen(nextIsOpen);
+    if (!nextIsOpen) {
+      closeListMenu();
+      setIsCreateOpen(false);
+      setEditingListId(null);
+    }
+  };
+
   return (
     <>
     <aside
@@ -385,6 +397,8 @@ export function LeftNavigation({
           aria-expanded={isOpen}
           onClick={() => {
             closeListMenu();
+            setIsCreateOpen(false);
+            setEditingListId(null);
             onToggle();
           }}
         >
@@ -397,130 +411,6 @@ export function LeftNavigation({
       </div>
 
       <nav className="nav-sections" aria-label="ビュー">
-        <div className="nav-section">
-          {isOpen ? (
-            <div className="nav-section-heading">
-              <span>リスト</span>
-              <button
-                className="nav-mini-button"
-                type="button"
-                aria-label="リストを追加"
-                title="リストを追加"
-                disabled={isMutating}
-                onClick={() => {
-                  closeListMenu();
-                  setEditingListId(null);
-                  setIsCreateOpen((current) => !current);
-                }}
-              >
-                <Plus aria-hidden="true" size={17} />
-              </button>
-            </div>
-          ) : null}
-          {isOpen && isCreateOpen ? (
-            <form className="nav-list-form" onSubmit={handleCreate}>
-              <input
-                value={newListName}
-                onChange={(event) => setNewListName(event.target.value)}
-                placeholder="新しいリスト"
-                maxLength={80}
-                disabled={isMutating}
-                autoFocus
-              />
-              <button type="submit" disabled={isMutating || !newListName.trim()}>
-                追加
-              </button>
-            </form>
-          ) : null}
-          {taskLists.map((list) => (
-            <div
-              className={`nav-list-row ${isOpen ? "has-menu" : ""}`}
-              key={list.id}
-            >
-              {editingListId === list.id ? (
-                <form
-                  className="nav-list-form nav-list-editor"
-                  onSubmit={(event) => handleEditSubmit(event, list.id)}
-                  onBlur={(event) => handleEditorBlur(event, list.id)}
-                >
-                  <input
-                    value={editingListName}
-                    onChange={(event) => setEditingListName(event.target.value)}
-                    maxLength={80}
-                    disabled={isMutating}
-                    readOnly={list.id === DEFAULT_TASK_LIST_ID}
-                    aria-label={`${list.name}の名前`}
-                    autoFocus
-                  />
-                  <div className="nav-list-color-field">
-                    <span>リストの色</span>
-                    <div className="nav-list-color-picker" aria-label="リストの色">
-                      {taskListColorOptions.map((colorToken) => (
-                        <button
-                          className={`nav-list-color-button color-${colorToken}`}
-                          type="button"
-                          key={colorToken}
-                          aria-label={`${taskListColorLabels[colorToken]}に変更`}
-                          aria-pressed={editingListColor === colorToken}
-                          title={taskListColorLabels[colorToken]}
-                          disabled={isMutating}
-                          onClick={() => setEditingListColor(colorToken)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </form>
-              ) : (
-                <>
-                  <NavButton
-                    icon={<ColorSwatch colorToken={list.colorToken} />}
-                    label={list.name}
-                    count={list.activeTaskCount}
-                    isOpen={isOpen}
-                    isActive={
-                      activeScope.kind === "list" && activeScope.listId === list.id
-                    }
-                    onClick={() => selectView({ kind: "list", listId: list.id })}
-                  />
-                  {isOpen ? (
-                    <button
-                      ref={(node) => {
-                        if (node) {
-                          listMenuTriggerRefs.current.set(list.id, node);
-                        } else {
-                          listMenuTriggerRefs.current.delete(list.id);
-                        }
-                      }}
-                      className="nav-list-menu-trigger"
-                      type="button"
-                      aria-label={`${list.name}の操作`}
-                      aria-haspopup="menu"
-                      aria-expanded={listMenu?.listId === list.id}
-                      title="リストの操作"
-                      disabled={isMutating}
-                      onClick={(event) => openListMenu(list.id, event.currentTarget)}
-                    >
-                      <EllipsisVertical aria-hidden="true" size={18} />
-                    </button>
-                  ) : null}
-                </>
-              )}
-            </div>
-          ))}
-          {taskLists.length === 0 ? (
-            <NavButton
-              icon={<ColorSwatch colorToken="green" />}
-              label="タスク"
-              count={0}
-              isOpen={isOpen}
-              isActive={activeScope.kind === "list"}
-              onClick={() =>
-                selectView({ kind: "list", listId: DEFAULT_TASK_LIST_ID })
-              }
-            />
-          ) : null}
-        </div>
-
         <div className="nav-section">
           <NavButton
             icon={<CircleDot aria-hidden="true" size={18} strokeWidth={1.8} />}
@@ -538,6 +428,158 @@ export function LeftNavigation({
             isActive={activeScope.kind === "favorites"}
             onClick={() => selectView({ kind: "favorites" })}
           />
+        </div>
+
+        <div className="nav-section nav-list-section">
+          {isOpen ? (
+            <button
+              className="nav-section-heading nav-section-toggle"
+              type="button"
+              aria-expanded={isListSectionOpen}
+              aria-controls="navigation-task-lists"
+              onClick={toggleListSection}
+            >
+              <span>リスト</span>
+              <ChevronDown
+                className={isListSectionOpen ? "is-open" : ""}
+                aria-hidden="true"
+                size={16}
+              />
+            </button>
+          ) : null}
+          <div
+            id="navigation-task-lists"
+            hidden={isOpen && !isListSectionOpen}
+          >
+              {taskLists.map((list) => (
+                <div
+                  className={`nav-list-row ${isOpen ? "has-menu" : ""}`}
+                  key={list.id}
+                >
+                  {editingListId === list.id ? (
+                    <form
+                      className="nav-list-form nav-list-editor"
+                      onSubmit={(event) => handleEditSubmit(event, list.id)}
+                      onBlur={(event) => handleEditorBlur(event, list.id)}
+                    >
+                      <input
+                        value={editingListName}
+                        onChange={(event) => setEditingListName(event.target.value)}
+                        maxLength={80}
+                        disabled={isMutating}
+                        readOnly={list.id === DEFAULT_TASK_LIST_ID}
+                        aria-label={`${list.name}の名前`}
+                        autoFocus
+                      />
+                      <div className="nav-list-color-field">
+                        <span>リストの色</span>
+                        <div
+                          className="nav-list-color-picker"
+                          aria-label="リストの色"
+                        >
+                          {taskListColorOptions.map((colorToken) => (
+                            <button
+                              className={`nav-list-color-button color-${colorToken}`}
+                              type="button"
+                              key={colorToken}
+                              aria-label={`${taskListColorLabels[colorToken]}に変更`}
+                              aria-pressed={editingListColor === colorToken}
+                              title={taskListColorLabels[colorToken]}
+                              disabled={isMutating}
+                              onClick={() => setEditingListColor(colorToken)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <NavButton
+                        icon={<ColorSwatch colorToken={list.colorToken} />}
+                        label={list.name}
+                        count={list.activeTaskCount}
+                        isOpen={isOpen}
+                        isActive={
+                          activeScope.kind === "list" &&
+                          activeScope.listId === list.id
+                        }
+                        onClick={() =>
+                          selectView({ kind: "list", listId: list.id })
+                        }
+                      />
+                      {isOpen ? (
+                        <button
+                          ref={(node) => {
+                            if (node) {
+                              listMenuTriggerRefs.current.set(list.id, node);
+                            } else {
+                              listMenuTriggerRefs.current.delete(list.id);
+                            }
+                          }}
+                          className="nav-list-menu-trigger"
+                          type="button"
+                          aria-label={`${list.name}の操作`}
+                          aria-haspopup="menu"
+                          aria-expanded={listMenu?.listId === list.id}
+                          title="リストの操作"
+                          disabled={isMutating}
+                          onClick={(event) =>
+                            openListMenu(list.id, event.currentTarget)
+                          }
+                        >
+                          <EllipsisVertical aria-hidden="true" size={18} />
+                        </button>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ))}
+              {taskLists.length === 0 ? (
+                <NavButton
+                  icon={<ColorSwatch colorToken="green" />}
+                  label="タスク"
+                  count={0}
+                  isOpen={isOpen}
+                  isActive={activeScope.kind === "list"}
+                  onClick={() =>
+                    selectView({ kind: "list", listId: DEFAULT_TASK_LIST_ID })
+                  }
+                />
+              ) : null}
+              {isOpen && isCreateOpen ? (
+                <form className="nav-list-form nav-list-create" onSubmit={handleCreate}>
+                  <input
+                    value={newListName}
+                    onChange={(event) => setNewListName(event.target.value)}
+                    placeholder="新しいリスト"
+                    maxLength={80}
+                    disabled={isMutating}
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    disabled={isMutating || !newListName.trim()}
+                  >
+                    追加
+                  </button>
+                </form>
+              ) : null}
+              {isOpen && !isCreateOpen ? (
+                <button
+                  className="nav-list-add-button"
+                  type="button"
+                  disabled={isMutating}
+                  onClick={() => {
+                    closeListMenu();
+                    setEditingListId(null);
+                    setIsCreateOpen(true);
+                  }}
+                >
+                  <Plus aria-hidden="true" size={17} />
+                  <span>新しいリストを作成</span>
+                </button>
+              ) : null}
+          </div>
         </div>
       </nav>
 

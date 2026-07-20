@@ -288,6 +288,21 @@ pub fn create_task(
 }
 
 #[tauri::command]
+pub fn create_task_in_board_column(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::CreateTaskInBoardColumnRequestDto,
+) -> Result<super::dto::TaskDto, String> {
+    super::usecases::create_task_in_board_column(
+        database.inner(),
+        clock.inner(),
+        request.task.into(),
+        request.board_column_id,
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
 pub fn create_scheduled_task(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,

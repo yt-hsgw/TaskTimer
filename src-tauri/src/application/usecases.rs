@@ -226,6 +226,18 @@ pub fn create_task(
     repository.create_task(validate_work_item_draft(draft, clock.now_utc_iso8601())?)
 }
 
+pub fn create_task_in_board_column(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    draft: WorkItemDraft,
+    board_column_id: String,
+) -> RepositoryResult<TaskRecord> {
+    repository.create_task_in_board_column(
+        validate_work_item_draft(draft, clock.now_utc_iso8601())?,
+        validate_identifier(&board_column_id, "状態ID")?,
+    )
+}
+
 pub fn list_task_page(
     repository: &impl TaskReadRepository,
     draft: TaskPageDraft,

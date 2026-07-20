@@ -383,6 +383,10 @@ export type TaskTimerGateway = {
   getUiPreferences(): Promise<UiPreferences>;
   updateUiPreferences(input: UiPreferences): Promise<UiPreferences>;
   createTask(input: WorkItemDraft): Promise<Task>;
+  createTaskInBoardColumn(
+    input: WorkItemDraft,
+    boardColumnId: string,
+  ): Promise<Task>;
   createScheduledTask(input: ScheduledTaskDraft): Promise<Task>;
   createTaskList(input: TaskListDraft): Promise<TaskListItem>;
   updateTaskList(listId: string, input: TaskListDraft): Promise<TaskListItem>;
