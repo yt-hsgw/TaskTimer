@@ -818,7 +818,8 @@ try {
       action: `document.querySelector(".task-row-content")?.click()`,
       ready: `document.querySelector(".task-detail-pane") &&
         document.querySelector(".detail-subtask-list") &&
-        document.querySelector('.detail-list-card[aria-label="所属リスト"]') &&
+        document.querySelector('.detail-list-card[aria-label="所属リストとタスク表示色"]') &&
+        document.querySelector(".detail-task-color-picker") &&
         !document.querySelector('.detail-section[aria-label="タイマー"]') &&
         !document.querySelector('.detail-section[aria-label="通知"]') &&
         !document.querySelector(".detail-color-button") &&
