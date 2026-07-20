@@ -88,6 +88,7 @@ const UI_VIEW_TODAY: &str = "today";
 const UI_VIEW_FAVORITES: &str = "favorites";
 const UI_VIEW_BOARD: &str = "board";
 const UI_VIEW_CALENDAR: &str = "calendar";
+const UI_VIEW_TIMELINE: &str = "timeline";
 const UI_VIEW_POMODORO: &str = "pomodoro";
 const UI_VIEW_SETTINGS: &str = "settings";
 const UI_VIEW_LEGACY_TASKS: &str = "tasks";
@@ -4519,6 +4520,7 @@ fn normalize_ui_view(value: Option<&String>) -> String {
         Some(UI_VIEW_FAVORITES) => UI_VIEW_FAVORITES.to_string(),
         Some(UI_VIEW_BOARD) => UI_VIEW_BOARD.to_string(),
         Some(UI_VIEW_CALENDAR) => UI_VIEW_CALENDAR.to_string(),
+        Some(UI_VIEW_TIMELINE) => UI_VIEW_TIMELINE.to_string(),
         Some(UI_VIEW_POMODORO) => UI_VIEW_POMODORO.to_string(),
         Some(UI_VIEW_SETTINGS) => UI_VIEW_SETTINGS.to_string(),
         _ => UI_VIEW_LIST.to_string(),
@@ -10825,14 +10827,14 @@ mod tests {
             &clock,
             usecases::UiPreferencesDraft {
                 left_pane_open: false,
-                last_view: UI_VIEW_BOARD.to_string(),
+                last_view: UI_VIEW_TIMELINE.to_string(),
                 last_task_list_id: "custom-list".to_string(),
                 calendar_view_mode: CALENDAR_VIEW_MONTH.to_string(),
             },
         )
         .expect("update ui preferences");
         assert!(!updated.left_pane_open);
-        assert_eq!(updated.last_view, UI_VIEW_BOARD);
+        assert_eq!(updated.last_view, UI_VIEW_TIMELINE);
         assert_eq!(updated.last_task_list_id, "custom-list");
         assert_eq!(updated.calendar_view_mode, CALENDAR_VIEW_MONTH);
 

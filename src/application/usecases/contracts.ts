@@ -237,6 +237,7 @@ export type AppViewKind =
   | "tag"
   | "board"
   | "calendar"
+  | "timeline"
   | "pomodoro"
   | "settings";
 

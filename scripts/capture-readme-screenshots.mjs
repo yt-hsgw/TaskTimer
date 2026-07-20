@@ -20,6 +20,7 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const outputDir = path.join(repoRoot, "docs", "assets", "readme");
 const outputPath = path.join(outputDir, "tasktimer-overview.png");
 const kanbanOutputPath = path.join(outputDir, "tasktimer-kanban.png");
+const timelineOutputPath = path.join(outputDir, "tasktimer-timeline.png");
 const taskCreateOutputPath = path.join(
   outputDir,
   "tasktimer-task-create.png",
@@ -84,7 +85,7 @@ try {
         .slice(0, 2)
         .map((button) => button.getAttribute("aria-label"))
         .join(",") === "今日,お気に入り" &&
-      document.querySelectorAll(".workspace-mode-switcher [role=tab]").length === 3 &&
+      document.querySelectorAll(".workspace-mode-switcher [role=tab]").length === 4 &&
       !document.querySelector('button.nav-item[aria-label="カレンダー"]') &&
       !document.querySelector('button.nav-item[aria-label="かんばん"]') &&
       !document.querySelector('button.nav-item[aria-label="ポモドーロ"]') &&
@@ -636,6 +637,77 @@ try {
   );
   await writeFile(outputPath, Buffer.from(screenshot.data, "base64"));
   await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector('button[aria-label="詳細を閉じる"]')?.click();
+        [...document.querySelectorAll('.workspace-mode-switcher [role="tab"]')]
+          .find((button) => button.textContent === "タイムライン")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector(".timeline-panel") &&
+      document.querySelector(".timeline-unscheduled-list button") &&
+      document.querySelector(".timeline-scroll")?.scrollWidth >
+        document.querySelector(".timeline-scroll")?.clientWidth
+    )`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `(() => {
+        const dayMs = 86400000;
+        const targetDay = Math.floor(Date.UTC(2026, 6, 6) / dayMs);
+        const now = new Date();
+        const today = Math.floor(
+          Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()) / dayMs
+        );
+        const weekday = new Date(today * dayMs).getUTCDay();
+        const weekStart = today - ((weekday + 6) % 7);
+        const steps = Math.floor((targetDay - weekStart) / (12 * 7));
+        const label = steps < 0 ? "前の期間" : "次の期間";
+        const button = document.querySelector(
+          '.timeline-range-navigation button[aria-label="' + label + '"]'
+        );
+        for (let index = 0; index < Math.abs(steps); index += 1) {
+          button?.click();
+        }
+      })()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `document.querySelectorAll(".timeline-task-bar").length === 2`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `(() => {
+        const timeline = document.querySelector(".timeline-scroll");
+        if (timeline) timeline.scrollLeft = timeline.scrollWidth - timeline.clientWidth;
+      })()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await sleep(200);
+  const timelineScreenshot = await client.send(
+    "Page.captureScreenshot",
+    { format: "png", fromSurface: true, captureBeyondViewport: false },
+    sessionId,
+  );
+  await writeFile(
+    timelineOutputPath,
+    Buffer.from(timelineScreenshot.data, "base64"),
+  );
+  await client.send(
     "Emulation.setDeviceMetricsOverride",
     {
       width: 1024,
@@ -659,6 +731,26 @@ try {
       );
     })()`,
   );
+  await client.send(
+    "Emulation.setDeviceMetricsOverride",
+    {
+      width: 760,
+      height: 800,
+      deviceScaleFactor: 1,
+      mobile: false,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelectorAll(".workspace-mode-switcher [role=tab]").length === 4 &&
+      document.documentElement.scrollWidth <= window.innerWidth + 1 &&
+      document.querySelector(".timeline-scroll")?.scrollWidth >
+        document.querySelector(".timeline-scroll")?.clientWidth
+    )`,
+  );
   await client.close();
   console.log(`README screenshot written: ${path.relative(repoRoot, outputPath)}`);
   console.log(
@@ -666,6 +758,9 @@ try {
   );
   console.log(
     `README screenshot written: ${path.relative(repoRoot, taskCreateOutputPath)}`,
+  );
+  console.log(
+    `README screenshot written: ${path.relative(repoRoot, timelineOutputPath)}`,
   );
 } finally {
   if (chromeProcess) {
@@ -769,7 +864,7 @@ function buildTauriInvokeMockSource() {
       isFavorite: false,
       colorToken: null,
       plannedStartDate: null,
-      dueDate: "2026-07-08",
+      dueDate: null,
       dueTime: null,
       timerTargetSeconds: 1800,
       recurrenceRule: null,
@@ -897,7 +992,7 @@ function buildTauriInvokeMockSource() {
       status: "done",
       isFavorite: false,
       plannedStartDate: null,
-      dueDate: "2026-07-08",
+      dueDate: null,
       dueTime: null,
       timerTargetSeconds: 1800,
       sortOrder: 30,

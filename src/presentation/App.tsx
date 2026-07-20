@@ -52,6 +52,7 @@ import {
 import { PomodoroPanel } from "./components/PomodoroPanel";
 import { GlobalSearch } from "./components/GlobalSearch";
 import { TaskCreateDialog } from "./components/TaskCreateDialog";
+import { TimelinePanel } from "./components/TimelinePanel";
 import { usePresentationRenderProbe } from "./renderProbe";
 import type {
   CalendarTaskCreatePreset,
@@ -67,8 +68,9 @@ const MemoizedSettingsPanel = memo(SettingsPanel);
 const MemoizedLeftNavigation = memo(LeftNavigation);
 const MemoizedPomodoroPanel = memo(PomodoroPanel);
 const MemoizedGlobalSearch = memo(GlobalSearch);
+const MemoizedTimelinePanel = memo(TimelinePanel);
 
-type WorkspaceMode = "list" | "board" | "calendar";
+type WorkspaceMode = "list" | "board" | "calendar" | "timeline";
 
 type LoadSnapshotOptions = {
   showLoading?: boolean;
@@ -118,6 +120,7 @@ const workspaceModes: { value: WorkspaceMode; label: string }[] = [
   { value: "list", label: "リスト" },
   { value: "board", label: "かんばん" },
   { value: "calendar", label: "カレンダー" },
+  { value: "timeline", label: "タイムライン" },
 ];
 const INITIAL_MUTATION_COUNTS: Record<MutationScope, number> = {
   navigation: 0,
@@ -1892,7 +1895,11 @@ export function App() {
         setWorkspaceScope(nextScope);
         setActiveView(nextView);
         clearDetailSelection();
-      } else if (view.kind === "board" || view.kind === "calendar") {
+      } else if (
+        view.kind === "board" ||
+        view.kind === "calendar" ||
+        view.kind === "timeline"
+      ) {
         if (workspaceMode === view.kind && isSameAppView(activeView, view)) {
           return;
         }
@@ -2434,6 +2441,58 @@ export function App() {
             </div>
           ) : null}
 
+          {activeView.kind === "timeline" ? (
+            <div
+              className={`task-workspace timeline-workspace ${
+                selectedTask ? "is-detail-open" : ""
+              }`}
+            >
+              <MemoizedTimelinePanel
+                tasks={visibleTasks}
+                taskRows={visibleTaskRows}
+                taskLists={taskLists}
+                selectedTaskId={selectedTaskId}
+                todayDate={todayDate}
+                isLoading={isLoading || isTaskPageLoading}
+                isLoadingMore={isLoadingMoreTasks}
+                totalTaskCount={taskPageState.totalCount}
+                hasMoreTasks={taskPageState.nextCursor !== null}
+                onSelectTask={handleSelectTask}
+                onLoadMoreTasks={handleLoadMoreTasks}
+              />
+              {selectedTask ? (
+                <MemoizedTaskDetailPane
+                  task={selectedTask}
+                  selectedSubtaskId={selectedSubtaskId}
+                  activeTimer={activeTimer}
+                  activePomodoro={activePomodoro}
+                  taskLists={taskLists}
+                  tags={tags}
+                  isMutating={isDetailMutating}
+                  onClose={closeDetailPane}
+                  onUpdateTask={handleUpdateTask}
+                  onUpdateSubtask={handleUpdateSubtask}
+                  onCreateSubtask={handleCreateSubtask}
+                  onSelectSubtask={handleSelectDetailSubtask}
+                  onSelectParentTask={handleSelectParentTask}
+                  onStartTimer={handleStartTimer}
+                  onPauseTimer={handlePauseTimer}
+                  onResumeTimer={handleResumeTimer}
+                  onStopTimer={handleStopTimer}
+                  onToggleTaskCompletion={handleToggleTaskCompletion}
+                  onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
+                  onDeleteTask={handleDeleteTask}
+                  onDeleteSubtask={handleDeleteSubtask}
+                  onCreateTag={handleCreateTag}
+                  onRenameTag={handleRenameTag}
+                  onDeleteTag={handleDeleteTag}
+                  onAttachTagToTask={handleAttachTagToTask}
+                  onDetachTagFromTask={handleDetachTagFromTask}
+                />
+              ) : null}
+            </div>
+          ) : null}
+
           {activeView.kind === "pomodoro" ? (
             <MemoizedPomodoroPanel
               activePomodoro={activePomodoro}
@@ -2527,7 +2586,11 @@ function workspaceScopeFromPreferences(
 }
 
 function workspaceModeFromView(view: AppView): WorkspaceMode {
-  if (view.kind === "board" || view.kind === "calendar") {
+  if (
+    view.kind === "board" ||
+    view.kind === "calendar" ||
+    view.kind === "timeline"
+  ) {
     return view.kind;
   }
   return "list";

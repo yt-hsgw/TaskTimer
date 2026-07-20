@@ -56,6 +56,8 @@ const thresholds = {
   calendar_month_drag_create: 1500,
   calendar_month_date_change: 1500,
   calendar_multiday_header: 2000,
+  timeline: 2000,
+  timeline_load_more: 1500,
   task_detail: 1000,
 };
 const taskPageSize = 200;
@@ -682,13 +684,85 @@ try {
       thresholds.calendar_multiday_header,
     ),
   );
+  measurements.push(
+    await measureView({
+      client,
+      sessionId,
+      name: "timeline",
+      thresholdMs: thresholds.timeline,
+      action: clickWorkspaceMode("タイムライン"),
+      ready: `document.querySelector('.workspace-mode-switcher [role="tab"][aria-selected="true"]')?.textContent === "タイムライン" &&
+        document.querySelector(".timeline-panel") &&
+        document.querySelectorAll(".timeline-task-bar").length === ${initialTaskPageCount} &&
+        document.querySelectorAll(".timeline-scale-switch [role=tab]").length === 3 &&
+        document.querySelector(".timeline-scroll")?.scrollWidth > document.querySelector(".timeline-scroll")?.clientWidth`,
+    }),
+  );
+  await resetInvokeLog(client, sessionId);
+  await resetRenderCounts(client, sessionId);
+  await evaluate(
+    client,
+    sessionId,
+    `(() => {
+      [...document.querySelectorAll('.timeline-scale-switch [role="tab"]')]
+        .find((button) => button.textContent === "月")?.click();
+      document.querySelector('.timeline-task-bar')?.click();
+    })()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector('.timeline-scale-switch [role="tab"][aria-selected="true"]')?.textContent === "月" &&
+      Boolean(document.querySelector(".task-detail-pane"))`,
+  );
+  const timelineInteractionCommands = await takeInvokeLog(client, sessionId);
+  if (timelineInteractionCommands.length > 0) {
+    throw new Error(
+      `タイムラインの参照操作中にcommandが呼ばれました: ${JSON.stringify(
+        timelineInteractionCommands,
+      )}`,
+    );
+  }
+  assertComponentsDidNotRender(
+    "タイムライン粒度切替",
+    await takeRenderCounts(client, sessionId),
+    ["LeftNavigation", "WeekCalendar", "KanbanBoard", "SettingsPanel"],
+  );
+  await evaluate(client, sessionId, `document.querySelector('.timeline-task-bar')?.click()`);
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector(".task-detail-pane")`,
+  );
+  if (profile.taskCount > taskPageSize) {
+    measurements.push(
+      await measureView({
+        client,
+        sessionId,
+        name: "timeline_load_more",
+        thresholdMs: thresholds.timeline_load_more,
+        action: `document.querySelector(".timeline-load-more button")?.click()`,
+        ready: `document.querySelectorAll(".timeline-task-bar").length === ${Math.min(
+          profile.taskCount,
+          taskPageSize * 2,
+        )} &&
+          document.querySelector(".timeline-summary")?.textContent?.includes("${Math.min(
+            profile.taskCount,
+            taskPageSize * 2,
+          )}/${profile.taskCount}件")`,
+      }),
+    );
+  }
   await evaluate(client, sessionId, clickNavigation("タスク"));
   await evaluate(client, sessionId, clickWorkspaceMode("リスト"));
   await waitForPaintedExpression(
     client,
     sessionId,
     `document.querySelector('#task-panel-title')?.textContent === "タスク" &&
-      document.querySelectorAll(".task-row").length === ${initialTaskPageCount}`,
+      document.querySelectorAll(".task-row").length === ${Math.min(
+        profile.taskCount,
+        profile.taskCount > taskPageSize ? taskPageSize * 2 : taskPageSize,
+      )}`,
   );
 
   await resetInvokeLog(client, sessionId);
