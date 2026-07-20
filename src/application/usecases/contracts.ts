@@ -383,6 +383,10 @@ export type TaskTimerGateway = {
   getUiPreferences(): Promise<UiPreferences>;
   updateUiPreferences(input: UiPreferences): Promise<UiPreferences>;
   createTask(input: WorkItemDraft): Promise<Task>;
+  createTaskInBoardColumn(
+    input: WorkItemDraft,
+    boardColumnId: string,
+  ): Promise<Task>;
   createScheduledTask(input: ScheduledTaskDraft): Promise<Task>;
   createTaskList(input: TaskListDraft): Promise<TaskListItem>;
   updateTaskList(listId: string, input: TaskListDraft): Promise<TaskListItem>;
@@ -391,6 +395,7 @@ export type TaskTimerGateway = {
   updateBoardColumn(columnId: string, title: string): Promise<BoardColumn>;
   reorderBoardColumns(orderedColumnIds: string[]): Promise<BoardColumn[]>;
   deleteBoardColumn(columnId: string, moveTasksToColumnId: string): Promise<void>;
+  deleteCompletedTasksInBoardColumn(boardColumnId: string): Promise<number>;
   moveTaskToBoardColumn(taskId: string, boardColumnId: string): Promise<void>;
   createTag(input: TagDraft): Promise<TagItem>;
   updateTag(tagId: string, input: TagDraft): Promise<TagItem>;

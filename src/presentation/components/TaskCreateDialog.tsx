@@ -171,6 +171,7 @@ export function TaskCreateDialog({
               dueTime: draft.dueDate && draft.dueTime ? draft.dueTime : null,
               memo: draft.memo,
             },
+            boardColumnId: preset.boardColumnId,
           };
 
     if (await onSubmit(submission)) {

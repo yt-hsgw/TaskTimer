@@ -272,7 +272,11 @@ try {
   );
   const kanbanTaskCreateResult = await verifyKanbanTaskCreate(client, sessionId);
   assertCommandScope("かんばんからのタスク作成", kanbanTaskCreateResult.commands, {
-    required: ["create_task", "list_task_page", "list_task_lists"],
+    required: [
+      "create_task_in_board_column",
+      "list_task_page",
+      "list_task_lists",
+    ],
     forbidden: ["create_scheduled_task", "update_task", "update_subtask"],
   });
   const kanbanRenameBlurResult = await verifyKanbanRenameOnBlur(
@@ -302,6 +306,7 @@ try {
       thresholds.kanban_rename_blur,
     ),
   );
+  await verifyKanbanColumnSort(client, sessionId);
   const kanbanDragStartedAt = performance.now();
   const kanbanDragResult = await verifyKanbanCardDrag(client, sessionId);
   assertCommandScope("かんばんD&D", kanbanDragResult.commands, {
@@ -1193,7 +1198,7 @@ async function verifyKanbanTaskCreate(client, sessionId) {
     sessionId,
     `(() => {
       window.__lastCreateTaskRequest = null;
-      document.querySelector('.kanban-panel .task-add-button')?.click();
+      document.querySelector('.kanban-column-add-task')?.click();
     })()`,
   );
   await waitForPaintedExpression(
@@ -1217,7 +1222,11 @@ async function verifyKanbanTaskCreate(client, sessionId) {
     sessionId,
     `window.__lastCreateTaskRequest`,
   );
-  if (!request || request.plannedStartDate !== null) {
+  if (
+    !request ||
+    request.task?.plannedStartDate !== null ||
+    request.boardColumnId !== "board-todo"
+  ) {
     throw new Error(
       `かんばんからの作成プリセットが不正です: ${JSON.stringify(request)}`,
     );
@@ -1664,7 +1673,33 @@ async function verifyKanbanRenameOnBlur(client, sessionId) {
   await evaluate(
     client,
     sessionId,
-    `document.querySelector(".kanban-column-title")?.click()`,
+    `document.querySelector(".kanban-column-menu-trigger")?.click()`,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `(() => {
+      const menu = document.querySelector(".kanban-column-menu");
+      const labels = [...(menu?.querySelectorAll("button") ?? [])]
+        .map((button) => button.textContent?.trim());
+      return Boolean(
+        menu &&
+        labels.includes("タイトルを編集") &&
+        labels.some((label) => label?.startsWith("完了タスクを全件削除")) &&
+        labels.includes("既定順") &&
+        labels.includes("期限が近い順") &&
+        labels.includes("作成日の新しい順") &&
+        labels.includes("タイトル順") &&
+        labels.includes("状態を削除")
+      );
+    })()`,
+    5000,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.kanban-column-menu [role="menuitem"]')]
+      .find((button) => button.textContent?.trim() === "タイトルを編集")?.click()`,
   );
   await waitForExpression(
     client,
@@ -1705,6 +1740,84 @@ async function verifyKanbanRenameOnBlur(client, sessionId) {
     commands: await takeInvokeLog(client, sessionId),
     durationMs: performance.now() - startedAt,
   };
+}
+
+async function verifyKanbanColumnSort(client, sessionId) {
+  const originalTitles = await evaluateValue(
+    client,
+    sessionId,
+    `[...document.querySelectorAll(
+      ".kanban-column:first-of-type .kanban-active-tasks .kanban-card-title"
+    )].map((node) => node.textContent ?? "")`,
+  );
+  if (!Array.isArray(originalTitles) || originalTitles.length < 2) {
+    throw new Error("かんばん列ソートの検証対象が不足しています");
+  }
+  const expectedTitles = [...originalTitles].sort((left, right) =>
+    left.localeCompare(right, "ja", { numeric: true, sensitivity: "base" }),
+  );
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector(
+      ".kanban-column:first-of-type .kanban-column-menu-trigger"
+    )?.click()`,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(".kanban-column-menu"))`,
+    5000,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.kanban-column-menu [role="menuitemradio"]')]
+      .find((button) => button.textContent?.trim() === "タイトル順")?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `JSON.stringify([...document.querySelectorAll(
+      ".kanban-column:first-of-type .kanban-active-tasks .kanban-card-title"
+    )].map((node) => node.textContent ?? "")) === ${JSON.stringify(
+      JSON.stringify(expectedTitles),
+    )}`,
+  );
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector(
+      ".kanban-column:first-of-type .kanban-column-menu-trigger"
+    )?.click()`,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.kanban-column-menu [role="menuitemradio"]')]
+      .some((button) =>
+        button.textContent?.trim() === "タイトル順" &&
+        button.getAttribute("aria-checked") === "true"
+      )`,
+    5000,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.kanban-column-menu [role="menuitemradio"]')]
+      .find((button) => button.textContent?.trim() === "既定順")?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `JSON.stringify([...document.querySelectorAll(
+      ".kanban-column:first-of-type .kanban-active-tasks .kanban-card-title"
+    )].map((node) => node.textContent ?? "")) === ${JSON.stringify(
+      JSON.stringify(originalTitles),
+    )}`,
+  );
 }
 
 async function verifyKanbanCardDrag(client, sessionId) {
@@ -3887,6 +4000,10 @@ function buildTauriInvokeMockSource(profile) {
           if (args.request?.title === "失敗保持テスト") {
             throw new Error("作成失敗の入力保持テスト");
           }
+          return clone(tasks[0]);
+        },
+        create_task_in_board_column: () => {
+          window.__lastCreateTaskRequest = clone(args.request);
           return clone(tasks[0]);
         },
         create_scheduled_task: () => clone(tasks[0]),

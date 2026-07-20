@@ -84,6 +84,10 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<UiPreferences>("update_ui_preferences", { request: input }),
   createTask: (input: WorkItemDraft) =>
     invoke<Task>("create_task", { request: input }),
+  createTaskInBoardColumn: (input: WorkItemDraft, boardColumnId: string) =>
+    invoke<Task>("create_task_in_board_column", {
+      request: { task: input, boardColumnId },
+    }),
   createScheduledTask: (input: ScheduledTaskDraft) =>
     invoke<Task>("create_scheduled_task", { request: input }),
   createTaskList: (input: TaskListDraft) =>
@@ -105,6 +109,10 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   deleteBoardColumn: (columnId: string, moveTasksToColumnId: string) =>
     invoke<void>("delete_board_column", {
       request: { columnId, moveTasksToColumnId },
+    }),
+  deleteCompletedTasksInBoardColumn: (boardColumnId: string) =>
+    invoke<number>("delete_completed_tasks_in_board_column", {
+      request: { boardColumnId },
     }),
   moveTaskToBoardColumn: (taskId: string, boardColumnId: string) =>
     invoke<void>("move_task_to_board_column", {

@@ -226,6 +226,18 @@ pub fn create_task(
     repository.create_task(validate_work_item_draft(draft, clock.now_utc_iso8601())?)
 }
 
+pub fn create_task_in_board_column(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    draft: WorkItemDraft,
+    board_column_id: String,
+) -> RepositoryResult<TaskRecord> {
+    repository.create_task_in_board_column(
+        validate_work_item_draft(draft, clock.now_utc_iso8601())?,
+        validate_identifier(&board_column_id, "状態ID")?,
+    )
+}
+
 pub fn list_task_page(
     repository: &impl TaskReadRepository,
     draft: TaskPageDraft,
@@ -903,6 +915,15 @@ pub fn delete_task(
 ) -> RepositoryResult<()> {
     let task_id = validate_identifier(&task_id, "タスクID")?;
     repository.delete_task(task_id, clock.now_utc_iso8601())
+}
+
+pub fn delete_completed_tasks_in_board_column(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    board_column_id: String,
+) -> RepositoryResult<i64> {
+    let board_column_id = validate_identifier(&board_column_id, "状態ID")?;
+    repository.delete_completed_tasks_in_board_column(board_column_id, clock.now_utc_iso8601())
 }
 
 pub fn delete_subtask(

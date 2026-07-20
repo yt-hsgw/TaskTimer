@@ -78,6 +78,12 @@ try {
       document.querySelector(".left-navigation") &&
       document.querySelector(".task-row-content") &&
       document.querySelector(".global-search input") &&
+      document.querySelector('.nav-section-toggle[aria-expanded="true"]') &&
+      document.querySelector(".nav-list-add-button") &&
+      [...document.querySelectorAll('.nav-sections .nav-item')]
+        .slice(0, 2)
+        .map((button) => button.getAttribute("aria-label"))
+        .join(",") === "今日,お気に入り" &&
       document.querySelectorAll(".workspace-mode-switcher [role=tab]").length === 3 &&
       !document.querySelector('button.nav-item[aria-label="カレンダー"]') &&
       !document.querySelector('button.nav-item[aria-label="かんばん"]') &&
@@ -85,6 +91,38 @@ try {
       ![...document.querySelectorAll(".nav-section-heading")]
         .some((heading) => heading.textContent?.trim() === "タグ") &&
       !document.querySelector(".app-alert")
+    )`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".nav-section-toggle")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector('.nav-section-toggle[aria-expanded="false"]') &&
+      document.querySelector("#navigation-task-lists")?.hidden
+    )`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".nav-section-toggle")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector('.nav-section-toggle[aria-expanded="true"]') &&
+      !document.querySelector("#navigation-task-lists")?.hidden
     )`,
   );
   await client.send(
@@ -361,15 +399,53 @@ try {
       const board = document.querySelector(".kanban-board");
       const columns = [...document.querySelectorAll(".kanban-column")];
       const cards = [...document.querySelectorAll(".kanban-card")];
+      const handles = [...document.querySelectorAll(".kanban-column-drag-handle")];
       return Boolean(
         board &&
         columns.length === 2 &&
         cards.length === 3 &&
-        document.querySelectorAll(".kanban-drag-handle").length === 2 &&
+        handles.length === 2 &&
+        document.querySelectorAll(".kanban-column-add-task").length === 2 &&
+        document.querySelectorAll(".kanban-column-add-slot").length === 1 &&
+        document.querySelector(".kanban-column-add-trigger") &&
+        document.querySelectorAll(".kanban-column-menu-trigger").length === 2 &&
         document.querySelector(".kanban-card .task-check-button") &&
         !document.querySelector(".kanban-card-actions") &&
+        handles.every((handle, index) =>
+          Math.abs(
+            handle.getBoundingClientRect().width -
+            columns[index].getBoundingClientRect().width
+          ) <= 2
+        ) &&
         columns.every((column) => column.scrollWidth <= column.clientWidth + 1) &&
         cards.every((card) => card.scrollWidth <= card.clientWidth + 1)
+      );
+    })()`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".kanban-column-menu-trigger")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `(() => {
+      const menu = document.querySelector(".kanban-column-menu");
+      const labels = [...(menu?.querySelectorAll("button") ?? [])]
+        .map((button) => button.textContent?.trim());
+      return Boolean(
+        menu &&
+        labels.includes("タイトルを編集") &&
+        labels.some((label) => label?.startsWith("完了タスクを全件削除")) &&
+        labels.includes("既定順") &&
+        labels.includes("期限が近い順") &&
+        labels.includes("作成日の新しい順") &&
+        labels.includes("タイトル順") &&
+        labels.includes("状態を削除")
       );
     })()`,
   );
@@ -381,6 +457,47 @@ try {
   await writeFile(
     kanbanOutputPath,
     Buffer.from(kanbanScreenshot.data, "base64"),
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      )`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `!document.querySelector(".kanban-column-menu")`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelectorAll(".kanban-column-add-task")[1]?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `document.querySelector("#task-create-dialog-source")?.textContent === "状態: 進行中"`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector('.task-create-dialog-heading .inline-icon-button')?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.task-create-dialog')`,
   );
   await client.send(
     "Runtime.evaluate",
@@ -518,6 +635,30 @@ try {
     sessionId,
   );
   await writeFile(outputPath, Buffer.from(screenshot.data, "base64"));
+  await client.send(
+    "Emulation.setDeviceMetricsOverride",
+    {
+      width: 1024,
+      height: 768,
+      deviceScaleFactor: 1,
+      mobile: false,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `(() => {
+      const shell = document.querySelector(".app-shell");
+      const navigation = document.querySelector(".left-navigation");
+      return Boolean(
+        shell &&
+        navigation &&
+        document.documentElement.scrollWidth <= window.innerWidth + 1 &&
+        navigation.scrollWidth <= navigation.clientWidth + 1
+      );
+    })()`,
+  );
   await client.close();
   console.log(`README screenshot written: ${path.relative(repoRoot, outputPath)}`);
   console.log(

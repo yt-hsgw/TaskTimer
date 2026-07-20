@@ -1203,16 +1203,24 @@ export function App() {
   );
 
   const handleCreateTask = useCallback(
-    (input: WorkItemDraft) =>
+    (input: WorkItemDraft, boardColumnId?: string | null) =>
       runCreateTaskMutation(async () => {
-        await tauriTaskTimerGateway.createTask({
+        const draft = {
           ...input,
           listId:
             input.listId ??
             (workspaceScope.kind === "list"
               ? workspaceScope.listId
               : DEFAULT_TASK_LIST_ID),
-        });
+        };
+        if (boardColumnId) {
+          await tauriTaskTimerGateway.createTaskInBoardColumn(
+            draft,
+            boardColumnId,
+          );
+        } else {
+          await tauriTaskTimerGateway.createTask(draft);
+        }
       }, TASK_LIFECYCLE_REFRESH),
     [runCreateTaskMutation, workspaceScope],
   );
@@ -1228,12 +1236,21 @@ export function App() {
     [runCreateTaskMutation],
   );
 
-  const handleRequestTaskCreate = useCallback(() => {
-    setTaskCreateErrorMessage(null);
-    setTaskCreatePreset((current) =>
-      current ?? { ...defaultTaskCreatePreset },
-    );
-  }, [defaultTaskCreatePreset]);
+  const handleRequestTaskCreate = useCallback(
+    (boardColumnId?: string, boardColumnTitle?: string) => {
+      setTaskCreateErrorMessage(null);
+      setTaskCreatePreset((current) =>
+        current ?? {
+          ...defaultTaskCreatePreset,
+          sourceLabel: boardColumnTitle
+            ? `状態: ${boardColumnTitle}`
+            : defaultTaskCreatePreset.sourceLabel,
+          boardColumnId: boardColumnId ?? null,
+        },
+      );
+    },
+    [defaultTaskCreatePreset],
+  );
 
   const handleRequestScheduledTaskCreate = useCallback(
     ({ schedule, sourceLabel }: CalendarTaskCreatePreset) => {
@@ -1253,7 +1270,7 @@ export function App() {
   const handleSubmitTaskCreate = useCallback(
     (submission: TaskCreateSubmission) =>
       submission.kind === "standard"
-        ? handleCreateTask(submission.input)
+        ? handleCreateTask(submission.input, submission.boardColumnId)
         : handleCreateScheduledTask(submission.input),
     [handleCreateScheduledTask, handleCreateTask],
   );
@@ -1637,6 +1654,19 @@ export function App() {
       }, {
         scope: "board",
         refresh: { taskPage: true, boardColumns: true },
+      }),
+    [runMutation],
+  );
+
+  const handleDeleteCompletedBoardColumnTasks = useCallback(
+    (boardColumnId: string) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.deleteCompletedTasksInBoardColumn(
+          boardColumnId,
+        );
+      }, {
+        scope: "board",
+        ...TASK_LIFECYCLE_REFRESH,
       }),
     [runMutation],
   );
@@ -2310,6 +2340,7 @@ export function App() {
                 onRenameColumn={handleRenameBoardColumn}
                 onReorderColumns={handleReorderBoardColumns}
                 onDeleteColumn={handleDeleteBoardColumn}
+                onDeleteCompletedTasks={handleDeleteCompletedBoardColumnTasks}
                 onMoveTask={handleMoveTaskToBoardColumn}
                 onLoadMoreTasks={handleLoadMoreTasks}
               />

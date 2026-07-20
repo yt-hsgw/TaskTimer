@@ -758,6 +758,12 @@ pub trait BoardColumnRepository {
 pub trait TaskTimerCommandRepository {
     fn create_task(&self, input: WorkItemCreate) -> RepositoryResult<TaskRecord>;
 
+    fn create_task_in_board_column(
+        &self,
+        input: WorkItemCreate,
+        board_column_id: String,
+    ) -> RepositoryResult<TaskRecord>;
+
     fn create_scheduled_task(
         &self,
         input: WorkItemCreate,
@@ -829,6 +835,12 @@ pub trait TaskTimerCommandRepository {
     fn restore_archived_task(&self, task_id: String, now: String) -> RepositoryResult<TaskRecord>;
 
     fn delete_task(&self, task_id: String, now: String) -> RepositoryResult<()>;
+
+    fn delete_completed_tasks_in_board_column(
+        &self,
+        board_column_id: String,
+        now: String,
+    ) -> RepositoryResult<i64>;
 
     fn delete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<()>;
 }

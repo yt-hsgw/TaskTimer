@@ -1653,6 +1653,16 @@ impl TaskTimerCommandRepository for SqliteDatabase {
         self.with_transaction(|transaction| insert_task(transaction, input))
     }
 
+    fn create_task_in_board_column(
+        &self,
+        input: WorkItemCreate,
+        board_column_id: String,
+    ) -> RepositoryResult<TaskRecord> {
+        self.with_transaction(|transaction| {
+            insert_task_in_board_column(transaction, input, Some(&board_column_id))
+        })
+    }
+
     fn create_scheduled_task(
         &self,
         input: WorkItemCreate,
@@ -2131,6 +2141,42 @@ impl TaskTimerCommandRepository for SqliteDatabase {
         })
     }
 
+    fn delete_completed_tasks_in_board_column(
+        &self,
+        board_column_id: String,
+        now: String,
+    ) -> RepositoryResult<i64> {
+        self.with_transaction(|transaction| {
+            ensure_board_column_exists(transaction, &board_column_id)?;
+            let task_ids = {
+                let mut statement = transaction
+                    .prepare(
+                        "
+                        SELECT id
+                        FROM tasks
+                        WHERE board_column_id = ?1
+                          AND lifecycle_status = 'done'
+                          AND deleted_at IS NULL
+                        ORDER BY id
+                        ",
+                    )
+                    .map_err(|error| format!("状態内の完了タスクを準備できません: {error}"))?;
+                let task_ids = statement
+                    .query_map(params![board_column_id], |row| row.get::<_, String>(0))
+                    .map_err(|error| format!("状態内の完了タスクを取得できません: {error}"))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| format!("状態内の完了タスクを読み込めません: {error}"))?;
+                task_ids
+            };
+
+            for task_id in &task_ids {
+                soft_delete_task_graph(transaction, task_id, &now)?;
+            }
+
+            Ok(task_ids.len() as i64)
+        })
+    }
+
     fn delete_subtask(&self, subtask_id: String, now: String) -> RepositoryResult<()> {
         self.with_transaction(|transaction| {
             ensure_subtask_exists(transaction, &subtask_id)?;
@@ -2555,12 +2601,25 @@ fn insert_task(
     transaction: &Transaction<'_>,
     input: WorkItemCreate,
 ) -> RepositoryResult<TaskRecord> {
+    insert_task_in_board_column(transaction, input, None)
+}
+
+fn insert_task_in_board_column(
+    transaction: &Transaction<'_>,
+    input: WorkItemCreate,
+    requested_board_column_id: Option<&str>,
+) -> RepositoryResult<TaskRecord> {
     let id = Uuid::new_v4().to_string();
     ensure_default_task_list(transaction, &input.now)?;
     ensure_task_list_exists(transaction, &input.list_id)?;
     ensure_default_board_columns(transaction, &input.now)?;
-    let board_column_id =
-        select_preferred_active_board_column_id(transaction, DEFAULT_BOARD_COLUMN_ID)?;
+    let board_column_id = match requested_board_column_id {
+        Some(column_id) => {
+            ensure_board_column_exists(transaction, column_id)?;
+            column_id.to_string()
+        }
+        None => select_preferred_active_board_column_id(transaction, DEFAULT_BOARD_COLUMN_ID)?,
+    };
     let sort_order = next_task_sort_order(transaction, &input.list_id)?;
     let planned_start_date = input.planned_start_date.clone();
     let due_date = input.due_date.clone();
@@ -13987,6 +14046,247 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].status, WorkStatus::InProgress);
         assert_eq!(rows[0].completed_at, None);
+    }
+
+    #[test]
+    fn create_task_in_board_column_is_transactional() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-18T00:00:00Z",
+        };
+        let review = usecases::create_board_column(
+            &database,
+            &clock,
+            usecases::BoardColumnDraft {
+                title: "レビュー".to_string(),
+            },
+        )
+        .expect("create review column");
+
+        let task = usecases::create_task_in_board_column(
+            &database,
+            &clock,
+            draft("列指定タスク"),
+            review.id.clone(),
+        )
+        .expect("create task in review column");
+        let persisted_column_id: String = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT board_column_id FROM tasks WHERE id = ?1",
+                        params![task.id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| format!("task board column: {error}"))
+            })
+            .expect("task board column");
+        assert_eq!(persisted_column_id, review.id);
+
+        usecases::delete_board_column(
+            &database,
+            &clock,
+            review.id.clone(),
+            DEFAULT_BOARD_COLUMN_ID.to_string(),
+        )
+        .expect("delete review column");
+
+        let before_count = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("rows before failure")
+            .len();
+        let rejected = usecases::create_task_in_board_column(
+            &database,
+            &clock,
+            draft("保存されないタスク"),
+            review.id,
+        );
+        assert!(rejected.expect_err("deleted column").contains("状態"));
+        let after_count = database
+            .list_task_rows(Some(DEFAULT_TASK_LIST_ID), 200)
+            .expect("rows after failure")
+            .len();
+        assert_eq!(after_count, before_count);
+    }
+
+    #[test]
+    fn delete_completed_tasks_in_board_column_soft_deletes_only_matching_graphs() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-18T00:00:00Z",
+        };
+        let review = usecases::create_board_column(
+            &database,
+            &clock,
+            usecases::BoardColumnDraft {
+                title: "レビュー".to_string(),
+            },
+        )
+        .expect("create review column");
+        let completed_review_task = usecases::create_task_in_board_column(
+            &database,
+            &clock,
+            draft("削除する完了タスク"),
+            review.id.clone(),
+        )
+        .expect("create completed review task");
+        let child = usecases::create_subtask(
+            &database,
+            &clock,
+            completed_review_task.id.clone(),
+            draft("一緒に削除するサブタスク"),
+        )
+        .expect("create child");
+        usecases::complete_task(&database, &clock, completed_review_task.id.clone(), true)
+            .expect("complete review task");
+        let active_review_task = usecases::create_task_in_board_column(
+            &database,
+            &clock,
+            draft("残す未完了タスク"),
+            review.id.clone(),
+        )
+        .expect("create active review task");
+        let completed_default_task =
+            usecases::create_task(&database, &clock, draft("別列の完了タスク"))
+                .expect("create default task");
+        usecases::complete_task(&database, &clock, completed_default_task.id.clone(), false)
+            .expect("complete default task");
+
+        let deleted_count =
+            usecases::delete_completed_tasks_in_board_column(&database, &clock, review.id.clone())
+                .expect("delete completed review tasks");
+
+        let deletion_states: (bool, bool, bool, bool) = database
+            .with_connection(|connection| {
+                let task_deleted = connection
+                    .query_row(
+                        "SELECT deleted_at IS NOT NULL FROM tasks WHERE id = ?1",
+                        params![completed_review_task.id],
+                        |row| row.get(0),
+                    )
+                    .expect("completed task deletion state");
+                let child_deleted = connection
+                    .query_row(
+                        "SELECT deleted_at IS NOT NULL FROM subtasks WHERE id = ?1",
+                        params![child.id],
+                        |row| row.get(0),
+                    )
+                    .expect("child deletion state");
+                let active_deleted = connection
+                    .query_row(
+                        "SELECT deleted_at IS NOT NULL FROM tasks WHERE id = ?1",
+                        params![active_review_task.id],
+                        |row| row.get(0),
+                    )
+                    .expect("active task deletion state");
+                let other_column_deleted = connection
+                    .query_row(
+                        "SELECT deleted_at IS NOT NULL FROM tasks WHERE id = ?1",
+                        params![completed_default_task.id],
+                        |row| row.get(0),
+                    )
+                    .expect("other task deletion state");
+                Ok((
+                    task_deleted,
+                    child_deleted,
+                    active_deleted,
+                    other_column_deleted,
+                ))
+            })
+            .expect("deletion states");
+
+        assert_eq!(deleted_count, 1);
+        assert_eq!(deletion_states, (true, true, false, false));
+        let columns = database.list_board_columns().expect("board columns");
+        let review_after = columns
+            .iter()
+            .find(|column| column.id == review.id)
+            .expect("review column remains");
+        assert_eq!(review_after.active_task_count, 1);
+        assert_eq!(review_after.completed_task_count, 0);
+    }
+
+    #[test]
+    fn delete_completed_tasks_in_board_column_rolls_back_on_graph_failure() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-18T00:00:00Z",
+        };
+        let review = usecases::create_board_column(
+            &database,
+            &clock,
+            usecases::BoardColumnDraft {
+                title: "レビュー".to_string(),
+            },
+        )
+        .expect("create review column");
+        let first = usecases::create_task_in_board_column(
+            &database,
+            &clock,
+            draft("最初の完了タスク"),
+            review.id.clone(),
+        )
+        .expect("create first task");
+        let second = usecases::create_task_in_board_column(
+            &database,
+            &clock,
+            draft("失敗させる完了タスク"),
+            review.id.clone(),
+        )
+        .expect("create second task");
+        usecases::complete_task(&database, &clock, first.id.clone(), false)
+            .expect("complete first task");
+        usecases::complete_task(&database, &clock, second.id.clone(), false)
+            .expect("complete second task");
+        let failure_target_id = if first.id > second.id {
+            first.id.clone()
+        } else {
+            second.id.clone()
+        };
+        database
+            .with_connection(|connection| {
+                connection
+                    .execute_batch(
+                        "
+                        CREATE TABLE bulk_delete_failure_target (
+                          id TEXT PRIMARY KEY
+                        );
+                        CREATE TRIGGER fail_completed_task_bulk_delete
+                        BEFORE UPDATE OF deleted_at ON tasks
+                        WHEN OLD.id = (SELECT id FROM bulk_delete_failure_target)
+                          AND NEW.deleted_at IS NOT NULL
+                        BEGIN
+                          SELECT RAISE(ABORT, 'forced bulk delete failure');
+                        END;
+                        ",
+                    )
+                    .map_err(|error| format!("create failure trigger: {error}"))?;
+                connection
+                    .execute(
+                        "INSERT INTO bulk_delete_failure_target (id) VALUES (?1)",
+                        params![failure_target_id],
+                    )
+                    .map(|_| ())
+                    .map_err(|error| format!("store failure target: {error}"))
+            })
+            .expect("create failure trigger");
+
+        let error = usecases::delete_completed_tasks_in_board_column(&database, &clock, review.id)
+            .expect_err("bulk delete must fail");
+        let deleted_count: i64 = database
+            .with_connection(|connection| {
+                connection
+                    .query_row(
+                        "SELECT COUNT(*) FROM tasks WHERE id IN (?1, ?2) AND deleted_at IS NOT NULL",
+                        params![first.id, second.id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|query_error| format!("count deleted tasks: {query_error}"))
+            })
+            .expect("deleted count");
+
+        assert!(error.contains("タスクを削除できません"));
+        assert_eq!(deleted_count, 0);
     }
 
     #[test]
