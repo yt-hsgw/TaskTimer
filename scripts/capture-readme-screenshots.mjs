@@ -786,6 +786,13 @@ function buildTauriInvokeMockSource() {
       status: "in_progress",
       isFavorite: true,
       colorToken: "blue",
+      schedule: {
+        startDate: "2026-07-06",
+        startTime: "09:00",
+        endDate: "2026-07-06",
+        endTime: "11:30",
+        isAllDay: false
+      },
       plannedStartDate: "2026-07-06",
       dueDate: "2026-07-10",
       dueTime: "16:00",
@@ -842,6 +849,7 @@ function buildTauriInvokeMockSource() {
       status: "todo",
       isFavorite: false,
       colorToken: null,
+      schedule: null,
       plannedStartDate: "2026-07-09",
       dueDate: "2026-07-10",
       dueTime: null,
@@ -863,6 +871,7 @@ function buildTauriInvokeMockSource() {
       status: "done",
       isFavorite: false,
       colorToken: null,
+      schedule: null,
       plannedStartDate: null,
       dueDate: null,
       dueTime: null,
@@ -949,6 +958,13 @@ function buildTauriInvokeMockSource() {
       title: "週次レビュー資料を作成",
       status: "in_progress",
       isFavorite: true,
+      schedule: {
+        startDate: "2026-07-06",
+        startTime: "09:00",
+        endDate: "2026-07-06",
+        endTime: "11:30",
+        isAllDay: false
+      },
       plannedStartDate: "2026-07-06",
       dueDate: "2026-07-10",
       dueTime: "16:00",
@@ -970,6 +986,7 @@ function buildTauriInvokeMockSource() {
       title: "リリース前チェック",
       status: "todo",
       isFavorite: false,
+      schedule: null,
       plannedStartDate: "2026-07-09",
       dueDate: "2026-07-10",
       dueTime: null,
@@ -991,6 +1008,7 @@ function buildTauriInvokeMockSource() {
       title: "設計メモを整理",
       status: "done",
       isFavorite: false,
+      schedule: null,
       plannedStartDate: null,
       dueDate: null,
       dueTime: null,
@@ -1083,15 +1101,16 @@ function buildTauriInvokeMockSource() {
     invoke(command, args = {}) {
       const rangeStart =
         args.request?.startDate ?? args.startDate ?? args.weekStartDate ?? "2026-07-06";
+      const calendarBase = args.request?.todayDate ?? rangeStart;
       const calendarItems = [
         {
           id: "cal-review-scheduled",
           target: { type: "task", id: "task-weekly-review" },
           title: "週次レビュー資料を作成",
           parentTitle: null,
-          date: addDays(rangeStart, 0),
+          date: addDays(calendarBase, 0),
           time: "09:00",
-          endDate: addDays(rangeStart, 0),
+          endDate: addDays(calendarBase, 0),
           endTime: "11:30",
           isAllDay: false,
           marker: "scheduled",
@@ -1104,7 +1123,7 @@ function buildTauriInvokeMockSource() {
           target: { type: "task", id: "task-weekly-review" },
           title: "週次レビュー資料を作成",
           parentTitle: null,
-          date: addDays(rangeStart, 0),
+          date: addDays(calendarBase, 0),
           time: null,
           endDate: null,
           endTime: null,
@@ -1119,7 +1138,7 @@ function buildTauriInvokeMockSource() {
           target: { type: "subtask", id: "subtask-summary" },
           title: "要点を3つにまとめる",
           parentTitle: "週次レビュー資料を作成",
-          date: addDays(rangeStart, 2),
+          date: addDays(calendarBase, 2),
           time: "10:15",
           endDate: null,
           endTime: null,
@@ -1134,7 +1153,7 @@ function buildTauriInvokeMockSource() {
           target: { type: "task", id: "task-release-check" },
           title: "リリース前チェック",
           parentTitle: null,
-          date: addDays(rangeStart, 4),
+          date: addDays(calendarBase, 4),
           time: null,
           endDate: null,
           endTime: null,
@@ -1242,7 +1261,17 @@ function buildTauriInvokeMockSource() {
           failed: 0,
           lastError: null
         }),
-        resize_scheduled_work_item: () => null
+        resize_scheduled_work_item: () => null,
+        assign_work_schedule: () => {
+          const task = tasks.find((candidate) => candidate.id === args.request?.taskId);
+          const row = taskRows.find((candidate) => candidate.id === args.request?.taskId);
+          if (!task || !row || row.schedule) {
+            throw new Error("予定を設定できません");
+          }
+          task.schedule = clone(args.request.schedule);
+          row.schedule = clone(args.request.schedule);
+          return null;
+        }
       };
       const handler = commands[command];
       if (!handler) {

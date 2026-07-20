@@ -6,8 +6,11 @@ import type {
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { GripHorizontal, GripVertical, X } from "lucide-react";
+import { CalendarClock, GripHorizontal, GripVertical, X } from "lucide-react";
 import type {
+  TaskListItem,
+  TaskRow,
+  TaskWithSubtasks,
   WeekCalendarItem,
   WorkScheduleDraft,
   WorkScheduleMoveDraft,
@@ -15,6 +18,7 @@ import type {
 import type { WorkTargetRef } from "../../domain/task/types";
 import { usePresentationRenderProbe } from "../renderProbe";
 import type { CalendarTaskCreatePreset } from "../taskCreate";
+import { ScheduleAssignmentDialog } from "./ScheduleAssignmentDialog";
 
 export type CalendarViewMode = "week" | "day" | "month";
 
@@ -22,6 +26,9 @@ type WeekCalendarProps = {
   viewMode: CalendarViewMode;
   anchorDate: string;
   items: WeekCalendarItem[];
+  tasks: TaskWithSubtasks[];
+  taskRows: TaskRow[];
+  taskLists: TaskListItem[];
   isLoading: boolean;
   isTaskCreateOpen: boolean;
   isReschedulingItem: boolean;
@@ -31,6 +38,7 @@ type WeekCalendarProps = {
   onNextRange(): void;
   onToday(): void;
   onSelectItem(item: WeekCalendarItem): void;
+  onSelectTask(taskId: string): void;
   onRequestCreateTask(preset: CalendarTaskCreatePreset): void;
   onRescheduleItem(
     item: WeekCalendarItem,
@@ -44,6 +52,10 @@ type WeekCalendarProps = {
   onMoveScheduledItem(
     item: WeekCalendarItem,
     destination: WorkScheduleMoveDraft,
+  ): Promise<boolean>;
+  onAssignWorkSchedule(
+    taskId: string,
+    schedule: WorkScheduleDraft,
   ): Promise<boolean>;
 };
 
@@ -136,6 +148,7 @@ type TimedCalendarLayout = {
 };
 const RESIZE_PREVIEW_ID_SUFFIX = ":resize-preview";
 const MOVE_PREVIEW_ID_SUFFIX = ":move-preview";
+const ASSIGNMENT_PREVIEW_ID_SUFFIX = ":assignment-preview";
 const CALENDAR_VISIBLE_ITEM_LIMIT = 3;
 const CREATE_SELECTION_DRAG_THRESHOLD = 6;
 
@@ -143,6 +156,9 @@ export function WeekCalendar({
   viewMode,
   anchorDate,
   items,
+  tasks,
+  taskRows,
+  taskLists,
   isLoading,
   isTaskCreateOpen,
   isReschedulingItem,
@@ -152,10 +168,12 @@ export function WeekCalendar({
   onNextRange,
   onToday,
   onSelectItem,
+  onSelectTask,
   onRequestCreateTask,
   onRescheduleItem,
   onResizeItem: persistResizeItem,
   onMoveScheduledItem,
+  onAssignWorkSchedule,
 }: WeekCalendarProps) {
   usePresentationRenderProbe("WeekCalendar");
   const calendarPanelRef = useRef<HTMLElement>(null);
@@ -164,11 +182,54 @@ export function WeekCalendar({
   const [createSelection, setCreateSelection] =
     useState<CalendarCreateSelection | null>(null);
   const [draggedItem, setDraggedItem] = useState<WeekCalendarItem | null>(null);
+  const [draggedUnscheduledTaskId, setDraggedUnscheduledTaskId] = useState<
+    string | null
+  >(null);
+  const [assignmentPreview, setAssignmentPreview] =
+    useState<WorkScheduleDraft | null>(null);
+  const [scheduleDialogTask, setScheduleDialogTask] = useState<TaskRow | null>(
+    null,
+  );
+  const [assigningTaskId, setAssigningTaskId] = useState<string | null>(null);
+  const [isUnscheduledOpen, setIsUnscheduledOpen] = useState(false);
+  const suppressTaskClickRef = useRef<string | null>(null);
   const [dropTarget, setDropTarget] = useState<CalendarDropTarget | null>(null);
   const [pendingMove, setPendingMove] = useState<PendingCalendarMove | null>(null);
   const [resizePreview, setResizePreview] = useState<WeekCalendarItem | null>(null);
   const [overflowPopup, setOverflowPopup] =
     useState<CalendarOverflowPopupState | null>(null);
+  const unscheduledRows = useMemo(
+    () => taskRows.filter((row) => row.schedule === null),
+    [taskRows],
+  );
+  const assignmentPreviewItem = useMemo(() => {
+    if (!draggedUnscheduledTaskId || !assignmentPreview) {
+      return null;
+    }
+    const row = taskRows.find((candidate) => candidate.id === draggedUnscheduledTaskId);
+    if (!row) {
+      return null;
+    }
+    const task = tasks.find((candidate) => candidate.id === row.id);
+    const listColor =
+      taskLists.find((candidate) => candidate.id === row.listId)?.colorToken ??
+      "green";
+    return {
+      id: `task:${row.id}${ASSIGNMENT_PREVIEW_ID_SUFFIX}`,
+      target: { type: "task" as const, id: row.id },
+      title: row.title,
+      parentTitle: null,
+      date: assignmentPreview.startDate,
+      time: assignmentPreview.startTime,
+      endDate: assignmentPreview.endDate,
+      endTime: assignmentPreview.endTime,
+      isAllDay: assignmentPreview.isAllDay,
+      marker: "scheduled" as const,
+      status: row.status,
+      colorToken: task?.colorToken ?? listColor,
+      listColorToken: listColor,
+    } satisfies WeekCalendarItem;
+  }, [assignmentPreview, draggedUnscheduledTaskId, taskLists, taskRows, tasks]);
   const displayItems = useMemo(
     () => {
       const committedItems = pendingMove
@@ -193,12 +254,20 @@ export function WeekCalendar({
               id: `${movePreview.id}${MOVE_PREVIEW_ID_SUFFIX}`,
             }
           : null,
+        assignmentPreviewItem,
       ].filter((item): item is WeekCalendarItem => item !== null);
       return previewItems.length > 0
         ? [...committedItems, ...previewItems]
         : committedItems;
     },
-    [draggedItem, dropTarget, items, pendingMove, resizePreview],
+    [
+      assignmentPreviewItem,
+      draggedItem,
+      dropTarget,
+      items,
+      pendingMove,
+      resizePreview,
+    ],
   );
   const rangeDays = useMemo(
     () =>
@@ -242,6 +311,10 @@ export function WeekCalendar({
     clearCreateSelection();
     closeOverflowPopup(false);
   }, [anchorDate, viewMode]);
+
+  useEffect(() => {
+    setIsUnscheduledOpen(unscheduledRows.length > 0);
+  }, [unscheduledRows.length > 0]);
 
   useEffect(() => {
     const activePopup = overflowPopup;
@@ -596,13 +669,53 @@ export function WeekCalendar({
 
   function handleDragEnd() {
     setDraggedItem(null);
+    setDraggedUnscheduledTaskId(null);
+    setAssignmentPreview(null);
     setDropTarget(null);
+  }
+
+  function handleUnscheduledTaskDragStart(
+    row: TaskRow,
+    event: DragEvent<HTMLButtonElement>,
+  ) {
+    if (isReschedulingItem || assigningTaskId) {
+      event.preventDefault();
+      return;
+    }
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-tasktimer-unscheduled-task", row.id);
+    suppressTaskClickRef.current = row.id;
+    setDraggedUnscheduledTaskId(row.id);
+    setDraggedItem(null);
+  }
+
+  function handleUnscheduledTaskDragEnd() {
+    handleDragEnd();
+    window.setTimeout(() => {
+      suppressTaskClickRef.current = null;
+    }, 0);
   }
 
   function handleDragOver(
     target: CalendarDropTarget,
     event: DragEvent<HTMLElement>,
   ) {
+    if (draggedUnscheduledTaskId && !isReschedulingItem && !assigningTaskId) {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      const { target: resolvedTarget, schedule } =
+        resolveUnscheduledTaskDrop(target, event);
+      setDropTarget((current) =>
+        isSameCalendarDestination(current, resolvedTarget)
+          ? current
+          : resolvedTarget,
+      );
+      setAssignmentPreview((current) =>
+        current && isSameWorkSchedule(current, schedule) ? current : schedule,
+      );
+      return;
+    }
     if (!draggedItem || !canMoveCalendarItem(draggedItem) || isReschedulingItem) {
       return;
     }
@@ -632,12 +745,30 @@ export function WeekCalendar({
     setDropTarget((current) =>
       isSameDropTarget(current, target) ? null : current,
     );
+    if (draggedUnscheduledTaskId) {
+      setAssignmentPreview(null);
+    }
   }
 
   async function handleDrop(
     target: CalendarDropTarget,
     event: DragEvent<HTMLElement>,
   ) {
+    if (draggedUnscheduledTaskId && !isReschedulingItem && !assigningTaskId) {
+      event.preventDefault();
+      const taskId = draggedUnscheduledTaskId;
+      const { schedule } = resolveUnscheduledTaskDrop(target, event);
+      setDraggedUnscheduledTaskId(null);
+      setAssignmentPreview(null);
+      setDropTarget(null);
+      setAssigningTaskId(taskId);
+      try {
+        await onAssignWorkSchedule(taskId, schedule);
+      } finally {
+        setAssigningTaskId(null);
+      }
+      return;
+    }
     if (!draggedItem || !canMoveCalendarItem(draggedItem) || isReschedulingItem) {
       return;
     }
@@ -679,6 +810,18 @@ export function WeekCalendar({
         : null,
     );
     return saved;
+  }
+
+  async function submitScheduleDialog(
+    taskId: string,
+    schedule: WorkScheduleDraft,
+  ) {
+    setAssigningTaskId(taskId);
+    try {
+      return await onAssignWorkSchedule(taskId, schedule);
+    } finally {
+      setAssigningTaskId(null);
+    }
   }
 
   function previewScheduleResize(
@@ -815,6 +958,54 @@ export function WeekCalendar({
         </div>
       </div>
 
+      <details
+        className="calendar-unscheduled"
+        open={isUnscheduledOpen}
+        onToggle={(event) => setIsUnscheduledOpen(event.currentTarget.open)}
+      >
+        <summary>{`予定未設定 ${unscheduledRows.length}`}</summary>
+        {unscheduledRows.length > 0 ? (
+          <div className="calendar-unscheduled-list">
+            {unscheduledRows.map((row) => (
+              <div
+                className={
+                  draggedUnscheduledTaskId === row.id ? "is-dragging" : ""
+                }
+                key={row.id}
+              >
+                <button
+                  draggable={!isReschedulingItem && assigningTaskId === null}
+                  type="button"
+                  onClick={() => {
+                    if (suppressTaskClickRef.current !== row.id) {
+                      onSelectTask(row.id);
+                    }
+                  }}
+                  onDragEnd={handleUnscheduledTaskDragEnd}
+                  onDragStart={(event) =>
+                    handleUnscheduledTaskDragStart(row, event)
+                  }
+                >
+                  <GripVertical aria-hidden="true" size={14} />
+                  <span>{row.title}</span>
+                </button>
+                <button
+                  aria-label={`${row.title}の予定を入力して設定`}
+                  className="calendar-unscheduled-schedule-button"
+                  title="予定を入力して設定"
+                  type="button"
+                  onClick={() => setScheduleDialogTask(row)}
+                >
+                  <CalendarClock aria-hidden="true" size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p>予定未設定のタスクはありません。</p>
+        )}
+      </details>
+
       {viewMode === "month" ? (
         <MonthCalendar
           days={monthDays}
@@ -873,6 +1064,17 @@ export function WeekCalendar({
           }}
           onClose={() => closeOverflowPopup()}
           onSelectItem={selectOverflowItem}
+        />
+      ) : null}
+      {scheduleDialogTask ? (
+        <ScheduleAssignmentDialog
+          initialDate={anchorDate}
+          isPending={assigningTaskId === scheduleDialogTask.id}
+          task={scheduleDialogTask}
+          onClose={() => setScheduleDialogTask(null)}
+          onSubmit={(schedule) =>
+            submitScheduleDialog(scheduleDialogTask.id, schedule)
+          }
         />
       ) : null}
     </section>
@@ -2021,6 +2223,7 @@ function CalendarItemButton({
   const isCalendarPreview = previewKind !== null;
   const isResizePreview = previewKind === "resize";
   const isMovePreview = previewKind === "move";
+  const isAssignmentPreview = previewKind === "assignment";
   const isSelected =
     !isCalendarPreview && isSameTarget(item.target, selectedTarget);
   const isDraggable =
@@ -2070,6 +2273,8 @@ function CalendarItemButton({
       } ${isCalendarPreview ? "is-calendar-preview" : ""} ${
         isResizePreview ? "is-resize-preview" : ""
       } ${isMovePreview ? "is-move-preview" : ""} ${
+        isAssignmentPreview ? "is-assignment-preview" : ""
+      } ${
         rangeSegment ? "is-scheduled-range" : ""
       } ${
         rangeSegment?.connectsBefore ? "connects-before" : ""
@@ -2119,7 +2324,11 @@ function CalendarItemButton({
         {isCalendarPreview &&
         (!rangeSegment || rangeSegment.showsContent) ? (
           <span className="calendar-preview-label">
-            {isMovePreview ? "移動後" : "変更後"}
+            {isMovePreview
+              ? "移動後"
+              : isAssignmentPreview
+                ? "設定後"
+                : "変更後"}
           </span>
         ) : null}
         {rangeSegment ? (
@@ -2159,12 +2368,17 @@ function CalendarItemButton({
   );
 }
 
-function getCalendarPreviewKind(itemId: string): "resize" | "move" | null {
+function getCalendarPreviewKind(
+  itemId: string,
+): "resize" | "move" | "assignment" | null {
   if (itemId.endsWith(RESIZE_PREVIEW_ID_SUFFIX)) {
     return "resize";
   }
   if (itemId.endsWith(MOVE_PREVIEW_ID_SUFFIX)) {
     return "move";
+  }
+  if (itemId.endsWith(ASSIGNMENT_PREVIEW_ID_SUFFIX)) {
+    return "assignment";
   }
   return null;
 }
@@ -2757,6 +2971,61 @@ function resolveCalendarDropTarget(
     minuteOffset,
   );
   return { dueDate: destination.date, dueTime: destination.time, zoneId };
+}
+
+function resolveUnscheduledTaskDrop(
+  zone: CalendarDropTarget,
+  event: DragEvent<HTMLElement>,
+): { target: CalendarDropTarget; schedule: WorkScheduleDraft } {
+  const zoneId = getDropZoneId(zone);
+  if (!zone.dueTime) {
+    return {
+      target: { dueDate: zone.dueDate, dueTime: null, zoneId },
+      schedule: {
+        startDate: zone.dueDate,
+        startTime: null,
+        endDate: zone.dueDate,
+        endTime: null,
+        isAllDay: true,
+      },
+    };
+  }
+
+  const bounds = event.currentTarget.getBoundingClientRect();
+  const relativeY = Math.max(
+    0,
+    Math.min(0.999, (event.clientY - bounds.top) / Math.max(bounds.height, 1)),
+  );
+  const minuteOffset = Math.min(45, Math.floor(relativeY * 4) * 15);
+  const start = addMinutesToLocalDateTime(
+    zone.dueDate,
+    zone.dueTime,
+    minuteOffset,
+  );
+  const end = addMinutesToLocalDateTime(start.date, start.time, 60);
+  return {
+    target: { dueDate: start.date, dueTime: start.time, zoneId },
+    schedule: {
+      startDate: start.date,
+      startTime: start.time,
+      endDate: end.date,
+      endTime: end.time,
+      isAllDay: false,
+    },
+  };
+}
+
+function isSameWorkSchedule(
+  left: WorkScheduleDraft,
+  right: WorkScheduleDraft,
+) {
+  return (
+    left.startDate === right.startDate &&
+    left.startTime === right.startTime &&
+    left.endDate === right.endDate &&
+    left.endTime === right.endTime &&
+    left.isAllDay === right.isAllDay
+  );
 }
 
 function moveCalendarItemPreview(

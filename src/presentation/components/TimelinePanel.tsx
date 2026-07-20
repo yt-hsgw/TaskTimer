@@ -1,12 +1,15 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { CalendarClock, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { DragEvent } from "react";
 import type {
   TaskListItem,
   TaskRow,
   TaskWithSubtasks,
+  WorkScheduleDraft,
 } from "../../application/usecases/contracts";
 import type { TaskColorToken } from "../../domain/task/types";
 import { usePresentationRenderProbe } from "../renderProbe";
+import { ScheduleAssignmentDialog } from "./ScheduleAssignmentDialog";
 
 const DAY_MS = 86_400_000;
 const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -28,6 +31,10 @@ type TimelinePanelProps = {
   hasMoreTasks: boolean;
   onSelectTask(taskId: string): void;
   onLoadMoreTasks(): Promise<void>;
+  onAssignWorkSchedule(
+    taskId: string,
+    schedule: WorkScheduleDraft,
+  ): Promise<boolean>;
 };
 
 type TimelineColumn = {
@@ -63,12 +70,22 @@ export function TimelinePanel({
   hasMoreTasks,
   onSelectTask,
   onLoadMoreTasks,
+  onAssignWorkSchedule,
 }: TimelinePanelProps) {
   usePresentationRenderProbe("TimelinePanel");
   const normalizedToday = parseDate(todayDate) ?? currentEpochDay();
   const [scale, setScale] = useState<TimelineScale>("week");
   const [anchorDay, setAnchorDay] = useState(normalizedToday);
   const [isUnscheduledOpen, setIsUnscheduledOpen] = useState(false);
+  const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+  const [assignmentPreviewDay, setAssignmentPreviewDay] = useState<number | null>(
+    null,
+  );
+  const [scheduleDialogTask, setScheduleDialogTask] = useState<TaskRow | null>(
+    null,
+  );
+  const [assigningTaskId, setAssigningTaskId] = useState<string | null>(null);
+  const suppressTaskClickRef = useRef<string | null>(null);
   const { columns, columnWidth, rangeLabel } = useMemo(
     () => createTimelineWindow(scale, anchorDay),
     [anchorDay, scale],
@@ -89,14 +106,18 @@ export function TimelinePanel({
     let outside = 0;
 
     taskRows.forEach((row) => {
+      if (!row.schedule) {
+        unscheduled.push(row);
+      }
+      const scheduleStart = parseDate(row.schedule?.startDate);
+      const scheduleEnd = parseDate(row.schedule?.endDate);
       const plannedStart = parseDate(row.plannedStartDate);
       const due = parseDate(row.dueDate);
-      if (plannedStart === null && due === null) {
-        unscheduled.push(row);
+      const firstDay = scheduleStart ?? plannedStart ?? due;
+      if (firstDay === null) {
         return;
       }
-      const firstDay = plannedStart ?? due ?? rangeStart;
-      const lastDay = due ?? plannedStart ?? firstDay;
+      const lastDay = scheduleEnd ?? due ?? plannedStart ?? firstDay;
       const startDay = Math.min(firstDay, lastDay);
       const endDay = Math.max(firstDay, lastDay);
       if (endDay < rangeStart || startDay >= rangeEnd) {
@@ -134,6 +155,72 @@ export function TimelinePanel({
   const moveRange = (direction: -1 | 1) => {
     setAnchorDay((current) => moveAnchor(current, scale, direction));
   };
+
+  function handleUnscheduledDragStart(
+    row: TaskRow,
+    event: DragEvent<HTMLButtonElement>,
+  ) {
+    if (assigningTaskId) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-tasktimer-unscheduled-task", row.id);
+    suppressTaskClickRef.current = row.id;
+    setDraggedTaskId(row.id);
+  }
+
+  function handleUnscheduledDragEnd() {
+    setDraggedTaskId(null);
+    setAssignmentPreviewDay(null);
+    window.setTimeout(() => {
+      suppressTaskClickRef.current = null;
+    }, 0);
+  }
+
+  function handleAxisDragOver(
+    column: TimelineColumn,
+    event: DragEvent<HTMLDivElement>,
+  ) {
+    if (!draggedTaskId || assigningTaskId) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setAssignmentPreviewDay(resolveTimelineDropDay(column, event));
+  }
+
+  async function handleAxisDrop(
+    column: TimelineColumn,
+    event: DragEvent<HTMLDivElement>,
+  ) {
+    const taskId = draggedTaskId;
+    if (!taskId || assigningTaskId) {
+      return;
+    }
+    event.preventDefault();
+    const day = resolveTimelineDropDay(column, event);
+    setDraggedTaskId(null);
+    setAssignmentPreviewDay(null);
+    setAssigningTaskId(taskId);
+    try {
+      await onAssignWorkSchedule(taskId, createAllDaySchedule(formatDate(day)));
+    } finally {
+      setAssigningTaskId(null);
+    }
+  }
+
+  async function submitScheduleDialog(
+    taskId: string,
+    schedule: WorkScheduleDraft,
+  ) {
+    setAssigningTaskId(taskId);
+    try {
+      return await onAssignWorkSchedule(taskId, schedule);
+    } finally {
+      setAssigningTaskId(null);
+    }
+  }
 
   return (
     <section className="panel timeline-panel" aria-labelledby="timeline-title">
@@ -221,12 +308,27 @@ export function TimelinePanel({
                   normalizedToday < column.endDay;
                 return (
                   <div
-                    className={isToday ? "is-today" : ""}
+                    className={`${isToday ? "is-today" : ""} ${
+                      assignmentPreviewDay !== null &&
+                      assignmentPreviewDay >= column.startDay &&
+                      assignmentPreviewDay < column.endDay
+                        ? "is-assignment-target"
+                        : ""
+                    }`}
                     role="columnheader"
                     key={column.key}
+                    onDragOver={(event) => handleAxisDragOver(column, event)}
+                    onDrop={(event) => void handleAxisDrop(column, event)}
                   >
                     <span>{column.label}</span>
                     {isToday ? <small>今日</small> : null}
+                    {assignmentPreviewDay !== null &&
+                    assignmentPreviewDay >= column.startDay &&
+                    assignmentPreviewDay < column.endDay ? (
+                      <span className="timeline-assignment-preview">
+                        {formatMonthDay(assignmentPreviewDay)}へ設定
+                      </span>
+                    ) : null}
                   </div>
                 );
               })}
@@ -314,23 +416,46 @@ export function TimelinePanel({
         open={isUnscheduledOpen}
         onToggle={(event) => setIsUnscheduledOpen(event.currentTarget.open)}
       >
-        <summary>{`日付未設定 ${unscheduledRows.length}`}</summary>
+        <summary>{`予定未設定 ${unscheduledRows.length}`}</summary>
         {unscheduledRows.length > 0 ? (
           <div className="timeline-unscheduled-list">
             {unscheduledRows.map((row) => (
-              <button
-                type="button"
-                className={selectedTaskId === row.id ? "is-selected" : ""}
+              <div
+                className={`timeline-unscheduled-item ${
+                  draggedTaskId === row.id ? "is-dragging" : ""
+                }`}
                 key={row.id}
-                onClick={() => onSelectTask(row.id)}
               >
-                <span>{row.title}</span>
-                <small>{statusLabel(row.status)}</small>
-              </button>
+                <button
+                  draggable={assigningTaskId === null}
+                  type="button"
+                  className={selectedTaskId === row.id ? "is-selected" : ""}
+                  onClick={() => {
+                    if (suppressTaskClickRef.current !== row.id) {
+                      onSelectTask(row.id);
+                    }
+                  }}
+                  onDragEnd={handleUnscheduledDragEnd}
+                  onDragStart={(event) => handleUnscheduledDragStart(row, event)}
+                >
+                  <GripVertical aria-hidden="true" size={14} />
+                  <span>{row.title}</span>
+                  <small>{statusLabel(row.status)}</small>
+                </button>
+                <button
+                  aria-label={`${row.title}の予定を入力して設定`}
+                  className="timeline-schedule-button"
+                  title="予定を入力して設定"
+                  type="button"
+                  onClick={() => setScheduleDialogTask(row)}
+                >
+                  <CalendarClock aria-hidden="true" size={15} />
+                </button>
+              </div>
             ))}
           </div>
         ) : (
-          <p className="empty-state">日付未設定のタスクはありません。</p>
+          <p className="empty-state">予定未設定のタスクはありません。</p>
         )}
       </details>
 
@@ -346,7 +471,43 @@ export function TimelinePanel({
           </button>
         </div>
       ) : null}
+      {scheduleDialogTask ? (
+        <ScheduleAssignmentDialog
+          initialDate={formatDate(normalizedToday)}
+          isPending={assigningTaskId === scheduleDialogTask.id}
+          task={scheduleDialogTask}
+          onClose={() => setScheduleDialogTask(null)}
+          onSubmit={(schedule) =>
+            submitScheduleDialog(scheduleDialogTask.id, schedule)
+          }
+        />
+      ) : null}
     </section>
+  );
+}
+
+function createAllDaySchedule(date: string): WorkScheduleDraft {
+  return {
+    startDate: date,
+    startTime: null,
+    endDate: date,
+    endTime: null,
+    isAllDay: true,
+  };
+}
+
+function resolveTimelineDropDay(
+  column: TimelineColumn,
+  event: DragEvent<HTMLDivElement>,
+) {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  const ratio = Math.max(
+    0,
+    Math.min(0.999, (event.clientX - bounds.left) / Math.max(bounds.width, 1)),
+  );
+  return Math.min(
+    column.endDay - 1,
+    column.startDay + Math.floor((column.endDay - column.startDay) * ratio),
   );
 }
 

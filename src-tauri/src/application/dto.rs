@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::{
     notification::NotificationDisplayMode,
+    task::WorkSchedule,
     timer::{WorkTargetRef, WorkTargetType},
 };
 
@@ -71,6 +72,16 @@ pub struct WorkScheduleRequestDto {
     pub is_all_day: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkScheduleDto {
+    pub start_date: String,
+    pub start_time: Option<String>,
+    pub end_date: String,
+    pub end_time: Option<String>,
+    pub is_all_day: bool,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateScheduledTaskRequestDto {
@@ -84,6 +95,13 @@ pub struct CreateScheduledTaskRequestDto {
 #[serde(rename_all = "camelCase")]
 pub struct ResizeScheduledWorkItemRequestDto {
     pub target: WorkTargetRefDto,
+    pub schedule: WorkScheduleRequestDto,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignWorkScheduleRequestDto {
+    pub task_id: String,
     pub schedule: WorkScheduleRequestDto,
 }
 
@@ -492,6 +510,7 @@ pub struct TaskDto {
     pub status: String,
     pub is_favorite: bool,
     pub color_token: Option<String>,
+    pub schedule: Option<WorkScheduleDto>,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub due_time: Option<String>,
@@ -535,6 +554,7 @@ pub struct TaskWithSubtasksDto {
     pub status: String,
     pub is_favorite: bool,
     pub color_token: Option<String>,
+    pub schedule: Option<WorkScheduleDto>,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub due_time: Option<String>,
@@ -655,6 +675,7 @@ pub struct TaskRowDto {
     pub title: String,
     pub status: String,
     pub is_favorite: bool,
+    pub schedule: Option<WorkScheduleDto>,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub due_time: Option<String>,
@@ -1093,6 +1114,7 @@ impl From<TaskRecord> for TaskDto {
             status: value.status.as_str().to_string(),
             is_favorite: value.is_favorite,
             color_token: value.color_token,
+            schedule: value.schedule.map(Into::into),
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
             due_time: value.due_time,
@@ -1177,6 +1199,7 @@ impl From<TaskWithSubtasksRecord> for TaskWithSubtasksDto {
             status: value.task.status.as_str().to_string(),
             is_favorite: value.task.is_favorite,
             color_token: value.task.color_token,
+            schedule: value.task.schedule.map(Into::into),
             planned_start_date: value.task.planned_start_date,
             due_date: value.task.due_date,
             due_time: value.task.due_time,
@@ -1294,6 +1317,7 @@ impl From<TaskRowRecord> for TaskRowDto {
             title: value.title,
             status: value.status.as_str().to_string(),
             is_favorite: value.is_favorite,
+            schedule: value.schedule.map(Into::into),
             planned_start_date: value.planned_start_date,
             due_date: value.due_date,
             due_time: value.due_time,
@@ -1307,6 +1331,18 @@ impl From<TaskRowRecord> for TaskRowDto {
             active_timer_target,
             is_timer_active,
             tags: value.tags.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<WorkSchedule> for WorkScheduleDto {
+    fn from(value: WorkSchedule) -> Self {
+        Self {
+            start_date: value.start_date,
+            start_time: value.start_time,
+            end_date: value.end_date,
+            end_time: value.end_time,
+            is_all_day: value.is_all_day,
         }
     }
 }

@@ -572,6 +572,19 @@ pub fn resize_scheduled_work_item(
     )
 }
 
+pub fn assign_work_schedule(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    task_id: String,
+    schedule: WorkScheduleDraft,
+) -> RepositoryResult<()> {
+    let task_id = validate_identifier(&task_id, "タスクID")?;
+    repository.assign_work_schedule(
+        task_id,
+        validate_work_schedule_draft(schedule, clock.now_utc_iso8601())?,
+    )
+}
+
 pub fn move_scheduled_work_item(
     repository: &impl TaskTimerCommandRepository,
     clock: &impl Clock,

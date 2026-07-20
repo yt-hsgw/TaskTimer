@@ -76,6 +76,8 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [068 左ペインのリスト管理操作を縦三点メニューへ集約する](068-list-actions-overflow-menu.md) / GitHub #163
 - [069 今日ビューから開始予定日付きタスクを追加する](069-today-task-create.md)
 - [070 左ペインとカンバンの操作配置を整理する](070-navigation-kanban-action-layout.md) / GitHub #178
+- [071 日時未設定タスクをカレンダー／タイムラインへD&Dして予定化する](071-assign-unscheduled-work-schedule.md) / GitHub #181
+- [072 かんばんの未設定タスクをD&Dで予定化する](072-kanban-unscheduled-work-schedule.md) / GitHub #182
 
 ## 運用
 
