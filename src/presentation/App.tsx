@@ -22,6 +22,7 @@ import type {
   UiPreferences,
   WeekCalendarItem,
   WorkItemDraft,
+  WorkItemSearchResult,
   WorkItemUpdateDraft,
   WorkScheduleDraft,
   WorkScheduleMoveDraft,
@@ -43,8 +44,13 @@ import {
   SettingsPanel,
   type DataManagementActionResult,
 } from "./components/SettingsPanel";
-import { LeftNavigation, type AppView } from "./components/LeftNavigation";
+import {
+  LeftNavigation,
+  type AppView,
+  type WorkspaceScope,
+} from "./components/LeftNavigation";
 import { PomodoroPanel } from "./components/PomodoroPanel";
+import { GlobalSearch } from "./components/GlobalSearch";
 import { usePresentationRenderProbe } from "./renderProbe";
 
 const MemoizedWeekCalendar = memo(WeekCalendar);
@@ -54,6 +60,9 @@ const MemoizedTaskDetailPane = memo(TaskDetailPane);
 const MemoizedSettingsPanel = memo(SettingsPanel);
 const MemoizedLeftNavigation = memo(LeftNavigation);
 const MemoizedPomodoroPanel = memo(PomodoroPanel);
+const MemoizedGlobalSearch = memo(GlobalSearch);
+
+type WorkspaceMode = "list" | "board" | "calendar";
 
 type LoadSnapshotOptions = {
   showLoading?: boolean;
@@ -99,6 +108,11 @@ type TaskPageViewState = {
 const NOTIFICATION_SCHEDULER_MAX_TIMEOUT_MS = 60_000;
 const NOTIFICATION_SCHEDULER_DUE_DELAY_MS = 500;
 const TASK_PAGE_SIZE = 200;
+const workspaceModes: { value: WorkspaceMode; label: string }[] = [
+  { value: "list", label: "リスト" },
+  { value: "board", label: "かんばん" },
+  { value: "calendar", label: "カレンダー" },
+];
 const INITIAL_MUTATION_COUNTS: Record<MutationScope, number> = {
   navigation: 0,
   detail: 0,
@@ -151,6 +165,20 @@ export function App() {
     kind: "list",
     listId: DEFAULT_TASK_LIST_ID,
   });
+  const [workspaceScope, setWorkspaceScope] = useState<WorkspaceScope>({
+    kind: "list",
+    listId: DEFAULT_TASK_LIST_ID,
+  });
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("list");
+  const [selectedTaskOverride, setSelectedTaskOverride] =
+    useState<TaskWithSubtasks | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<WorkItemSearchResult[]>([]);
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchErrorMessage, setSearchErrorMessage] = useState<string | null>(
+    null,
+  );
   const [selectedCalendarTarget, setSelectedCalendarTarget] =
     useState<WorkTargetRef | null>(null);
   const [isNavigationOpen, setIsNavigationOpen] = useState(true);
@@ -209,11 +237,14 @@ export function App() {
   const boardColumnsInvalidationVersionRef = useRef(0);
   const loadedBoardColumnsInvalidationVersionRef = useRef(-1);
   const loadMoreRequestIdRef = useRef(0);
+  const searchRequestIdRef = useRef(0);
+  const selectedTaskOverrideRef = useRef(selectedTaskOverride);
   const activeViewRef = useRef(activeView);
   const refreshReadModelsRef = useRef<
     (plan: ReadModelRefreshPlan) => Promise<void>
   >(async () => undefined);
   activeViewRef.current = activeView;
+  selectedTaskOverrideRef.current = selectedTaskOverride;
 
   const isNavigationMutating = mutationCounts.navigation > 0;
   const isDetailMutating = mutationCounts.detail > 0;
@@ -234,8 +265,8 @@ export function App() {
   const todayDate = getTodayDateInputValue();
   const todayCount = taskNavigationCounts.todayCount;
   const taskPageScope = useMemo(
-    () => taskPageScopeFromView(activeView),
-    [activeView],
+    () => taskPageScopeFromWorkspaceScope(workspaceScope),
+    [workspaceScope],
   );
   const taskPageScopeKey = useMemo(
     () => serializeTaskPageScope(taskPageScope, todayDate),
@@ -243,24 +274,17 @@ export function App() {
   );
 
   const activeTaskList = useMemo(() => {
-    if (activeView.kind !== "list") {
+    if (workspaceScope.kind !== "list") {
       return null;
     }
-    return taskLists.find((list) => list.id === activeView.listId) ?? null;
-  }, [activeView, taskLists]);
-
-  const activeTag = useMemo(() => {
-    if (activeView.kind !== "tag") {
-      return null;
-    }
-    return tags.find((tag) => tag.id === activeView.tagId) ?? null;
-  }, [activeView, tags]);
+    return taskLists.find((list) => list.id === workspaceScope.listId) ?? null;
+  }, [taskLists, workspaceScope]);
 
   const calendarRange = useMemo(
     () => getCalendarQueryRange(calendarViewMode, calendarAnchorDate),
     [calendarAnchorDate, calendarViewMode],
   );
-  const calendarQueryKey = `${calendarRange.startDate}:${calendarRange.endDate}`;
+  const calendarQueryKey = `${calendarRange.startDate}:${calendarRange.endDate}:${taskPageScopeKey}`;
 
   const visibleTasks = tasks;
   const visibleTaskRows = taskRows;
@@ -269,8 +293,11 @@ export function App() {
     if (!selectedTaskId) {
       return null;
     }
-    return visibleTasks.find((task) => task.id === selectedTaskId) ?? null;
-  }, [selectedTaskId, visibleTasks]);
+    return (
+      visibleTasks.find((task) => task.id === selectedTaskId) ??
+      (selectedTaskOverride?.id === selectedTaskId ? selectedTaskOverride : null)
+    );
+  }, [selectedTaskId, selectedTaskOverride, visibleTasks]);
 
   const selectedSubtask = useMemo(() => {
     if (!selectedSubtaskId) {
@@ -363,6 +390,8 @@ export function App() {
         const nextItems = await tauriTaskTimerGateway.listCalendarItems(
           calendarRange.startDate,
           calendarRange.endDate,
+          taskPageScope,
+          todayDate,
         );
         if (requestId === calendarRequestIdRef.current) {
           setItems(nextItems);
@@ -375,7 +404,13 @@ export function App() {
         }
       }
     },
-    [calendarQueryKey, calendarRange.endDate, calendarRange.startDate],
+    [
+      calendarQueryKey,
+      calendarRange.endDate,
+      calendarRange.startDate,
+      taskPageScope,
+      todayDate,
+    ],
   );
 
   const refreshRuntime = useCallback(async (
@@ -553,7 +588,10 @@ export function App() {
         setIsNavigationOpen(preferences.leftPaneOpen);
         setLastTaskListId(normalizeTaskListId(preferences.lastTaskListId));
         setCalendarViewMode(preferences.calendarViewMode);
-        setActiveView(appViewFromPreferences(preferences));
+        const restoredView = appViewFromPreferences(preferences);
+        setActiveView(restoredView);
+        setWorkspaceScope(workspaceScopeFromPreferences(preferences));
+        setWorkspaceMode(workspaceModeFromView(restoredView));
         lastPersistedUiPreferencesRef.current =
           serializeUiPreferences(preferences);
       } catch {
@@ -596,6 +634,44 @@ export function App() {
       hasLoadedInitialSnapshotRef.current = true;
     });
   }, [hasHydratedUiPreferences, loadSnapshot]);
+
+  useEffect(() => {
+    const requestId = ++searchRequestIdRef.current;
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchResults([]);
+      setSearchErrorMessage(null);
+      setIsSearchLoading(false);
+      setIsSearchOpen(false);
+      return;
+    }
+
+    setIsSearchLoading(true);
+    setSearchErrorMessage(null);
+    setIsSearchOpen(true);
+    const timerId = window.setTimeout(() => {
+      void tauriTaskTimerGateway
+        .searchWorkItems(query, 50)
+        .then((results) => {
+          if (requestId === searchRequestIdRef.current) {
+            setSearchResults(results);
+          }
+        })
+        .catch(() => {
+          if (requestId === searchRequestIdRef.current) {
+            setSearchResults([]);
+            setSearchErrorMessage("検索に失敗しました。もう一度お試しください。");
+          }
+        })
+        .finally(() => {
+          if (requestId === searchRequestIdRef.current) {
+            setIsSearchLoading(false);
+          }
+        });
+    }, 200);
+
+    return () => window.clearTimeout(timerId);
+  }, [searchQuery]);
 
   useEffect(() => {
     if (
@@ -646,10 +722,10 @@ export function App() {
   }, [activeView.kind, refreshBoardColumns]);
 
   useEffect(() => {
-    if (activeView.kind === "list") {
-      setLastTaskListId(activeView.listId);
+    if (workspaceScope.kind === "list") {
+      setLastTaskListId(workspaceScope.listId);
     }
-  }, [activeView]);
+  }, [workspaceScope]);
 
   useEffect(() => {
     if (!hasHydratedUiPreferences) {
@@ -795,13 +871,20 @@ export function App() {
   ]);
 
   useEffect(() => {
-    if (activeView.kind !== "list" || taskLists.length === 0) {
+    if (workspaceScope.kind !== "list" || taskLists.length === 0) {
       return;
     }
-    if (!taskLists.some((list) => list.id === activeView.listId)) {
-      setActiveView({ kind: "list", listId: taskLists[0].id });
+    if (!taskLists.some((list) => list.id === workspaceScope.listId)) {
+      const nextScope: WorkspaceScope = {
+        kind: "list",
+        listId: taskLists[0].id,
+      };
+      setWorkspaceScope(nextScope);
+      if (workspaceMode === "list") {
+        setActiveView(nextScope);
+      }
     }
-  }, [activeView, taskLists]);
+  }, [taskLists, workspaceMode, workspaceScope]);
 
   useEffect(() => {
     if (
@@ -830,27 +913,41 @@ export function App() {
       setSelectedTaskId(null);
       setSelectedSubtaskId(null);
       setSelectedCalendarTarget(null);
+      setSelectedTaskOverride(null);
       return;
     }
 
     if (activeView.kind === "calendar") {
-      if (selectedTaskId && !tasks.some((task) => task.id === selectedTaskId)) {
+      if (
+        selectedTaskId &&
+        selectedTaskOverride?.id !== selectedTaskId &&
+        !tasks.some((task) => task.id === selectedTaskId)
+      ) {
         setSelectedTaskId(null);
         setSelectedSubtaskId(null);
         setSelectedCalendarTarget(null);
+        setSelectedTaskOverride(null);
       }
       return;
     }
 
     if (
       selectedTaskId &&
+      selectedTaskOverride?.id !== selectedTaskId &&
       !visibleTaskRows.some((task) => task.id === selectedTaskId)
     ) {
       setSelectedTaskId(null);
       setSelectedSubtaskId(null);
       setSelectedCalendarTarget(null);
+      setSelectedTaskOverride(null);
     }
-  }, [activeView.kind, selectedTaskId, tasks, visibleTaskRows]);
+  }, [
+    activeView.kind,
+    selectedTaskId,
+    selectedTaskOverride,
+    tasks,
+    visibleTaskRows,
+  ]);
 
   useEffect(() => {
     if (selectedSubtaskId && !selectedSubtask) {
@@ -862,6 +959,7 @@ export function App() {
     setSelectedTaskId(null);
     setSelectedSubtaskId(null);
     setSelectedCalendarTarget(null);
+    setSelectedTaskOverride(null);
   }, []);
 
   const handleToggleNavigation = useCallback(() => {
@@ -951,6 +1049,23 @@ export function App() {
     [],
   );
 
+  const refreshSelectedTaskOverride = useCallback(async () => {
+    const taskId = selectedTaskOverrideRef.current?.id;
+    if (!taskId) {
+      return;
+    }
+    try {
+      const task = await tauriTaskTimerGateway.getTaskDetail(taskId);
+      if (selectedTaskOverrideRef.current?.id === taskId) {
+        setSelectedTaskOverride(task);
+      }
+    } catch {
+      if (selectedTaskOverrideRef.current?.id === taskId) {
+        clearDetailSelection();
+      }
+    }
+  }, [clearDetailSelection]);
+
   const runMutation = useCallback(
     async (
       operation: () => Promise<string | void>,
@@ -962,6 +1077,7 @@ export function App() {
       try {
         const nextSelectedTaskId = await operation();
         await refreshAfterMutation(options);
+        await refreshSelectedTaskOverride();
         if (nextSelectedTaskId) {
           setSelectedTaskId(nextSelectedTaskId);
         }
@@ -973,7 +1089,7 @@ export function App() {
         updateMutationCount(options.scope, -1);
       }
     },
-    [refreshAfterMutation, updateMutationCount],
+    [refreshAfterMutation, refreshSelectedTaskOverride, updateMutationCount],
   );
 
   const runTaskActionMutation = useCallback(
@@ -988,6 +1104,7 @@ export function App() {
       try {
         const nextSelectedTaskId = await operation();
         await refreshAfterMutation(options);
+        await refreshSelectedTaskOverride();
         if (nextSelectedTaskId) {
           setSelectedTaskId(nextSelectedTaskId);
         }
@@ -1003,7 +1120,7 @@ export function App() {
         });
       }
     },
-    [refreshAfterMutation],
+    [refreshAfterMutation, refreshSelectedTaskOverride],
   );
 
   const runCreateTaskMutation = useCallback(
@@ -1035,10 +1152,12 @@ export function App() {
           ...input,
           listId:
             input.listId ??
-            (activeView.kind === "list" ? activeView.listId : DEFAULT_TASK_LIST_ID),
+            (workspaceScope.kind === "list"
+              ? workspaceScope.listId
+              : DEFAULT_TASK_LIST_ID),
         });
       }, TASK_LIFECYCLE_REFRESH),
-    [activeView, runCreateTaskMutation],
+    [runCreateTaskMutation, workspaceScope],
   );
 
   const handleCreateScheduledTask = useCallback(
@@ -1056,7 +1175,10 @@ export function App() {
     (name: string) =>
       runMutation(async () => {
         const list = await tauriTaskTimerGateway.createTaskList({ name });
-        setActiveView({ kind: "list", listId: list.id });
+        const nextScope: WorkspaceScope = { kind: "list", listId: list.id };
+        setWorkspaceScope(nextScope);
+        setWorkspaceMode("list");
+        setActiveView(nextScope);
         clearDetailSelection();
       }, {
         scope: "navigation",
@@ -1084,15 +1206,22 @@ export function App() {
     (listId: string) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.deleteTaskList(listId);
-        if (activeView.kind === "list" && activeView.listId === listId) {
-          setActiveView({ kind: "list", listId: DEFAULT_TASK_LIST_ID });
+        if (workspaceScope.kind === "list" && workspaceScope.listId === listId) {
+          const nextScope: WorkspaceScope = {
+            kind: "list",
+            listId: DEFAULT_TASK_LIST_ID,
+          };
+          setWorkspaceScope(nextScope);
+          if (workspaceMode === "list") {
+            setActiveView(nextScope);
+          }
           clearDetailSelection();
         }
       }, {
         scope: "navigation",
         refresh: { taskLists: true },
       }),
-    [activeView, clearDetailSelection, runMutation],
+    [clearDetailSelection, runMutation, workspaceMode, workspaceScope],
   );
 
   const handleCreateTag = useCallback(
@@ -1469,6 +1598,7 @@ export function App() {
           setSelectedTaskId(null);
           setSelectedSubtaskId(null);
           setSelectedCalendarTarget(null);
+          setSelectedTaskOverride(null);
         }
         return deleted;
       });
@@ -1615,16 +1745,92 @@ export function App() {
 
   const handleSelectView = useCallback(
     (view: AppView) => {
-      if (isSameAppView(activeView, view)) {
-        return;
+      if (view.kind === "settings" || view.kind === "pomodoro") {
+        if (isSameAppView(activeView, view)) {
+          return;
+        }
+        setActiveView(view);
+        clearDetailSelection();
+      } else if (
+        view.kind === "list" ||
+        view.kind === "today" ||
+        view.kind === "favorites"
+      ) {
+        const nextScope: WorkspaceScope = view;
+        const nextView: AppView =
+          workspaceMode === "list" ? nextScope : { kind: workspaceMode };
+        if (
+          isSameWorkspaceScope(workspaceScope, nextScope) &&
+          isSameAppView(activeView, nextView)
+        ) {
+          return;
+        }
+        setWorkspaceScope(nextScope);
+        setActiveView(nextView);
+        clearDetailSelection();
+      } else if (view.kind === "board" || view.kind === "calendar") {
+        if (workspaceMode === view.kind && isSameAppView(activeView, view)) {
+          return;
+        }
+        setWorkspaceMode(view.kind);
+        setActiveView(view);
+        clearDetailSelection();
+      } else {
+        if (isSameAppView(activeView, view)) {
+          return;
+        }
+        setActiveView(view);
+        clearDetailSelection();
       }
-      setActiveView(view);
-      clearDetailSelection();
       if (window.matchMedia("(max-width: 767px)").matches) {
         setIsNavigationOpen(false);
       }
     },
-    [activeView, clearDetailSelection],
+    [
+      activeView,
+      clearDetailSelection,
+      workspaceMode,
+      workspaceScope,
+    ],
+  );
+
+  const handleSelectWorkspaceMode = useCallback(
+    (mode: WorkspaceMode) => {
+      const nextView: AppView =
+        mode === "list" ? workspaceScope : { kind: mode };
+      if (workspaceMode === mode && isSameAppView(activeView, nextView)) {
+        return;
+      }
+      setWorkspaceMode(mode);
+      setActiveView(nextView);
+      clearDetailSelection();
+    },
+    [activeView, clearDetailSelection, workspaceMode, workspaceScope],
+  );
+
+  const handleSelectSearchResult = useCallback(
+    async (result: WorkItemSearchResult) => {
+      setSearchErrorMessage(null);
+      try {
+        const task = await tauriTaskTimerGateway.getTaskDetail(result.taskId);
+        setSelectedTaskOverride(task);
+        setSelectedTaskId(task.id);
+        setSelectedSubtaskId(
+          result.target.type === "subtask" ? result.target.id : null,
+        );
+        setSelectedCalendarTarget(null);
+        if (activeView.kind === "settings" || activeView.kind === "pomodoro") {
+          setActiveView(
+            workspaceMode === "list" ? workspaceScope : { kind: workspaceMode },
+          );
+        }
+        setIsSearchOpen(false);
+      } catch {
+        setSearchErrorMessage("タスク詳細を開けませんでした。");
+        setIsSearchOpen(true);
+      }
+    },
+    [activeView.kind, workspaceMode, workspaceScope],
   );
 
   const handleSelectTask = useCallback(
@@ -1633,6 +1839,7 @@ export function App() {
         clearDetailSelection();
         return;
       }
+      setSelectedTaskOverride(null);
       setSelectedTaskId(taskId);
       setSelectedSubtaskId(null);
       setSelectedCalendarTarget(null);
@@ -1641,6 +1848,9 @@ export function App() {
   );
 
   const handleSelectSubtask = useCallback((taskId: string, subtaskId: string) => {
+    setSelectedTaskOverride((current) =>
+      current?.id === taskId ? current : null,
+    );
     setSelectedTaskId(taskId);
     setSelectedSubtaskId(subtaskId);
     setSelectedCalendarTarget({ type: "subtask", id: subtaskId });
@@ -1672,6 +1882,7 @@ export function App() {
         return;
       }
       setErrorMessage(null);
+      setSelectedTaskOverride(null);
       setSelectedTaskId(nextTaskId);
       setSelectedSubtaskId(item.target.type === "subtask" ? item.target.id : null);
       setSelectedCalendarTarget(item.target);
@@ -1819,6 +2030,18 @@ export function App() {
         <div className="top-bar-title">
           <h1>TaskTimer</h1>
         </div>
+        <MemoizedGlobalSearch
+          query={searchQuery}
+          results={searchResults}
+          isLoading={isSearchLoading}
+          errorMessage={searchErrorMessage}
+          isOpen={isSearchOpen}
+          isPomodoroActive={activeView.kind === "pomodoro"}
+          onChange={setSearchQuery}
+          onOpenChange={setIsSearchOpen}
+          onSelect={(result) => void handleSelectSearchResult(result)}
+          onOpenPomodoro={() => handleSelectView({ kind: "pomodoro" })}
+        />
       </header>
 
       {errorMessage ? (
@@ -1845,6 +2068,7 @@ export function App() {
         ) : null}
         <MemoizedLeftNavigation
           activeView={activeView}
+          activeScope={workspaceScope}
           favoriteCount={favoriteCount}
           todayCount={todayCount}
           isOpen={isNavigationOpen}
@@ -1858,6 +2082,28 @@ export function App() {
         />
 
         <section className="workspace-main" aria-label="現在のビュー">
+          {activeView.kind !== "settings" && activeView.kind !== "pomodoro" ? (
+            <div className="workspace-mode-bar">
+              <div
+                className="workspace-mode-switcher"
+                role="tablist"
+                aria-label="表示形式"
+              >
+                {workspaceModes.map((mode) => (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={workspaceMode === mode.value}
+                    className={workspaceMode === mode.value ? "is-active" : ""}
+                    key={mode.value}
+                    onClick={() => handleSelectWorkspaceMode(mode.value)}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
           {activeView.kind === "list" ||
           activeView.kind === "today" ||
           activeView.kind === "favorites" ||
@@ -1873,26 +2119,22 @@ export function App() {
                 selectedTaskId={selectedTaskId}
                 activeTimer={activeTimer}
                 activePomodoro={activePomodoro}
-                eyebrow={getTaskPanelEyebrow(activeView)}
+                eyebrow={getTaskPanelEyebrow(workspaceScope)}
                 title={
-                  activeView.kind === "today"
+                  workspaceScope.kind === "today"
                     ? "今日"
-                    : activeView.kind === "favorites"
+                    : workspaceScope.kind === "favorites"
                       ? "お気に入り"
-                      : activeView.kind === "tag"
-                        ? activeTag?.name ?? "タグ"
-                        : activeTaskList?.name ?? "タスク"
+                      : activeTaskList?.name ?? "タスク"
                 }
                 emptyMessage={
-                  activeView.kind === "today"
+                  workspaceScope.kind === "today"
                     ? "今日が期限のタスクはありません。"
-                    : activeView.kind === "favorites"
+                    : workspaceScope.kind === "favorites"
                       ? "お気に入りにしたタスクはまだありません。"
-                      : activeView.kind === "tag"
-                        ? "このタグが付いたタスクはありません。"
-                        : "まだタスクはありません。"
+                      : "まだタスクはありません。"
                 }
-                showTaskForm={activeView.kind === "list"}
+                showTaskForm={workspaceScope.kind === "list"}
                 isLoading={isLoading || isTaskPageLoading}
                 isMutating={isDetailMutating}
                 isCreatingTaskPending={isCreatingTaskPending}
@@ -2104,15 +2346,12 @@ export function App() {
   );
 }
 
-function getTaskPanelEyebrow(activeView: AppView) {
-  if (activeView.kind === "today") {
+function getTaskPanelEyebrow(scope: WorkspaceScope) {
+  if (scope.kind === "today") {
     return "今日のタスク";
   }
-  if (activeView.kind === "favorites") {
+  if (scope.kind === "favorites") {
     return "お気に入り";
-  }
-  if (activeView.kind === "tag") {
-    return "タグ";
   }
   return "リスト";
 }
@@ -2131,6 +2370,28 @@ function appViewFromPreferences(preferences: UiPreferences): AppView {
     };
   }
   return { kind: preferences.lastView };
+}
+
+function workspaceScopeFromPreferences(
+  preferences: UiPreferences,
+): WorkspaceScope {
+  if (preferences.lastView === "today") {
+    return { kind: "today" };
+  }
+  if (preferences.lastView === "favorites") {
+    return { kind: "favorites" };
+  }
+  return {
+    kind: "list",
+    listId: normalizeTaskListId(preferences.lastTaskListId),
+  };
+}
+
+function workspaceModeFromView(view: AppView): WorkspaceMode {
+  if (view.kind === "board" || view.kind === "calendar") {
+    return view.kind;
+  }
+  return "list";
 }
 
 function uiPreferencesFromState({
@@ -2164,20 +2425,14 @@ function normalizeTaskListId(value: string) {
   return trimmed ? trimmed : DEFAULT_TASK_LIST_ID;
 }
 
-function taskPageScopeFromView(view: AppView): TaskPageScope {
-  if (view.kind === "list") {
-    return { type: "list", listId: view.listId };
+function taskPageScopeFromWorkspaceScope(scope: WorkspaceScope): TaskPageScope {
+  if (scope.kind === "list") {
+    return { type: "list", listId: scope.listId };
   }
-  if (view.kind === "today") {
+  if (scope.kind === "today") {
     return { type: "today" };
   }
-  if (view.kind === "favorites") {
-    return { type: "favorites" };
-  }
-  if (view.kind === "tag") {
-    return { type: "tag", tagId: view.tagId };
-  }
-  return { type: "board" };
+  return { type: "favorites" };
 }
 
 function serializeTaskPageScope(scope: TaskPageScope, todayDate: string) {
@@ -2323,6 +2578,19 @@ function getSundayOfWeek(value: Date) {
 }
 
 function isSameAppView(current: AppView, next: AppView) {
+  if (current.kind !== next.kind) {
+    return false;
+  }
+  if (current.kind === "list" && next.kind === "list") {
+    return current.listId === next.listId;
+  }
+  return true;
+}
+
+function isSameWorkspaceScope(
+  current: WorkspaceScope,
+  next: WorkspaceScope,
+) {
   if (current.kind !== next.kind) {
     return false;
   }

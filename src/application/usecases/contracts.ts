@@ -339,16 +339,36 @@ export type TaskPage = {
   };
 };
 
+export type WorkItemSearchResult = {
+  target: WorkTargetRef;
+  taskId: string;
+  title: string;
+  parentTitle: string | null;
+  listId: string;
+  listName: string;
+  status: Task["status"];
+  dueDate: string | null;
+  dueTime: string | null;
+  tags: TaskTag[];
+};
+
 export type TaskTimerGateway = {
   healthCheck(): Promise<string>;
   listTasks(): Promise<TaskWithSubtasks[]>;
   listTaskPage(request: TaskPageRequest): Promise<TaskPage>;
+  getTaskDetail(taskId: string): Promise<TaskWithSubtasks>;
+  searchWorkItems(query: string, limit?: number): Promise<WorkItemSearchResult[]>;
   listTaskLists(): Promise<TaskListItem[]>;
   listBoardColumns(): Promise<BoardColumn[]>;
   listTags(): Promise<TagItem[]>;
   listTaskRows(listId?: string | null): Promise<TaskRow[]>;
   listArchivedTaskRows(): Promise<TaskRow[]>;
-  listCalendarItems(startDate: string, endDate: string): Promise<WeekCalendarItem[]>;
+  listCalendarItems(
+    startDate: string,
+    endDate: string,
+    scope: TaskPageScope,
+    todayDate: string,
+  ): Promise<WeekCalendarItem[]>;
   listWeekCalendarItems(weekStartDate: string): Promise<WeekCalendarItem[]>;
   getActiveTimer(): Promise<ActiveTimer | null>;
   syncExpiredTaskCountdown(): Promise<TaskCountdownExpirySyncResult>;

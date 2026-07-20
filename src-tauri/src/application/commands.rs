@@ -17,13 +17,9 @@ pub fn health_check(database: DatabaseState<'_>) -> Result<&'static str, String>
 #[tauri::command]
 pub fn list_calendar_items(
     database: DatabaseState<'_>,
-    start_date: String,
-    end_date: String,
+    request: super::dto::ListCalendarItemsRequestDto,
 ) -> Result<Vec<super::dto::WeekCalendarItemDto>, String> {
-    use crate::application::repositories::CalendarRepository;
-
-    database
-        .list_calendar_items(&start_date, &end_date)
+    super::usecases::list_calendar_items(database.inner(), request.into())
         .map(|items| items.into_iter().map(Into::into).collect())
 }
 
@@ -56,6 +52,23 @@ pub fn list_task_page(
     request: super::dto::ListTaskPageRequestDto,
 ) -> Result<super::dto::TaskPageDto, String> {
     super::usecases::list_task_page(database.inner(), request.into()).map(Into::into)
+}
+
+#[tauri::command]
+pub fn get_task_detail(
+    database: DatabaseState<'_>,
+    task_id: String,
+) -> Result<super::dto::TaskWithSubtasksDto, String> {
+    super::usecases::get_task_detail(database.inner(), task_id).map(Into::into)
+}
+
+#[tauri::command]
+pub fn search_work_items(
+    database: DatabaseState<'_>,
+    request: super::dto::SearchWorkItemsRequestDto,
+) -> Result<Vec<super::dto::WorkItemSearchResultDto>, String> {
+    super::usecases::search_work_items(database.inner(), request.into())
+        .map(|items| items.into_iter().map(Into::into).collect())
 }
 
 #[tauri::command]

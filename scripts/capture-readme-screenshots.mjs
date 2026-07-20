@@ -73,6 +73,11 @@ try {
     `Boolean(
       document.querySelector(".left-navigation") &&
       document.querySelector(".task-row-content") &&
+      document.querySelector(".global-search input") &&
+      document.querySelectorAll(".workspace-mode-switcher [role=tab]").length === 3 &&
+      !document.querySelector('button.nav-item[aria-label="カレンダー"]') &&
+      !document.querySelector('button.nav-item[aria-label="かんばん"]') &&
+      !document.querySelector('button.nav-item[aria-label="ポモドーロ"]') &&
       ![...document.querySelectorAll(".nav-section-heading")]
         .some((heading) => heading.textContent?.trim() === "タグ") &&
       !document.querySelector(".app-alert")
@@ -128,7 +133,55 @@ try {
   await client.send(
     "Runtime.evaluate",
     {
-      expression: `document.querySelector('button.nav-item[aria-label="カレンダー"]')?.click()`,
+      expression: `(() => {
+        const input = document.querySelector(".global-search input");
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        setter?.call(input, "レビュー");
+        input?.dispatchEvent(new Event("input", { bubbles: true }));
+      })()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(".global-search-result"))`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".global-search-result")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector(".task-detail-pane"))`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector('button[aria-label="詳細を閉じる"]')?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector(".global-search-clear")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `[...document.querySelectorAll('.workspace-mode-switcher [role="tab"]')]
+        .find((button) => button.textContent === "カレンダー")?.click()`,
       awaitPromise: true,
     },
     sessionId,
@@ -154,7 +207,7 @@ try {
         block &&
         handles.length === 2 &&
         content &&
-        block.getBoundingClientRect().height >= 130 &&
+        block.getBoundingClientRect().height >= 100 &&
         content.scrollWidth <= content.clientWidth + 1
       );
     })()`,
@@ -269,7 +322,30 @@ try {
   await client.send(
     "Runtime.evaluate",
     {
-      expression: `document.querySelector('button.nav-item[aria-label="かんばん"]')?.click()`,
+      expression: `document.querySelector('button.nav-item[aria-label="タスク"]')?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `[...document.querySelectorAll('.workspace-mode-switcher [role="tab"]')]
+        .find((button) => button.textContent === "リスト")?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.workspace-mode-switcher [role="tab"]'))`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `[...document.querySelectorAll('.workspace-mode-switcher [role="tab"]')]
+        .find((button) => button.textContent === "かんばん")?.click()`,
       awaitPromise: true,
     },
     sessionId,
@@ -306,6 +382,15 @@ try {
     "Runtime.evaluate",
     {
       expression: `document.querySelector('button.nav-item[aria-label="タスク"]')?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `[...document.querySelectorAll('.workspace-mode-switcher [role="tab"]')]
+        .find((button) => button.textContent === "リスト")?.click()`,
       awaitPromise: true,
     },
     sessionId,
@@ -668,7 +753,8 @@ function buildTauriInvokeMockSource() {
 
   window.__TAURI_INTERNALS__ = {
     invoke(command, args = {}) {
-      const rangeStart = args.startDate ?? args.weekStartDate ?? "2026-07-06";
+      const rangeStart =
+        args.request?.startDate ?? args.startDate ?? args.weekStartDate ?? "2026-07-06";
       const calendarItems = [
         {
           id: "cal-review-scheduled",
@@ -731,6 +817,20 @@ function buildTauriInvokeMockSource() {
         health_check: () => "tauri-ready",
         list_tasks: () => clone(tasks),
         list_task_page: () => taskPage(args.request),
+        get_task_detail: () =>
+          clone(tasks.find((task) => task.id === args.taskId) ?? tasks[0]),
+        search_work_items: () => [{
+          target: { type: "task", id: "task-weekly-review" },
+          taskId: "task-weekly-review",
+          title: "週次レビュー資料を作成",
+          parentTitle: null,
+          listId: "default",
+          listName: "タスク",
+          status: "in_progress",
+          dueDate: "2026-07-10",
+          dueTime: "16:00",
+          tags: [{ id: "tag-priority", name: "重要" }]
+        }],
         list_task_lists: () => clone(taskLists),
         list_board_columns: () => clone(boardColumns),
         list_tags: () => clone(tags),

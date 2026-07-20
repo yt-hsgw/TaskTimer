@@ -1,16 +1,13 @@
 import { FormEvent, useState } from "react";
 import type { ReactNode } from "react";
 import {
-  CalendarDays,
   CircleDot,
-  Columns3,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
   Plus,
   Settings,
   Star,
-  Timer,
   Trash2,
 } from "lucide-react";
 import type {
@@ -30,8 +27,14 @@ export type AppView =
   | { kind: "pomodoro" }
   | { kind: "settings" };
 
+export type WorkspaceScope =
+  | { kind: "list"; listId: string }
+  | { kind: "today" }
+  | { kind: "favorites" };
+
 type LeftNavigationProps = {
   activeView: AppView;
+  activeScope: WorkspaceScope;
   favoriteCount: number;
   todayCount: number;
   isOpen: boolean;
@@ -50,6 +53,7 @@ type LeftNavigationProps = {
 
 export function LeftNavigation({
   activeView,
+  activeScope,
   favoriteCount,
   todayCount,
   isOpen,
@@ -243,7 +247,7 @@ export function LeftNavigation({
                     count={list.activeTaskCount}
                     isOpen={isOpen}
                     isActive={
-                      activeView.kind === "list" && activeView.listId === list.id
+                      activeScope.kind === "list" && activeScope.listId === list.id
                     }
                     onClick={() => onSelectView({ kind: "list", listId: list.id })}
                   />
@@ -283,7 +287,7 @@ export function LeftNavigation({
               label="タスク"
               count={0}
               isOpen={isOpen}
-              isActive={activeView.kind === "list"}
+              isActive={activeScope.kind === "list"}
               onClick={() =>
                 onSelectView({ kind: "list", listId: DEFAULT_TASK_LIST_ID })
               }
@@ -297,7 +301,7 @@ export function LeftNavigation({
             label="今日"
             count={todayCount}
             isOpen={isOpen}
-            isActive={activeView.kind === "today"}
+            isActive={activeScope.kind === "today"}
             onClick={() => onSelectView({ kind: "today" })}
           />
           <NavButton
@@ -305,29 +309,8 @@ export function LeftNavigation({
             label="お気に入り"
             count={favoriteCount}
             isOpen={isOpen}
-            isActive={activeView.kind === "favorites"}
+            isActive={activeScope.kind === "favorites"}
             onClick={() => onSelectView({ kind: "favorites" })}
-          />
-          <NavButton
-            icon={<Columns3 aria-hidden="true" size={18} strokeWidth={1.8} />}
-            label="かんばん"
-            isOpen={isOpen}
-            isActive={activeView.kind === "board"}
-            onClick={() => onSelectView({ kind: "board" })}
-          />
-          <NavButton
-            icon={<CalendarDays aria-hidden="true" size={18} strokeWidth={1.8} />}
-            label="カレンダー"
-            isOpen={isOpen}
-            isActive={activeView.kind === "calendar"}
-            onClick={() => onSelectView({ kind: "calendar" })}
-          />
-          <NavButton
-            icon={<Timer aria-hidden="true" size={18} strokeWidth={1.8} />}
-            label="ポモドーロ"
-            isOpen={isOpen}
-            isActive={activeView.kind === "pomodoro"}
-            onClick={() => onSelectView({ kind: "pomodoro" })}
           />
         </div>
       </nav>

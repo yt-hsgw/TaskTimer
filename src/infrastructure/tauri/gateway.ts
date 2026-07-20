@@ -33,6 +33,7 @@ import type {
   UpdateTaskDraft,
   WeekCalendarItem,
   WorkItemDraft,
+  WorkItemSearchResult,
   WorkScheduleDraft,
   WorkScheduleMoveDraft,
 } from "../../application/usecases/contracts";
@@ -45,14 +46,22 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
   listTasks: () => invoke<TaskWithSubtasks[]>("list_tasks"),
   listTaskPage: (request: TaskPageRequest) =>
     invoke<TaskPage>("list_task_page", { request }),
+  getTaskDetail: (taskId: string) =>
+    invoke<TaskWithSubtasks>("get_task_detail", { taskId }),
+  searchWorkItems: (query: string, limit = 50) =>
+    invoke<WorkItemSearchResult[]>("search_work_items", {
+      request: { query, limit },
+    }),
   listTaskLists: () => invoke<TaskListItem[]>("list_task_lists"),
   listBoardColumns: () => invoke<BoardColumn[]>("list_board_columns"),
   listTags: () => invoke<TagItem[]>("list_tags"),
   listTaskRows: (listId?: string | null) =>
     invoke<TaskRow[]>("list_task_rows", { listId: listId ?? null }),
   listArchivedTaskRows: () => invoke<TaskRow[]>("list_archived_task_rows"),
-  listCalendarItems: (startDate, endDate) =>
-    invoke<WeekCalendarItem[]>("list_calendar_items", { startDate, endDate }),
+  listCalendarItems: (startDate, endDate, scope, todayDate) =>
+    invoke<WeekCalendarItem[]>("list_calendar_items", {
+      request: { startDate, endDate, scope, todayDate },
+    }),
   listWeekCalendarItems: (weekStartDate) =>
     invoke<WeekCalendarItem[]>("list_week_calendar_items", { weekStartDate }),
   getActiveTimer: () => invoke<ActiveTimer | null>("get_active_timer"),
