@@ -1325,7 +1325,7 @@ function CalendarOverflowPopup({
                   onClick={() => onSelectItem(item)}
                 >
                   <span
-                    className={`calendar-overflow-color color-${item.colorToken}`}
+                    className={`calendar-overflow-color color-${item.colorToken} list-color-${item.listColorToken}`}
                     aria-hidden="true"
                   />
                   <span className="calendar-overflow-content">
@@ -2061,7 +2061,7 @@ function CalendarItemButton({
 
   return (
     <div
-      className={`calendar-item marker-${item.marker} color-${item.colorToken} is-${variant} ${
+      className={`calendar-item marker-${item.marker} color-${item.colorToken} list-color-${item.listColorToken} is-${variant} ${
         item.target.type === "subtask" ? "is-subtask" : ""
       } ${item.status === "done" ? "is-done" : ""} ${
         isSelected ? "is-selected" : ""

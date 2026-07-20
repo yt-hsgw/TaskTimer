@@ -211,7 +211,9 @@ Issue #83 では、カレンダー上の期限マーカー移動も既存の `Up
 
 GitHub #127では、期限と独立したローカル予定期間を `scheduled_start_date/time`、`scheduled_end_date/time`、`scheduled_is_all_day` でタスクとサブタスクに追加する。`ResizeScheduledWorkItem` が対象と期間を検証して1トランザクションで保存し、Calendar Read Modelは表示範囲と重なる期間を返す。週/日は15分、終日/月は1日単位で両端を調整する。予定期間の変更では `planned_start_date`、`due_date/time`、期限通知を変更しない。
 
-Issue #84 では、カレンダー項目の色をリスト単位で管理する。`TaskList` に `color_token` を追加し、`UpdateTaskList` がリスト名と色トークンの検証・保存トランザクション境界を持つ。Calendar Read Modelはタスクまたは親タスクの所属リスト色を `WeekCalendarItem` へ含め、Presentationは許可済みトークンからCSSクラスを選ぶ。色の変更操作は左ナビゲーションではなくタスク詳細に配置するが、保存単位はリストのままとする。タグ単位色とタスク個別色は後続Issueで扱う。
+Issue #84 では、カレンダー項目の色をリスト単位で管理する。`TaskList` に `color_token` を追加し、`UpdateTaskList` がリスト名と色トークンの検証・保存トランザクション境界を持つ。Calendar Read Modelはタスクまたは親タスクの所属リスト色を `WeekCalendarItem` へ含め、Presentationは許可済みトークンからCSSクラスを選ぶ。当時は変更操作をタスク詳細に配置したが、GitHub #159でリスト色編集を左ペインへ移し、タスク詳細は個別タスク色の編集に分離する。
+
+GitHub #159では、`tasks.color_token` をnullableで追加し、nullを所属リスト色の継承として扱う。`UpdateTask` は所属リスト変更とタスク色変更を同じトランザクションで保存し、Domain/Applicationの許可リストとSQLiteのCHECK制約で任意CSS値を拒否する。サブタスクは独立した色を保存せず、Calendar Read Modelで親タスクの実効色を継承する。`WeekCalendarItem` は本文用の実効タスク色と左端用のリスト色を分けて返し、Presentationは許可済みトークンだけをCSSクラスへ変換する。タスク色を必須値として作成時にリスト色をコピーする案は、後からリスト色を変更した際に継承意図が失われるため採用しない。
 
 Issue #80 では、タグを横断分類として追加する。`tags` と `task_tags` は `TaskList` とは別の分類境界であり、親タスクにだけ付与する。サブタスク詳細では親タスクのタグを継承表示するが、サブタスクへ直接タグを保存しない。タグの作成、名称変更、削除、付け外しはタスク詳細に集約する。タグ削除はタグと関連だけを同一トランザクションでソフト削除し、タスク、サブタスク、タイマー履歴、通知ルールは保持する。
 

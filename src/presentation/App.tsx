@@ -2009,6 +2009,7 @@ export function App() {
           dueDate,
           dueTime,
           timerTargetSeconds: task.timerTargetSeconds,
+          colorToken: task.colorToken,
           recurrenceRule: toRecurrenceRuleDraft(task.recurrenceRule),
           memo: task.memo,
         });
@@ -2031,6 +2032,7 @@ export function App() {
         dueDate,
         dueTime,
         timerTargetSeconds: subtask.timerTargetSeconds,
+        colorToken: null,
         recurrenceRule: toRecurrenceRuleDraft(subtask.recurrenceRule),
         memo: subtask.memo,
       });

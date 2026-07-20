@@ -1,7 +1,12 @@
 import type { ActiveTimer, TimerSession } from "../../domain/timer/types";
 import type { NotificationDisplayMode } from "../../domain/notification/types";
 import type { RecurrenceFrequency } from "../../domain/recurrence/types";
-import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
+import type {
+  Subtask,
+  Task,
+  TaskColorToken,
+  WorkTargetRef,
+} from "../../domain/task/types";
 
 export type WorkItemDraft = {
   listId?: string | null;
@@ -14,6 +19,7 @@ export type WorkItemDraft = {
 
 export type WorkItemUpdateDraft = WorkItemDraft & {
   timerTargetSeconds?: number | null;
+  colorToken: TaskColorToken | null;
   recurrenceRule?: RecurrenceRuleDraft | null;
 };
 
@@ -51,13 +57,7 @@ export type TagDraft = {
   name: string;
 };
 
-export type TaskListColorToken =
-  | "green"
-  | "blue"
-  | "amber"
-  | "rose"
-  | "violet"
-  | "gray";
+export type TaskListColorToken = TaskColorToken;
 
 export type CreateSubtaskDraft = WorkItemDraft & {
   taskId: string;
@@ -84,6 +84,7 @@ export type WeekCalendarItem = {
   marker: "scheduled" | "planned_start" | "due" | "active_timer";
   status: Task["status"];
   colorToken: TaskListColorToken;
+  listColorToken: TaskListColorToken;
 };
 
 export type NotificationDispatchSummary = {

@@ -5,6 +5,13 @@ export const DEFAULT_TASK_LIST_NAME = "タスク";
 
 export type WorkStatus = "todo" | "in_progress" | "done" | "archived";
 export type WorkTargetType = "task" | "subtask";
+export type TaskColorToken =
+  | "green"
+  | "blue"
+  | "amber"
+  | "rose"
+  | "violet"
+  | "gray";
 
 export type TaskTag = {
   id: string;
@@ -17,6 +24,7 @@ export type Task = {
   title: string;
   status: WorkStatus;
   isFavorite: boolean;
+  colorToken: TaskColorToken | null;
   plannedStartDate: string | null;
   dueDate: string | null;
   dueTime: string | null;

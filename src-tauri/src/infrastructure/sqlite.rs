@@ -76,7 +76,7 @@ const BACKUP_DATABASE_FILE: &str = "tasktimer.sqlite3";
 const BACKUP_MANIFEST_FILE: &str = "backup-manifest.json";
 const JSON_EXPORT_FORMAT: &str = "tasktimer-json-export";
 const CSV_EXPORT_FORMAT: &str = "tasktimer-csv-export";
-const DATA_EXPORT_FORMAT_VERSION: i64 = 5;
+const DATA_EXPORT_FORMAT_VERSION: i64 = 6;
 const DATA_EXPORT_COMPATIBILITY: &str = "viewing-and-migration-aid-not-restore";
 const CSV_EXPORT_MANIFEST_FILE: &str = "export-manifest.json";
 const UI_PREF_LEFT_PANE_OPEN: &str = "left_pane_open";
@@ -262,6 +262,7 @@ struct ExportTaskRow {
     status: String,
     lifecycle_status: String,
     is_favorite: bool,
+    color_token: Option<String>,
     planned_start_date: Option<String>,
     due_date: Option<String>,
     due_time: Option<String>,
@@ -2722,9 +2723,10 @@ fn update_task_detail(
                 due_date = ?5,
                 due_time = ?6,
                 timer_target_seconds = ?7,
-                memo = ?8,
-                updated_at = ?9
-            WHERE id = ?10
+                color_token = ?8,
+                memo = ?9,
+                updated_at = ?10
+            WHERE id = ?11
               AND deleted_at IS NULL
             ",
             params![
@@ -2735,6 +2737,7 @@ fn update_task_detail(
                 input.due_date,
                 input.due_time,
                 input.timer_target_seconds,
+                input.color_token,
                 input.memo,
                 input.now,
                 task_id
@@ -4666,6 +4669,7 @@ fn select_task_page_tasks(
                    tasks.deleted_at,
                    tasks.created_at,
                    tasks.updated_at,
+                   tasks.color_token,
                    recurrence_rules.id AS recurrence_rule_id,
                    recurrence_rules.target_type AS recurrence_target_type,
                    recurrence_rules.target_id AS recurrence_target_id,
@@ -5009,6 +5013,7 @@ fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec
             SELECT id, list_id, title, status, is_favorite,
                    planned_start_date, due_date, due_time, timer_target_seconds, memo,
                    sort_order, completed_at, deleted_at, created_at, updated_at,
+                   color_token,
                    recurrence_rule_id, recurrence_target_type, recurrence_target_id,
                    recurrence_frequency, recurrence_interval, recurrence_deleted_at,
                    recurrence_created_at, recurrence_updated_at
@@ -5028,6 +5033,7 @@ fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec
                      tasks.deleted_at,
                      tasks.created_at,
                      tasks.updated_at,
+                     tasks.color_token,
                      recurrence_rules.id AS recurrence_rule_id,
                      recurrence_rules.target_type AS recurrence_target_type,
                      recurrence_rules.target_id AS recurrence_target_id,
@@ -6435,6 +6441,7 @@ fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<Task
             SELECT id, list_id, title, status, is_favorite,
                    planned_start_date, due_date, due_time, timer_target_seconds, memo,
                    sort_order, completed_at, deleted_at, created_at, updated_at,
+                   color_token,
                    recurrence_rule_id, recurrence_target_type, recurrence_target_id,
                    recurrence_frequency, recurrence_interval, recurrence_deleted_at,
                    recurrence_created_at, recurrence_updated_at
@@ -6454,6 +6461,7 @@ fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<Task
                      tasks.deleted_at,
                      tasks.created_at,
                      tasks.updated_at,
+                     tasks.color_token,
                      recurrence_rules.id AS recurrence_rule_id,
                      recurrence_rules.target_type AS recurrence_target_type,
                      recurrence_rules.target_id AS recurrence_target_id,
@@ -6486,6 +6494,7 @@ fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryRe
             SELECT id, list_id, title, status, is_favorite,
                    planned_start_date, due_date, due_time, timer_target_seconds, memo,
                    sort_order, completed_at, deleted_at, created_at, updated_at,
+                   color_token,
                    recurrence_rule_id, recurrence_target_type, recurrence_target_id,
                    recurrence_frequency, recurrence_interval, recurrence_deleted_at,
                    recurrence_created_at, recurrence_updated_at
@@ -6505,6 +6514,7 @@ fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryRe
                      tasks.deleted_at,
                      tasks.created_at,
                      tasks.updated_at,
+                     tasks.color_token,
                      recurrence_rules.id AS recurrence_rule_id,
                      recurrence_rules.target_type AS recurrence_target_type,
                      recurrence_rules.target_id AS recurrence_target_id,
@@ -6640,13 +6650,14 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
         due_date: row.get(6)?,
         due_time: row.get(7)?,
         timer_target_seconds: row.get(8)?,
-        recurrence_rule: map_optional_recurrence_rule(row, 15)?,
+        recurrence_rule: map_optional_recurrence_rule(row, 16)?,
         memo: row.get(9)?,
         sort_order: row.get(10)?,
         completed_at: row.get(11)?,
         deleted_at: row.get(12)?,
         created_at: row.get(13)?,
         updated_at: row.get(14)?,
+        color_token: row.get(15)?,
         tags: Vec::new(),
     })
 }
@@ -7609,11 +7620,21 @@ fn run_initial_migration(connection: &Connection) -> RepositoryResult<()> {
     run_due_time_migration(connection)?;
     run_work_schedule_migration(connection)?;
     run_ui_read_model_migration(connection)?;
+    run_task_display_color_migration(connection)?;
     run_board_column_migration(connection)?;
     run_tag_migration(connection)?;
     run_notification_preference_migration(connection)?;
     run_notification_os_registration_migration(connection)?;
     run_notification_delivery_attempt_migration(connection)
+}
+
+fn run_task_display_color_migration(connection: &Connection) -> RepositoryResult<()> {
+    ensure_column(
+        connection,
+        "tasks",
+        "color_token",
+        "ALTER TABLE tasks ADD COLUMN color_token TEXT NULL CHECK (color_token IS NULL OR color_token IN ('green', 'blue', 'amber', 'rose', 'violet', 'gray'))",
+    )
 }
 
 fn run_task_countdown_migration(connection: &Connection) -> RepositoryResult<()> {
@@ -8734,6 +8755,7 @@ fn write_csv_export_files(
             "status",
             "lifecycle_status",
             "is_favorite",
+            "color_token",
             "planned_start_date",
             "due_date",
             "due_time",
@@ -8761,6 +8783,7 @@ fn write_csv_export_files(
                     row.status.clone(),
                     row.lifecycle_status.clone(),
                     row.is_favorite.to_string(),
+                    option_text(&row.color_token),
                     option_text(&row.planned_start_date),
                     option_text(&row.due_date),
                     option_text(&row.due_time),
@@ -9276,7 +9299,7 @@ fn select_export_tasks(connection: &Connection) -> RepositoryResult<Vec<ExportTa
         .prepare(
             "
             SELECT id, list_id, board_column_id, title, status, lifecycle_status,
-                   is_favorite, planned_start_date, due_date, due_time,
+                   is_favorite, color_token, planned_start_date, due_date, due_time,
                    scheduled_start_date, scheduled_start_time,
                    scheduled_end_date, scheduled_end_time, scheduled_is_all_day,
                    timer_target_seconds, memo, sort_order, completed_at, created_at, updated_at
@@ -9296,20 +9319,21 @@ fn select_export_tasks(connection: &Connection) -> RepositoryResult<Vec<ExportTa
                 status: row.get(4)?,
                 lifecycle_status: row.get(5)?,
                 is_favorite: row.get::<_, i64>(6)? != 0,
-                planned_start_date: row.get(7)?,
-                due_date: row.get(8)?,
-                due_time: row.get(9)?,
-                scheduled_start_date: row.get(10)?,
-                scheduled_start_time: row.get(11)?,
-                scheduled_end_date: row.get(12)?,
-                scheduled_end_time: row.get(13)?,
-                scheduled_is_all_day: row.get::<_, i64>(14)? != 0,
-                timer_target_seconds: row.get(15)?,
-                memo: row.get(16)?,
-                sort_order: row.get(17)?,
-                completed_at: row.get(18)?,
-                created_at: row.get(19)?,
-                updated_at: row.get(20)?,
+                color_token: row.get(7)?,
+                planned_start_date: row.get(8)?,
+                due_date: row.get(9)?,
+                due_time: row.get(10)?,
+                scheduled_start_date: row.get(11)?,
+                scheduled_start_time: row.get(12)?,
+                scheduled_end_date: row.get(13)?,
+                scheduled_end_time: row.get(14)?,
+                scheduled_is_all_day: row.get::<_, i64>(15)? != 0,
+                timer_target_seconds: row.get(16)?,
+                memo: row.get(17)?,
+                sort_order: row.get(18)?,
+                completed_at: row.get(19)?,
+                created_at: row.get(20)?,
+                updated_at: row.get(21)?,
             })
         })
         .map_err(|error| format!("エクスポート用タスクを取得できません: {error}"))?;
@@ -9638,7 +9662,8 @@ fn collect_task_calendar_items(
                    tasks.scheduled_end_time,
                    tasks.scheduled_is_all_day,
                    tasks.status,
-                   task_lists.color_token
+                   COALESCE(tasks.color_token, task_lists.color_token) AS color_token,
+                   task_lists.color_token AS list_color_token
             FROM tasks
             INNER JOIN task_lists
               ON task_lists.id = tasks.list_id
@@ -9712,6 +9737,7 @@ fn collect_task_calendar_items(
                     status: WorkStatus::from_db(&row.get::<_, String>(10)?)
                         .map_err(db_value_error)?,
                     color_token: row.get(11)?,
+                    list_color_token: row.get(12)?,
                     parent_title: None,
                 })
             },
@@ -9750,7 +9776,8 @@ fn collect_subtask_calendar_items(
                    subtasks.scheduled_is_all_day,
                    subtasks.status,
                    tasks.title AS parent_title,
-                   task_lists.color_token
+                   COALESCE(tasks.color_token, task_lists.color_token) AS color_token,
+                   task_lists.color_token AS list_color_token
             FROM subtasks
             INNER JOIN tasks
               ON tasks.id = subtasks.task_id
@@ -9829,6 +9856,7 @@ fn collect_subtask_calendar_items(
                         .map_err(db_value_error)?,
                     parent_title: row.get(11)?,
                     color_token: row.get(12)?,
+                    list_color_token: row.get(13)?,
                 })
             },
         )
@@ -9860,8 +9888,15 @@ fn collect_active_timer_calendar_item(
                    COALESCE(task_targets.title, subtask_targets.title) AS title,
                    COALESCE(task_targets.status, subtask_targets.status) AS status,
                    parent_tasks.title AS parent_title,
+                   COALESCE(
+                     task_targets.color_token,
+                     parent_tasks.color_token,
+                     task_target_lists.color_token,
+                     parent_task_lists.color_token,
+                     ?7
+                   ) AS color_token,
                    COALESCE(task_target_lists.color_token, parent_task_lists.color_token, ?7)
-                     AS color_token
+                     AS list_color_token
             FROM timer_sessions
             LEFT JOIN tasks AS task_targets
               ON timer_sessions.target_type = 'task'
@@ -9961,6 +9996,7 @@ fn collect_active_timer_calendar_item(
                     status: WorkStatus::from_db(&row.get::<_, String>(4)?)
                         .map_err(db_value_error)?,
                     color_token: row.get(6)?,
+                    list_color_token: row.get(7)?,
                 })
             },
         )
@@ -9988,6 +10024,7 @@ struct CalendarSourceRow {
     status: WorkStatus,
     parent_title: Option<String>,
     color_token: String,
+    list_color_token: String,
 }
 
 fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>) {
@@ -10009,6 +10046,7 @@ fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>
             marker: CalendarMarker::Scheduled,
             status: row.status.clone(),
             color_token: row.color_token.clone(),
+            list_color_token: row.list_color_token.clone(),
         });
     }
     if let Some(date) = row.planned_start_date {
@@ -10025,6 +10063,7 @@ fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>
             marker: CalendarMarker::PlannedStart,
             status: row.status.clone(),
             color_token: row.color_token.clone(),
+            list_color_token: row.list_color_token.clone(),
         });
     }
 
@@ -10044,6 +10083,7 @@ fn push_calendar_items(row: CalendarSourceRow, items: &mut Vec<WeekCalendarItem>
             marker: CalendarMarker::Due,
             status: row.status,
             color_token: row.color_token,
+            list_color_token: row.list_color_token,
         });
     }
 }
@@ -10932,17 +10972,18 @@ mod tests {
 
         run_initial_migration(&connection).expect("migrate legacy database");
 
-        let (list_id, board_column_id, lifecycle_status, is_favorite, timer_target_seconds): (
-            String,
-            String,
-            String,
-            i64,
-            Option<i64>,
-        ) = connection
+        let (
+            list_id,
+            board_column_id,
+            lifecycle_status,
+            is_favorite,
+            timer_target_seconds,
+            color_token,
+        ): (String, String, String, i64, Option<i64>, Option<String>) = connection
             .query_row(
                 "
                 SELECT list_id, board_column_id, lifecycle_status,
-                       is_favorite, timer_target_seconds
+                       is_favorite, timer_target_seconds, color_token
                 FROM tasks
                 WHERE id = 'legacy-task'
                 ",
@@ -10954,6 +10995,7 @@ mod tests {
                         row.get(2)?,
                         row.get(3)?,
                         row.get(4)?,
+                        row.get(5)?,
                     ))
                 },
             )
@@ -10993,6 +11035,7 @@ mod tests {
         assert_eq!(lifecycle_status, "active");
         assert_eq!(is_favorite, 0);
         assert_eq!(timer_target_seconds, None);
+        assert_eq!(color_token, None);
         assert_eq!(task_list_name, DEFAULT_TASK_LIST_NAME);
         assert_eq!(task_list_color_token, DEFAULT_TASK_LIST_COLOR_TOKEN);
         assert_eq!(ui_preference_count, 4);
@@ -12665,6 +12708,23 @@ mod tests {
             },
         )
         .expect("create task");
+        let task = usecases::update_task(
+            &database,
+            &clock,
+            task.id.clone(),
+            usecases::WorkItemUpdateDraft {
+                list_id: Some(task.list_id.clone()),
+                title: task.title.clone(),
+                planned_start_date: task.planned_start_date.clone(),
+                due_date: task.due_date.clone(),
+                due_time: task.due_time.clone(),
+                timer_target_seconds: task.timer_target_seconds,
+                color_token: Some("blue".to_string()),
+                recurrence_rule: None,
+                memo: Some(task.memo.clone()),
+            },
+        )
+        .expect("set task export color");
         let tag = usecases::create_tag(
             &database,
             &clock,
@@ -12716,6 +12776,7 @@ mod tests {
         assert_eq!(json["tasks"][0]["title"], "=SUM(1,2)");
         assert_eq!(json["tasks"][0]["board_column_id"], DEFAULT_BOARD_COLUMN_ID);
         assert_eq!(json["tasks"][0]["lifecycle_status"], "active");
+        assert_eq!(json["tasks"][0]["color_token"], "blue");
         assert_eq!(
             json["board_columns"]
                 .as_array()
@@ -12782,6 +12843,23 @@ mod tests {
             },
         )
         .expect("create task");
+        let task = usecases::update_task(
+            &database,
+            &start_clock,
+            task.id.clone(),
+            usecases::WorkItemUpdateDraft {
+                list_id: Some(task.list_id.clone()),
+                title: task.title.clone(),
+                planned_start_date: task.planned_start_date.clone(),
+                due_date: task.due_date.clone(),
+                due_time: task.due_time.clone(),
+                timer_target_seconds: task.timer_target_seconds,
+                color_token: Some("rose".to_string()),
+                recurrence_rule: None,
+                memo: Some(task.memo.clone()),
+            },
+        )
+        .expect("set task csv color");
         let tag = usecases::create_tag(
             &database,
             &start_clock,
@@ -12857,8 +12935,10 @@ mod tests {
         let task_tags_csv =
             fs::read_to_string(PathBuf::from(&export.export_path).join("task_tags.csv"))
                 .expect("read task tags csv");
-        assert!(tasks_csv
-            .starts_with("id,list_id,board_column_id,title,status,lifecycle_status,is_favorite"));
+        assert!(tasks_csv.starts_with(
+            "id,list_id,board_column_id,title,status,lifecycle_status,is_favorite,color_token"
+        ));
+        assert!(tasks_csv.contains(",rose,"));
         assert!(tasks_csv.contains(IN_PROGRESS_BOARD_COLUMN_ID));
         assert!(tasks_csv.contains("\"'=SUM(1,2)\""));
         assert!(tasks_csv.contains("\"カンマ, 改行\n\"\"引用符\"\"\""));
@@ -13470,6 +13550,103 @@ mod tests {
     }
 
     #[test]
+    fn task_color_validates_persists_and_survives_list_move() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+        let list = usecases::create_task_list(
+            &database,
+            &clock,
+            usecases::TaskListDraft {
+                name: "色分離".to_string(),
+                color_token: Some("violet".to_string()),
+            },
+        )
+        .expect("create colored list");
+        let task = usecases::create_task(
+            &database,
+            &clock,
+            usecases::WorkItemDraft {
+                list_id: Some(list.id),
+                title: "個別色タスク".to_string(),
+                planned_start_date: None,
+                due_date: Some("2026-07-20".to_string()),
+                due_time: None,
+                memo: None,
+            },
+        )
+        .expect("create task");
+        assert_eq!(task.color_token, None);
+
+        let colored = usecases::update_task(
+            &database,
+            &clock,
+            task.id.clone(),
+            usecases::WorkItemUpdateDraft {
+                list_id: Some(DEFAULT_TASK_LIST_ID.to_string()),
+                title: task.title.clone(),
+                planned_start_date: task.planned_start_date.clone(),
+                due_date: task.due_date.clone(),
+                due_time: task.due_time.clone(),
+                timer_target_seconds: task.timer_target_seconds,
+                color_token: Some("blue".to_string()),
+                recurrence_rule: None,
+                memo: Some(task.memo.clone()),
+            },
+        )
+        .expect("set task color and move list");
+        assert_eq!(colored.list_id, DEFAULT_TASK_LIST_ID);
+        assert_eq!(colored.color_token.as_deref(), Some("blue"));
+
+        let invalid = usecases::update_task(
+            &database,
+            &clock,
+            task.id.clone(),
+            usecases::WorkItemUpdateDraft {
+                list_id: Some(colored.list_id.clone()),
+                title: colored.title.clone(),
+                planned_start_date: colored.planned_start_date.clone(),
+                due_date: colored.due_date.clone(),
+                due_time: colored.due_time.clone(),
+                timer_target_seconds: colored.timer_target_seconds,
+                color_token: Some("linear-gradient(red, blue)".to_string()),
+                recurrence_rule: None,
+                memo: Some(colored.memo.clone()),
+            },
+        );
+        assert!(invalid
+            .expect_err("invalid task color")
+            .contains("許可済み"));
+        assert_eq!(
+            select_existing_task_by_id(&database.connection.lock().expect("connection"), &task.id,)
+                .expect("persisted task")
+                .color_token
+                .as_deref(),
+            Some("blue")
+        );
+
+        let inherited = usecases::update_task(
+            &database,
+            &clock,
+            task.id,
+            usecases::WorkItemUpdateDraft {
+                list_id: Some(colored.list_id),
+                title: colored.title,
+                planned_start_date: colored.planned_start_date,
+                due_date: colored.due_date,
+                due_time: colored.due_time,
+                timer_target_seconds: colored.timer_target_seconds,
+                color_token: None,
+                recurrence_rule: None,
+                memo: Some(colored.memo),
+            },
+        )
+        .expect("inherit list color");
+        assert_eq!(inherited.color_token, None);
+    }
+
+    #[test]
     fn list_calendar_items_returns_range_parent_title_and_active_timer_time() {
         let database = in_memory_database();
         let create_clock = FixedClock {
@@ -13500,6 +13677,23 @@ mod tests {
             },
         )
         .expect("task");
+        let parent = usecases::update_task(
+            &database,
+            &create_clock,
+            parent.id.clone(),
+            usecases::WorkItemUpdateDraft {
+                list_id: Some(parent.list_id.clone()),
+                title: parent.title.clone(),
+                planned_start_date: parent.planned_start_date.clone(),
+                due_date: parent.due_date.clone(),
+                due_time: parent.due_time.clone(),
+                timer_target_seconds: parent.timer_target_seconds,
+                color_token: Some("blue".to_string()),
+                recurrence_rule: None,
+                memo: Some(parent.memo.clone()),
+            },
+        )
+        .expect("set parent task color");
         let subtask = usecases::create_subtask(
             &database,
             &create_clock,
@@ -13553,12 +13747,14 @@ mod tests {
         assert_eq!(planned_subtask.title, "調査サブタスク");
         assert_eq!(planned_subtask.parent_title.as_deref(), Some("親タスク"));
         assert_eq!(planned_subtask.time, None);
-        assert_eq!(planned_subtask.color_token, "violet");
+        assert_eq!(planned_subtask.color_token, "blue");
+        assert_eq!(planned_subtask.list_color_token, "violet");
         assert_eq!(active_timer.target.target_type, WorkTargetType::Subtask);
         assert_eq!(active_timer.parent_title.as_deref(), Some("親タスク"));
         assert_eq!(active_timer.date, "2026-07-20");
         assert_eq!(active_timer.time.as_deref(), Some("10:15"));
-        assert_eq!(active_timer.color_token, "violet");
+        assert_eq!(active_timer.color_token, "blue");
+        assert_eq!(active_timer.list_color_token, "violet");
         assert!(!items.iter().any(|item| item.title == "範囲外"));
 
         assert!(database
@@ -14162,6 +14358,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 timer_target_seconds: Some(900),
+                color_token: None,
                 recurrence_rule: None,
                 memo: Some("新しいメモ".to_string()),
             },
@@ -14307,6 +14504,7 @@ mod tests {
                 due_date: Some("2026-07-07".to_string()),
                 due_time: Some("10:00".to_string()),
                 timer_target_seconds: None,
+                color_token: None,
                 recurrence_rule: None,
                 memo: None,
             },
@@ -14687,6 +14885,7 @@ mod tests {
                 due_date: Some("2026-07-10".to_string()),
                 due_time: None,
                 timer_target_seconds: Some(1_200),
+                color_token: None,
                 recurrence_rule: Some(usecases::RecurrenceRuleDraft {
                     frequency: "weekly".to_string(),
                     interval: 2,
@@ -14712,6 +14911,7 @@ mod tests {
                 due_date: Some("2026-07-10".to_string()),
                 due_time: None,
                 timer_target_seconds: Some(1_200),
+                color_token: None,
                 recurrence_rule: None,
                 memo: Some("繰り返し解除".to_string()),
             },
@@ -14758,6 +14958,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 timer_target_seconds: None,
+                color_token: None,
                 recurrence_rule: Some(usecases::RecurrenceRuleDraft {
                     frequency: "daily".to_string(),
                     interval: 1,
@@ -14794,6 +14995,7 @@ mod tests {
                 due_date: Some("2026-07-09".to_string()),
                 due_time: Some("16:45".to_string()),
                 timer_target_seconds: Some(900),
+                color_token: None,
                 recurrence_rule: None,
                 memo: Some("サブタスクメモ".to_string()),
             },
@@ -14850,6 +15052,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 timer_target_seconds: Some(600),
+                color_token: None,
                 recurrence_rule: Some(usecases::RecurrenceRuleDraft {
                     frequency: "monthly".to_string(),
                     interval: 1,
@@ -14885,6 +15088,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 timer_target_seconds: Some(0),
+                color_token: None,
                 recurrence_rule: None,
                 memo: None,
             },
@@ -15421,6 +15625,7 @@ mod tests {
                 due_date: None,
                 due_time: None,
                 timer_target_seconds: None,
+                color_token: None,
                 recurrence_rule: Some(usecases::RecurrenceRuleDraft {
                     frequency: "weekly".to_string(),
                     interval: 1,

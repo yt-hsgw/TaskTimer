@@ -12,6 +12,7 @@ erDiagram
     string status
     string lifecycle_status
     bool is_favorite
+    string color_token
     date planned_start_date
     date due_date
     int timer_target_seconds
@@ -216,6 +217,7 @@ erDiagram
 - `status`: `todo`, `in_progress`, `done`, `archived`
 - `lifecycle_status`: `active`, `done`, `archived`
 - `is_favorite`
+- `color_token`: nullable。nullは所属リスト色を継承する。
 - `planned_start_date`
 - `due_date`
 - `due_time`
@@ -229,6 +231,8 @@ erDiagram
 
 ルール:
 
+- `color_token` は `green`、`blue`、`amber`、`rose`、`violet`、`gray` またはnullに限定する。
+- サブタスクは色を保存せず、親タスクの実効色を継承する。
 - タイトルはtrim後に必須。
 - 期限日は開始予定日より前にできない。
 - 期限時刻は `HH:MM` 形式とし、期限日がない場合は保存できない。
