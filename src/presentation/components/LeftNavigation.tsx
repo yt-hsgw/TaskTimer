@@ -95,6 +95,7 @@ export function LeftNavigation({
   const navigationRef = useRef<HTMLElement>(null);
   const listMenuRef = useRef<HTMLDivElement>(null);
   const listMenuTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
+  const pendingListMenuFocusId = useRef<string | null>(null);
   const activeMenuList = listMenu
     ? taskLists.find((list) => list.id === listMenu.listId)
     : undefined;
@@ -104,13 +105,26 @@ export function LeftNavigation({
   const previousNavigationContextKey = useRef(navigationContextKey);
 
   const focusListMenuTrigger = useCallback((listId: string) => {
-    window.requestAnimationFrame(() => {
-      const trigger = listMenuTriggerRefs.current.get(listId);
-      if (trigger?.isConnected) {
-        trigger.focus();
-      }
-    });
+    const trigger = listMenuTriggerRefs.current.get(listId);
+    if (trigger?.isConnected) {
+      pendingListMenuFocusId.current = null;
+      trigger.focus();
+      return;
+    }
+    pendingListMenuFocusId.current = listId;
   }, []);
+
+  useLayoutEffect(() => {
+    const listId = pendingListMenuFocusId.current;
+    if (!listId) {
+      return;
+    }
+    const trigger = listMenuTriggerRefs.current.get(listId);
+    if (trigger?.isConnected) {
+      pendingListMenuFocusId.current = null;
+      trigger.focus();
+    }
+  });
 
   const closeListMenu = useCallback(
     (restoreFocus = false) => {
