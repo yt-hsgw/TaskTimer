@@ -1,7 +1,20 @@
-import { FormEvent, useState } from "react";
-import type { ReactNode } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import type {
+  FocusEvent as ReactFocusEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import {
   CircleDot,
+  EllipsisVertical,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -16,6 +29,16 @@ import type {
 } from "../../application/usecases/contracts";
 import { DEFAULT_TASK_LIST_ID } from "../../domain/task/types";
 import { usePresentationRenderProbe } from "../renderProbe";
+
+const LIST_MENU_GAP = 4;
+const LIST_MENU_MARGIN = 8;
+const LIST_MENU_WIDTH = 148;
+
+type ListMenuState = {
+  listId: string;
+  left: number;
+  top: number;
+};
 
 export type AppView =
   | { kind: "list"; listId: string }
@@ -72,6 +95,170 @@ export function LeftNavigation({
   const [editingListName, setEditingListName] = useState("");
   const [editingListColor, setEditingListColor] =
     useState<TaskListColorToken>("green");
+  const [listMenu, setListMenu] = useState<ListMenuState | null>(null);
+  const navigationRef = useRef<HTMLElement>(null);
+  const listMenuRef = useRef<HTMLDivElement>(null);
+  const listMenuTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
+  const pendingListMenuFocusId = useRef<string | null>(null);
+  const activeMenuList = listMenu
+    ? taskLists.find((list) => list.id === listMenu.listId)
+    : undefined;
+  const navigationContextKey = `${activeView.kind}:${activeScope.kind}:${
+    activeScope.kind === "list" ? activeScope.listId : ""
+  }`;
+  const previousNavigationContextKey = useRef(navigationContextKey);
+
+  const focusListMenuTrigger = useCallback((listId: string) => {
+    const trigger = listMenuTriggerRefs.current.get(listId);
+    if (trigger?.isConnected) {
+      pendingListMenuFocusId.current = null;
+      trigger.focus();
+      return;
+    }
+    pendingListMenuFocusId.current = listId;
+  }, []);
+
+  useLayoutEffect(() => {
+    const listId = pendingListMenuFocusId.current;
+    if (!listId) {
+      return;
+    }
+    const trigger = listMenuTriggerRefs.current.get(listId);
+    if (trigger?.isConnected) {
+      pendingListMenuFocusId.current = null;
+      trigger.focus();
+    }
+  });
+
+  const closeListMenu = useCallback(
+    (restoreFocus = false) => {
+      const listId = listMenu?.listId;
+      setListMenu(null);
+      if (restoreFocus && listId) {
+        focusListMenuTrigger(listId);
+      }
+    },
+    [focusListMenuTrigger, listMenu?.listId],
+  );
+
+  const openListMenu = (listId: string, trigger: HTMLButtonElement) => {
+    if (listMenu?.listId === listId) {
+      closeListMenu(true);
+      return;
+    }
+
+    setIsCreateOpen(false);
+    setEditingListId(null);
+    const triggerRect = trigger.getBoundingClientRect();
+    setListMenu({
+      listId,
+      left: Math.max(
+        LIST_MENU_MARGIN,
+        Math.min(
+          triggerRect.right - LIST_MENU_WIDTH,
+          window.innerWidth - LIST_MENU_WIDTH - LIST_MENU_MARGIN,
+        ),
+      ),
+      top: triggerRect.bottom + LIST_MENU_GAP,
+    });
+  };
+
+  useLayoutEffect(() => {
+    if (!listMenu || !listMenuRef.current) {
+      return;
+    }
+
+    const trigger = listMenuTriggerRefs.current.get(listMenu.listId);
+    if (!trigger?.isConnected) {
+      setListMenu(null);
+      return;
+    }
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const menuRect = listMenuRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - triggerRect.bottom - LIST_MENU_MARGIN;
+    const top =
+      menuRect.height > spaceBelow && triggerRect.top > menuRect.height
+        ? triggerRect.top - menuRect.height - LIST_MENU_GAP
+        : Math.min(
+            triggerRect.bottom + LIST_MENU_GAP,
+            window.innerHeight - menuRect.height - LIST_MENU_MARGIN,
+          );
+    const left = Math.max(
+      LIST_MENU_MARGIN,
+      Math.min(
+        triggerRect.right - menuRect.width,
+        window.innerWidth - menuRect.width - LIST_MENU_MARGIN,
+      ),
+    );
+
+    if (top !== listMenu.top || left !== listMenu.left) {
+      setListMenu((current) =>
+        current ? { ...current, left, top: Math.max(LIST_MENU_MARGIN, top) } : null,
+      );
+    }
+  }, [listMenu]);
+
+  useEffect(() => {
+    if (!listMenu) {
+      return;
+    }
+
+    listMenuRef.current
+      ?.querySelector<HTMLButtonElement>("[role='menuitem']:not(:disabled)")
+      ?.focus();
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      const trigger = listMenuTriggerRefs.current.get(listMenu.listId);
+      if (
+        !(target instanceof Node) ||
+        listMenuRef.current?.contains(target) ||
+        trigger?.contains(target)
+      ) {
+        return;
+      }
+      closeListMenu();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeListMenu(true);
+      }
+    };
+    const handlePositionChange = () => closeListMenu();
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handlePositionChange);
+    const navigation = navigationRef.current;
+    navigation?.addEventListener("scroll", handlePositionChange);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handlePositionChange);
+      navigation?.removeEventListener("scroll", handlePositionChange);
+    };
+  }, [closeListMenu, listMenu]);
+
+  useEffect(() => {
+    if (!isOpen && listMenu) {
+      closeListMenu();
+    }
+  }, [closeListMenu, isOpen, listMenu]);
+
+  useEffect(() => {
+    if (listMenu && !activeMenuList) {
+      closeListMenu();
+    }
+  }, [activeMenuList, closeListMenu, listMenu]);
+
+  useEffect(() => {
+    if (previousNavigationContextKey.current !== navigationContextKey) {
+      previousNavigationContextKey.current = navigationContextKey;
+      closeListMenu();
+    }
+  }, [closeListMenu, navigationContextKey]);
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -86,18 +273,15 @@ export function LeftNavigation({
     }
   };
 
-  const handleEdit = async (
-    event: FormEvent<HTMLFormElement>,
-    listId: string,
-  ) => {
-    event.preventDefault();
+  const saveEditingList = async (listId: string, restoreFocus = false) => {
     const list = taskLists.find((candidate) => candidate.id === listId);
     const name = editingListName.trim();
-    if (!list || !name) {
+    if (!list) {
       return;
     }
 
-    const nextName = list.id === DEFAULT_TASK_LIST_ID ? list.name : name;
+    const nextName =
+      list.id === DEFAULT_TASK_LIST_ID || !name ? list.name : name;
     if (
       (nextName !== list.name || editingListColor !== list.colorToken) &&
       !(await onUpdateTaskList(listId, nextName, editingListColor))
@@ -106,11 +290,34 @@ export function LeftNavigation({
     }
 
     setEditingListId(null);
-    setEditingListName("");
+    setEditingListName(list.name);
+    if (restoreFocus) {
+      focusListMenuTrigger(listId);
+    }
+  };
+
+  const handleEditSubmit = (
+    event: FormEvent<HTMLFormElement>,
+    listId: string,
+  ) => {
+    event.preventDefault();
+    void saveEditingList(listId, true);
+  };
+
+  const handleEditorBlur = (
+    event: ReactFocusEvent<HTMLFormElement>,
+    listId: string,
+  ) => {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+    void saveEditingList(listId);
   };
 
   const startEditing = (list: TaskListItem) => {
     setIsCreateOpen(false);
+    closeListMenu();
     setEditingListId(list.id);
     setEditingListName(list.name);
     setEditingListColor(list.colorToken);
@@ -121,13 +328,48 @@ export function LeftNavigation({
       `「${list.name}」を削除します。所属タスクは「タスク」へ移動します。`,
     );
     if (!shouldDelete) {
+      return false;
+    }
+    return onDeleteTaskList(list.id);
+  };
+
+  const handleMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       return;
     }
-    await onDeleteTaskList(list.id);
+    const items = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>(
+        "[role='menuitem']:not(:disabled)",
+      ),
+    );
+    if (items.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    const nextIndex =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? items.length - 1
+          : event.key === "ArrowDown"
+            ? (currentIndex + 1 + items.length) % items.length
+            : (currentIndex - 1 + items.length) % items.length;
+    items[nextIndex]?.focus();
+  };
+
+  const selectView = (view: AppView) => {
+    closeListMenu();
+    onSelectView(view);
   };
 
   return (
-    <aside className="left-navigation" aria-label="主要ナビゲーション">
+    <>
+    <aside
+      ref={navigationRef}
+      className="left-navigation"
+      aria-label="主要ナビゲーション"
+    >
       <div className="nav-header">
         {isOpen ? (
           <div className="nav-brand">
@@ -141,7 +383,10 @@ export function LeftNavigation({
           aria-label={isOpen ? "左ペインを閉じる" : "左ペインを開く"}
           title="左ペインを開閉"
           aria-expanded={isOpen}
-          onClick={onToggle}
+          onClick={() => {
+            closeListMenu();
+            onToggle();
+          }}
         >
           {isOpen ? (
             <PanelLeftClose aria-hidden="true" size={20} strokeWidth={1.8} />
@@ -163,6 +408,7 @@ export function LeftNavigation({
                 title="リストを追加"
                 disabled={isMutating}
                 onClick={() => {
+                  closeListMenu();
                   setEditingListId(null);
                   setIsCreateOpen((current) => !current);
                 }}
@@ -188,13 +434,14 @@ export function LeftNavigation({
           ) : null}
           {taskLists.map((list) => (
             <div
-              className={`nav-list-row ${isOpen ? "has-actions" : ""}`}
+              className={`nav-list-row ${isOpen ? "has-menu" : ""}`}
               key={list.id}
             >
               {editingListId === list.id ? (
                 <form
                   className="nav-list-form nav-list-editor"
-                  onSubmit={(event) => void handleEdit(event, list.id)}
+                  onSubmit={(event) => handleEditSubmit(event, list.id)}
+                  onBlur={(event) => handleEditorBlur(event, list.id)}
                 >
                   <input
                     value={editingListName}
@@ -205,22 +452,6 @@ export function LeftNavigation({
                     aria-label={`${list.name}の名前`}
                     autoFocus
                   />
-                  <button
-                    type="submit"
-                    disabled={isMutating || !editingListName.trim()}
-                  >
-                    保存
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isMutating}
-                    onClick={() => {
-                      setEditingListId(null);
-                      setEditingListName("");
-                    }}
-                  >
-                    ×
-                  </button>
                   <div className="nav-list-color-field">
                     <span>リストの色</span>
                     <div className="nav-list-color-picker" aria-label="リストの色">
@@ -249,33 +480,28 @@ export function LeftNavigation({
                     isActive={
                       activeScope.kind === "list" && activeScope.listId === list.id
                     }
-                    onClick={() => onSelectView({ kind: "list", listId: list.id })}
+                    onClick={() => selectView({ kind: "list", listId: list.id })}
                   />
                   {isOpen ? (
-                    <div className="nav-list-actions">
-                      <button
-                        className="nav-mini-button"
-                        type="button"
-                        aria-label={`${list.name}を編集`}
-                        title="リストを編集"
-                        disabled={isMutating}
-                        onClick={() => startEditing(list)}
-                      >
-                        <Pencil aria-hidden="true" size={14} />
-                      </button>
-                      {list.id !== DEFAULT_TASK_LIST_ID ? (
-                        <button
-                          className="nav-mini-button"
-                          type="button"
-                          aria-label={`${list.name}を削除`}
-                          title="削除"
-                          disabled={isMutating}
-                          onClick={() => void handleDelete(list)}
-                        >
-                          <Trash2 aria-hidden="true" size={14} />
-                        </button>
-                      ) : null}
-                    </div>
+                    <button
+                      ref={(node) => {
+                        if (node) {
+                          listMenuTriggerRefs.current.set(list.id, node);
+                        } else {
+                          listMenuTriggerRefs.current.delete(list.id);
+                        }
+                      }}
+                      className="nav-list-menu-trigger"
+                      type="button"
+                      aria-label={`${list.name}の操作`}
+                      aria-haspopup="menu"
+                      aria-expanded={listMenu?.listId === list.id}
+                      title="リストの操作"
+                      disabled={isMutating}
+                      onClick={(event) => openListMenu(list.id, event.currentTarget)}
+                    >
+                      <EllipsisVertical aria-hidden="true" size={18} />
+                    </button>
                   ) : null}
                 </>
               )}
@@ -289,7 +515,7 @@ export function LeftNavigation({
               isOpen={isOpen}
               isActive={activeScope.kind === "list"}
               onClick={() =>
-                onSelectView({ kind: "list", listId: DEFAULT_TASK_LIST_ID })
+                selectView({ kind: "list", listId: DEFAULT_TASK_LIST_ID })
               }
             />
           ) : null}
@@ -302,7 +528,7 @@ export function LeftNavigation({
             count={todayCount}
             isOpen={isOpen}
             isActive={activeScope.kind === "today"}
-            onClick={() => onSelectView({ kind: "today" })}
+            onClick={() => selectView({ kind: "today" })}
           />
           <NavButton
             icon={<Star aria-hidden="true" size={18} strokeWidth={1.8} />}
@@ -310,7 +536,7 @@ export function LeftNavigation({
             count={favoriteCount}
             isOpen={isOpen}
             isActive={activeScope.kind === "favorites"}
-            onClick={() => onSelectView({ kind: "favorites" })}
+            onClick={() => selectView({ kind: "favorites" })}
           />
         </div>
       </nav>
@@ -321,10 +547,54 @@ export function LeftNavigation({
           label="設定"
           isOpen={isOpen}
           isActive={activeView.kind === "settings"}
-          onClick={() => onSelectView({ kind: "settings" })}
+          onClick={() => selectView({ kind: "settings" })}
         />
       </div>
     </aside>
+    {listMenu && activeMenuList
+      ? createPortal(
+          <div
+            ref={listMenuRef}
+            className="nav-list-menu"
+            role="menu"
+            aria-label={`${activeMenuList.name}の操作`}
+            style={{ left: listMenu.left, top: listMenu.top }}
+            onKeyDown={handleMenuKeyDown}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              disabled={isMutating}
+              onClick={() => startEditing(activeMenuList)}
+            >
+              <Pencil aria-hidden="true" size={15} />
+              <span>編集</span>
+            </button>
+            {activeMenuList.id !== DEFAULT_TASK_LIST_ID ? (
+              <button
+                className="is-danger"
+                type="button"
+                role="menuitem"
+                disabled={isMutating}
+                onClick={() => {
+                  const list = activeMenuList;
+                  closeListMenu();
+                  void handleDelete(list).then((deleted) => {
+                    if (!deleted) {
+                      focusListMenuTrigger(list.id);
+                    }
+                  });
+                }}
+              >
+                <Trash2 aria-hidden="true" size={15} />
+                <span>削除</span>
+              </button>
+            ) : null}
+          </div>,
+          document.body,
+        )
+      : null}
+    </>
   );
 }
 
