@@ -1,10 +1,6 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pause, Play, Square } from "lucide-react";
-import type {
-  TaskRow,
-  TaskWithSubtasks,
-  WorkItemDraft,
-} from "../../application/usecases/contracts";
+import type { TaskRow, TaskWithSubtasks } from "../../application/usecases/contracts";
 import type { ActivePomodoro } from "../../application/usecases/contracts";
 import type { ActiveTimer } from "../../domain/timer/types";
 import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
@@ -20,7 +16,7 @@ type TaskPanelProps = {
   eyebrow?: string;
   title?: string;
   emptyMessage?: string;
-  showTaskForm?: boolean;
+  showTaskAdd?: boolean;
   isLoading: boolean;
   isMutating: boolean;
   isCreatingTaskPending: boolean;
@@ -30,7 +26,7 @@ type TaskPanelProps = {
   pendingTaskActionIds: ReadonlySet<string>;
   onSelectTask(taskId: string): void;
   onSelectSubtask(taskId: string, subtaskId: string): void;
-  onCreateTask(input: WorkItemDraft): Promise<boolean>;
+  onRequestCreateTask(): void;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
@@ -57,7 +53,7 @@ export function TaskPanel({
   eyebrow = "DB接続済みタスク",
   title = "タスク",
   emptyMessage = "まだタスクはありません。",
-  showTaskForm = true,
+  showTaskAdd = true,
   isLoading,
   isMutating,
   isCreatingTaskPending,
@@ -67,7 +63,7 @@ export function TaskPanel({
   pendingTaskActionIds,
   onSelectTask,
   onSelectSubtask,
-  onCreateTask,
+  onRequestCreateTask,
   onToggleTaskCompletion,
   onToggleTaskFavorite,
   onStartTimer,
@@ -77,19 +73,10 @@ export function TaskPanel({
   onLoadMoreTasks,
 }: TaskPanelProps) {
   usePresentationRenderProbe("TaskPanel");
-  const [isCreatingTask, setIsCreatingTask] = useState(false);
   const [isCompletedOpen, setIsCompletedOpen] = useState(true);
   const [expandedTaskIds, setExpandedTaskIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  const [taskDraft, setTaskDraft] = useState<WorkItemDraft>({
-    title: "",
-    dueDate: "",
-    dueTime: "",
-    memo: "",
-  });
-  const taskTitleInputRef = useRef<HTMLInputElement>(null);
-
   const taskById = useMemo(
     () => new Map(tasks.map((task) => [task.id, task])),
     [tasks],
@@ -97,41 +84,6 @@ export function TaskPanel({
   const incompleteRows = taskRows.filter((task) => task.status !== "done");
   const completedRows = taskRows.filter((task) => task.status === "done");
   const isCreateDisabled = isMutating || isCreatingTaskPending;
-
-  useEffect(() => {
-    if (!showTaskForm) {
-      return;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.ctrlKey && event.key.toLowerCase() === "n") {
-        event.preventDefault();
-        setIsCreatingTask(true);
-        return;
-      }
-      if (event.key === "Escape") {
-        setIsCreatingTask(false);
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showTaskForm]);
-
-  useEffect(() => {
-    if (isCreatingTask) {
-      taskTitleInputRef.current?.focus();
-    }
-  }, [isCreatingTask]);
-
-  async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const created = await onCreateTask(normalizeDraft(taskDraft));
-    if (created) {
-      setTaskDraft({ title: "", dueDate: "", dueTime: "", memo: "" });
-      setIsCreatingTask(false);
-    }
-  }
 
   function handleCompleteRow(row: TaskRow) {
     const task = taskById.get(row.id);
@@ -168,14 +120,18 @@ export function TaskPanel({
           >
             {totalTaskCount}
           </span>
-          {showTaskForm ? (
+          {showTaskAdd ? (
             <button
               className="task-add-button"
               type="button"
+              data-task-create-trigger
               aria-label="タスクを追加"
               title="タスクを追加"
-              disabled={isCreateDisabled || isCreatingTask}
-              onClick={() => setIsCreatingTask(true)}
+              disabled={isCreateDisabled}
+              onClick={(event) => {
+                event.currentTarget.focus();
+                onRequestCreateTask();
+              }}
             >
               ＋
             </button>
@@ -211,94 +167,6 @@ export function TaskPanel({
             onStopTimer={onStopTimer}
           />
         ))}
-
-        {showTaskForm && isCreatingTask ? (
-          <div className="task-composer">
-            <form
-              className="work-form inline-create-form"
-              onSubmit={(event) => void handleCreateTask(event)}
-            >
-              <label>
-                <span>タスク名</span>
-                <input
-                  ref={taskTitleInputRef}
-                  value={taskDraft.title}
-                  onChange={(event) =>
-                    setTaskDraft((current) => ({
-                      ...current,
-                      title: event.target.value,
-                    }))
-                  }
-                  placeholder="例: 週次レビュー"
-                  disabled={isCreateDisabled}
-                  maxLength={120}
-                  required
-                />
-              </label>
-              <div className="date-fields">
-                <label>
-                  <span>期限日</span>
-                  <input
-                    type="date"
-                    value={taskDraft.dueDate ?? ""}
-                    onChange={(event) =>
-                      setTaskDraft((current) => ({
-                        ...current,
-                        dueDate: event.target.value,
-                      }))
-                    }
-                    disabled={isCreateDisabled}
-                  />
-                </label>
-                <label>
-                  <span>期限時刻</span>
-                  <input
-                    type="time"
-                    value={taskDraft.dueTime ?? ""}
-                    onChange={(event) =>
-                      setTaskDraft((current) => ({
-                        ...current,
-                        dueTime: event.target.value,
-                      }))
-                    }
-                    disabled={isCreateDisabled || !taskDraft.dueDate}
-                  />
-                </label>
-              </div>
-              <label>
-                <span>メモ</span>
-                <textarea
-                  value={taskDraft.memo ?? ""}
-                  onChange={(event) =>
-                    setTaskDraft((current) => ({
-                      ...current,
-                      memo: event.target.value,
-                    }))
-                  }
-                  disabled={isCreateDisabled}
-                  rows={3}
-                />
-              </label>
-              <div className="composer-actions">
-                <button
-                  className="primary-button"
-                  type="submit"
-                  disabled={isCreateDisabled}
-                >
-                  追加
-                </button>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  disabled={isCreateDisabled}
-                  onClick={() => setIsCreatingTask(false)}
-                >
-                  キャンセル
-                </button>
-              </div>
-            </form>
-          </div>
-        ) : null}
 
         {completedRows.length > 0 ? (
           <section className="completed-task-section" aria-label="完了タスク">
@@ -728,24 +596,6 @@ function formatCountdownRemaining(activeTimer: ActiveTimer, now: number) {
   return hours > 0
     ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
-}
-
-function normalizeDraft(input: WorkItemDraft): WorkItemDraft {
-  const dueDate = normalizeOptionalText(input.dueDate);
-  return {
-    title: input.title,
-    plannedStartDate: null,
-    dueDate,
-    dueTime: dueDate ? normalizeOptionalText(input.dueTime) : null,
-    memo: input.memo ?? "",
-  };
-}
-
-function normalizeOptionalText(value: string | null | undefined) {
-  if (!value) {
-    return null;
-  }
-  return value;
 }
 
 function formatDateLabel(value: string | null) {

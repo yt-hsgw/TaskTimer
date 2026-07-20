@@ -2,21 +2,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,
   DragEvent,
-  FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
 import { GripHorizontal, GripVertical, X } from "lucide-react";
 import type {
-  ScheduledTaskDraft,
-  TaskListItem,
   WeekCalendarItem,
   WorkScheduleDraft,
   WorkScheduleMoveDraft,
 } from "../../application/usecases/contracts";
 import type { WorkTargetRef } from "../../domain/task/types";
 import { usePresentationRenderProbe } from "../renderProbe";
+import type { CalendarTaskCreatePreset } from "../taskCreate";
 
 export type CalendarViewMode = "week" | "day" | "month";
 
@@ -24,10 +22,8 @@ type WeekCalendarProps = {
   viewMode: CalendarViewMode;
   anchorDate: string;
   items: WeekCalendarItem[];
-  taskLists: TaskListItem[];
-  defaultTaskListId: string;
   isLoading: boolean;
-  isCreatingTaskPending: boolean;
+  isTaskCreateOpen: boolean;
   isReschedulingItem: boolean;
   selectedTarget: WorkTargetRef | null;
   onChangeViewMode(viewMode: CalendarViewMode): void;
@@ -35,7 +31,7 @@ type WeekCalendarProps = {
   onNextRange(): void;
   onToday(): void;
   onSelectItem(item: WeekCalendarItem): void;
-  onCreateTask(input: ScheduledTaskDraft): Promise<boolean>;
+  onRequestCreateTask(preset: CalendarTaskCreatePreset): void;
   onRescheduleItem(
     item: WeekCalendarItem,
     dueDate: string,
@@ -63,18 +59,6 @@ const viewModeLabels: Record<CalendarViewMode, string> = {
   week: "週",
   day: "日",
   month: "月",
-};
-
-type CalendarTaskDraft = {
-  title: string;
-  listId: string;
-  startDate: string;
-  startTime: string;
-  endDate: string;
-  endTime: string;
-  isAllDay: boolean;
-  memo: string;
-  sourceLabel: string;
 };
 
 type CalendarDropTarget = {
@@ -159,10 +143,8 @@ export function WeekCalendar({
   viewMode,
   anchorDate,
   items,
-  taskLists,
-  defaultTaskListId,
   isLoading,
-  isCreatingTaskPending,
+  isTaskCreateOpen,
   isReschedulingItem,
   selectedTarget,
   onChangeViewMode,
@@ -170,7 +152,7 @@ export function WeekCalendar({
   onNextRange,
   onToday,
   onSelectItem,
-  onCreateTask,
+  onRequestCreateTask,
   onRescheduleItem,
   onResizeItem: persistResizeItem,
   onMoveScheduledItem,
@@ -178,9 +160,7 @@ export function WeekCalendar({
   usePresentationRenderProbe("WeekCalendar");
   const calendarPanelRef = useRef<HTMLElement>(null);
   const overflowPopupRef = useRef<HTMLDivElement>(null);
-  const titleInputRef = useRef<HTMLInputElement>(null);
   const createSelectionRef = useRef<CalendarCreateSelection | null>(null);
-  const [createDraft, setCreateDraft] = useState<CalendarTaskDraft | null>(null);
   const [createSelection, setCreateSelection] =
     useState<CalendarCreateSelection | null>(null);
   const [draggedItem, setDraggedItem] = useState<WeekCalendarItem | null>(null);
@@ -242,32 +222,21 @@ export function WeekCalendar({
   const headingLabel = formatCalendarHeading(viewMode, anchorDate);
   const weekBadge =
     viewMode === "week" ? `第${getIsoWeekNumber(anchorDate)}週` : null;
-  const fallbackListId = useMemo(() => {
-    if (taskLists.some((list) => list.id === defaultTaskListId)) {
-      return defaultTaskListId;
-    }
-    return taskLists[0]?.id ?? defaultTaskListId;
-  }, [defaultTaskListId, taskLists]);
 
   useEffect(() => {
-    titleInputRef.current?.focus();
-  }, [createDraft?.sourceLabel]);
-
-  useEffect(() => {
-    if (!createDraft && !createSelection) {
+    if (!createSelection) {
       return;
     }
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setCreateDraft(null);
         clearCreateSelection();
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [createDraft, createSelection]);
+  }, [createSelection]);
 
   useEffect(() => {
     clearCreateSelection();
@@ -429,15 +398,14 @@ export function WeekCalendar({
     sourceLabel: string;
   }) {
     clearCreateSelection();
-    setCreateDraft({
-      title: "",
-      listId: fallbackListId,
-      startDate,
-      startTime,
-      endDate,
-      endTime,
-      isAllDay,
-      memo: "",
+    onRequestCreateTask({
+      schedule: {
+        startDate,
+        startTime: isAllDay ? null : startTime,
+        endDate,
+        endTime: isAllDay ? null : endTime,
+        isAllDay,
+      },
       sourceLabel,
     });
   }
@@ -462,9 +430,8 @@ export function WeekCalendar({
     if (
       event.button !== 0 ||
       !event.isPrimary ||
-      createDraft ||
+      isTaskCreateOpen ||
       isLoading ||
-      isCreatingTaskPending ||
       isReschedulingItem ||
       draggedItem
     ) {
@@ -762,29 +729,6 @@ export function WeekCalendar({
     void moveCalendarItem(item, target);
   }
 
-  async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!createDraft) {
-      return;
-    }
-
-    const created = await onCreateTask({
-      title: createDraft.title,
-      listId: createDraft.listId || fallbackListId,
-      memo: createDraft.memo,
-      schedule: {
-        startDate: createDraft.startDate,
-        startTime: createDraft.isAllDay ? null : createDraft.startTime,
-        endDate: createDraft.endDate,
-        endTime: createDraft.isAllDay ? null : createDraft.endTime,
-        isAllDay: createDraft.isAllDay,
-      },
-    });
-    if (created) {
-      setCreateDraft(null);
-    }
-  }
-
   return (
     <section
       ref={calendarPanelRef}
@@ -870,198 +814,6 @@ export function WeekCalendar({
           </div>
         </div>
       </div>
-
-      {createDraft ? (
-        <div className="calendar-create-form-shell">
-          <form
-            className="work-form calendar-create-form"
-            onSubmit={(event) => void handleCreateTask(event)}
-          >
-            <div className="calendar-create-form-heading">
-              <div>
-                <strong>タスクを追加</strong>
-                <span>{createDraft.sourceLabel}</span>
-              </div>
-              <button
-                className="inline-icon-button"
-                type="button"
-                aria-label="作成フォームを閉じる"
-                disabled={isCreatingTaskPending}
-                onClick={() => setCreateDraft(null)}
-              >
-                ×
-              </button>
-            </div>
-
-            <label>
-              <span>タスク名</span>
-              <input
-                ref={titleInputRef}
-                value={createDraft.title}
-                onChange={(event) =>
-                  setCreateDraft((current) =>
-                    current ? { ...current, title: event.target.value } : current,
-                  )
-                }
-                placeholder="例: 企画メモを整理"
-                disabled={isCreatingTaskPending}
-                maxLength={120}
-                required
-              />
-            </label>
-
-            <div className="calendar-create-grid">
-              <label>
-                <span>リスト</span>
-                <select
-                  value={createDraft.listId}
-                  onChange={(event) =>
-                    setCreateDraft((current) =>
-                      current
-                        ? { ...current, listId: event.target.value }
-                        : current,
-                    )
-                  }
-                  disabled={isCreatingTaskPending}
-                >
-                  {taskLists.length > 0 ? (
-                    taskLists.map((list) => (
-                      <option key={list.id} value={list.id}>
-                        {list.name}
-                      </option>
-                    ))
-                  ) : (
-                    <option value={fallbackListId}>タスク</option>
-                  )}
-                </select>
-              </label>
-              <label>
-                <span>開始日</span>
-                <input
-                  type="date"
-                  value={createDraft.startDate}
-                  onChange={(event) =>
-                    setCreateDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            startDate: event.target.value,
-                          }
-                        : current,
-                    )
-                  }
-                  disabled={isCreatingTaskPending}
-                  required
-                />
-              </label>
-              <label>
-                <span>開始時刻</span>
-                <input
-                  type="time"
-                  step={900}
-                  value={createDraft.startTime}
-                  onChange={(event) =>
-                    setCreateDraft((current) =>
-                      current ? { ...current, startTime: event.target.value } : current,
-                    )
-                  }
-                  disabled={isCreatingTaskPending || createDraft.isAllDay}
-                  required={!createDraft.isAllDay}
-                />
-              </label>
-              <label>
-                <span>終了日</span>
-                <input
-                  type="date"
-                  value={createDraft.endDate}
-                  onChange={(event) =>
-                    setCreateDraft((current) =>
-                      current ? { ...current, endDate: event.target.value } : current,
-                    )
-                  }
-                  disabled={isCreatingTaskPending}
-                  required
-                />
-              </label>
-              <label>
-                <span>終了時刻</span>
-                <input
-                  type="time"
-                  step={900}
-                  value={createDraft.endTime}
-                  onChange={(event) =>
-                    setCreateDraft((current) =>
-                      current ? { ...current, endTime: event.target.value } : current,
-                    )
-                  }
-                  disabled={isCreatingTaskPending || createDraft.isAllDay}
-                  required={!createDraft.isAllDay}
-                />
-              </label>
-            </div>
-
-            <label className="calendar-all-day-toggle">
-              <input
-                type="checkbox"
-                checked={createDraft.isAllDay}
-                onChange={(event) =>
-                  setCreateDraft((current) =>
-                    current
-                      ? {
-                          ...current,
-                          isAllDay: event.target.checked,
-                          startTime:
-                            event.target.checked || current.startTime
-                              ? current.startTime
-                              : "09:00",
-                          endTime:
-                            event.target.checked || current.endTime
-                              ? current.endTime
-                              : "10:00",
-                        }
-                      : current,
-                  )
-                }
-                disabled={isCreatingTaskPending}
-              />
-              <span>終日</span>
-            </label>
-
-            <label>
-              <span>メモ</span>
-              <textarea
-                value={createDraft.memo}
-                onChange={(event) =>
-                  setCreateDraft((current) =>
-                    current ? { ...current, memo: event.target.value } : current,
-                  )
-                }
-                disabled={isCreatingTaskPending}
-                maxLength={2000}
-                rows={2}
-              />
-            </label>
-
-            <div className="composer-actions">
-              <button
-                className="primary-button"
-                type="submit"
-                disabled={isCreatingTaskPending}
-              >
-                追加
-              </button>
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={isCreatingTaskPending}
-                onClick={() => setCreateDraft(null)}
-              >
-                キャンセル
-              </button>
-            </div>
-          </form>
-        </div>
-      ) : null}
 
       {viewMode === "month" ? (
         <MonthCalendar

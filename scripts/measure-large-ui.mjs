@@ -134,6 +134,12 @@ try {
     ),
   );
 
+  const taskCreateDialogResult = await verifyTaskCreateDialog(client, sessionId);
+  assertCommandScope("共通タスク作成ダイアログ", taskCreateDialogResult.commands, {
+    required: ["create_task", "list_task_page", "list_task_lists"],
+    forbidden: ["create_scheduled_task", "update_task", "update_subtask"],
+  });
+
   const navigationListEditResult = await verifyNavigationListEdit(
     client,
     sessionId,
@@ -415,13 +421,18 @@ try {
     client,
     sessionId,
   );
-  if (calendarDragCreateResult.commands.length > 0) {
-    throw new Error(
-      `カレンダードラッグ作成の保存前にcommandが呼ばれました: ${JSON.stringify(
-        calendarDragCreateResult.commands,
-      )}`,
-    );
-  }
+  assertCommandScope(
+    "カレンダードラッグ作成",
+    calendarDragCreateResult.commands,
+    {
+      required: [
+        "create_scheduled_task",
+        "list_task_page",
+        "list_calendar_items",
+      ],
+      forbidden: ["create_task", "update_task", "update_subtask"],
+    },
+  );
   measurements.push(
     createMeasurement(
       "calendar_drag_create",
@@ -994,6 +1005,139 @@ async function takeInvokeLog(client, sessionId) {
   );
 }
 
+async function verifyTaskCreateDialog(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.task-panel .task-add-button')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector('.task-create-dialog') &&
+      document.activeElement === document.querySelector(
+        '.task-create-dialog input[placeholder="例: 週次レビュー"]'
+      )
+    )`,
+  );
+  await setTaskCreateTitle(client, sessionId, "失敗保持テスト");
+  await evaluate(
+    client,
+    sessionId,
+    `window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'n',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true
+    }))`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector(
+      '.task-create-dialog input[placeholder="例: 週次レビュー"]'
+    )?.value === '失敗保持テスト'`,
+  );
+
+  const focusTrapWorked = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const dialog = document.querySelector('.task-create-dialog');
+      const submit = dialog?.querySelector('button[type="submit"]');
+      submit?.focus();
+      submit?.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Tab',
+        bubbles: true,
+        cancelable: true
+      }));
+      return document.activeElement === dialog?.querySelector(
+        '.task-create-dialog-heading .inline-icon-button'
+      );
+    })()`,
+  );
+  if (!focusTrapWorked) {
+    throw new Error("共通タスク作成ダイアログのフォーカス循環が不正です");
+  }
+
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.task-create-dialog button[type="submit"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector('.task-create-dialog') &&
+      document.querySelector(
+        '.task-create-dialog input[placeholder="例: 週次レビュー"]'
+      )?.value === '失敗保持テスト' &&
+      document.querySelector('.task-create-dialog-error') &&
+      !document.querySelector('.task-create-dialog button[type="submit"]')?.disabled
+    )`,
+  );
+
+  await setTaskCreateTitle(client, sessionId, "共通ダイアログ作成テスト");
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector(
+      '.task-create-dialog input[placeholder="例: 週次レビュー"]'
+    )?.value === '共通ダイアログ作成テスト'`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.task-create-dialog button[type="submit"]')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.task-create-dialog') &&
+      !document.querySelector('.task-detail-pane')`,
+  );
+  const restoredTriggerFocus = await evaluateValue(
+    client,
+    sessionId,
+    `document.activeElement === document.querySelector(
+      '.task-panel .task-add-button'
+    )`,
+  );
+  if (!restoredTriggerFocus) {
+    throw new Error("共通タスク作成ダイアログを閉じた後のフォーカス復帰が不正です");
+  }
+
+  const commands = await takeInvokeLog(client, sessionId);
+  if (commands.filter((command) => command === "create_task").length !== 2) {
+    throw new Error(
+      `共通タスク作成の失敗/再送コマンドが不正です: ${JSON.stringify(commands)}`,
+    );
+  }
+  return { commands };
+}
+
+async function setTaskCreateTitle(client, sessionId, value) {
+  await evaluate(
+    client,
+    sessionId,
+    `(() => {
+      const input = document.querySelector(
+        '.task-create-dialog input[placeholder="例: 週次レビュー"]'
+      );
+      if (!(input instanceof HTMLInputElement)) return;
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value'
+      )?.set;
+      setter?.call(input, ${JSON.stringify(value)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`,
+  );
+}
+
 async function verifyTaskCountdownControls(client, sessionId) {
   await resetInvokeLog(client, sessionId);
   await evaluate(
@@ -1515,7 +1659,7 @@ async function verifyCalendarOverflowPopup(
           list && list.clientHeight <= 420 &&
           popup && popup.scrollHeight <= popup.clientHeight + 1
         ),
-        createFormOpen: Boolean(document.querySelector('.calendar-create-form'))
+        createFormOpen: Boolean(document.querySelector('.task-create-dialog'))
       };
     })()`,
   );
@@ -1866,7 +2010,7 @@ async function verifyCalendarDragCreate(client, sessionId) {
               preview?.textContent?.includes(${JSON.stringify(
                 geometry.expectedEndTime,
               )}) &&
-              !document.querySelector('.calendar-create-form') &&
+              !document.querySelector('.task-create-dialog') &&
               (window.__taskTimerInvokeLog?.length ?? 0) === 0
             );
           })()`,
@@ -1877,13 +2021,13 @@ async function verifyCalendarDragCreate(client, sessionId) {
   await waitForPaintedExpression(
     client,
     sessionId,
-    `Boolean(document.querySelector('.calendar-create-form'))`,
+    `Boolean(document.querySelector('.task-create-dialog'))`,
   );
   const draft = await evaluateValue(
     client,
     sessionId,
     `(() => {
-      const form = document.querySelector('.calendar-create-form');
+      const form = document.querySelector('.task-create-dialog');
       const field = (label) => [...(form?.querySelectorAll('label') ?? [])]
         .find((element) => element.querySelector(':scope > span')?.textContent === label)
         ?.querySelector('input');
@@ -1892,8 +2036,8 @@ async function verifyCalendarDragCreate(client, sessionId) {
         startTime: field('開始時刻')?.value ?? null,
         endDate: field('終了日')?.value ?? null,
         endTime: field('終了時刻')?.value ?? null,
-        isAllDay: Boolean(form?.querySelector('.calendar-all-day-toggle input')?.checked),
-        sourceLabel: form?.querySelector('.calendar-create-form-heading span')?.textContent ?? null
+        isAllDay: Boolean(form?.querySelector('.task-create-all-day-toggle input')?.checked),
+        sourceLabel: form?.querySelector('.task-create-dialog-heading p')?.textContent ?? null
       };
     })()`,
   );
@@ -1912,17 +2056,22 @@ async function verifyCalendarDragCreate(client, sessionId) {
       )}`,
     );
   }
+  await setTaskCreateTitle(client, sessionId, "カレンダー範囲作成テスト");
   await evaluate(
     client,
     sessionId,
-    `[...document.querySelectorAll('.calendar-create-form button')]
-      .find((button) => button.textContent?.trim() === 'キャンセル')?.click()`,
+    `document.querySelector('.task-create-dialog button[type="submit"]')?.click()`,
   );
   await waitForPaintedExpression(
     client,
     sessionId,
-    `!document.querySelector('.calendar-create-form')`,
+    `!document.querySelector('.task-create-dialog') &&
+      !document.querySelector('.task-detail-pane') &&
+      window.__taskTimerInvokeLog?.includes('create_scheduled_task') &&
+      window.__taskTimerInvokeLog?.includes('list_task_page') &&
+      window.__taskTimerInvokeLog?.includes('list_calendar_items')`,
   );
+  const savedCommands = await takeInvokeLog(client, sessionId);
 
   await dragPointer(
     client,
@@ -1935,7 +2084,7 @@ async function verifyCalendarDragCreate(client, sessionId) {
   await waitForPaintedExpression(
     client,
     sessionId,
-    `!document.querySelector('.calendar-create-form') &&
+    `!document.querySelector('.task-create-dialog') &&
       !document.querySelector('.calendar-create-selection')`,
   );
 
@@ -1993,7 +2142,7 @@ async function verifyCalendarDragCreate(client, sessionId) {
           `document.querySelectorAll(
             '.calendar-create-selection.is-all-day'
           ).length === 3 &&
-            !document.querySelector('.calendar-create-form') &&
+            !document.querySelector('.task-create-dialog') &&
             (window.__taskTimerInvokeLog?.length ?? 0) === 0`,
         );
       },
@@ -2002,20 +2151,20 @@ async function verifyCalendarDragCreate(client, sessionId) {
   await waitForPaintedExpression(
     client,
     sessionId,
-    `Boolean(document.querySelector('.calendar-create-form'))`,
+    `Boolean(document.querySelector('.task-create-dialog'))`,
   );
   const allDayDraft = await evaluateValue(
     client,
     sessionId,
     `(() => {
-      const form = document.querySelector('.calendar-create-form');
+      const form = document.querySelector('.task-create-dialog');
       const field = (label) => [...(form?.querySelectorAll('label') ?? [])]
         .find((element) => element.querySelector(':scope > span')?.textContent === label)
         ?.querySelector('input');
       return {
         startDate: field('開始日')?.value ?? null,
         endDate: field('終了日')?.value ?? null,
-        isAllDay: Boolean(form?.querySelector('.calendar-all-day-toggle input')?.checked)
+        isAllDay: Boolean(form?.querySelector('.task-create-all-day-toggle input')?.checked)
       };
     })()`,
   );
@@ -2033,15 +2182,17 @@ async function verifyCalendarDragCreate(client, sessionId) {
   await evaluate(
     client,
     sessionId,
-    `[...document.querySelectorAll('.calendar-create-form button')]
+    `[...document.querySelectorAll('.task-create-dialog button')]
       .find((button) => button.textContent?.trim() === 'キャンセル')?.click()`,
   );
   await waitForPaintedExpression(
     client,
     sessionId,
-    `!document.querySelector('.calendar-create-form')`,
+    `!document.querySelector('.task-create-dialog')`,
   );
-  return { commands: await takeInvokeLog(client, sessionId) };
+  return {
+    commands: [...savedCommands, ...(await takeInvokeLog(client, sessionId))],
+  };
 }
 
 async function verifyCalendarMonthDragCreate(client, sessionId) {
@@ -2104,7 +2255,7 @@ async function verifyCalendarMonthDragCreate(client, sessionId) {
           `document.querySelectorAll(
             '.calendar-create-selection.is-month'
           ).length === 3 &&
-            !document.querySelector('.calendar-create-form') &&
+            !document.querySelector('.task-create-dialog') &&
             (window.__taskTimerInvokeLog?.length ?? 0) === 0`,
         );
       },
@@ -2113,20 +2264,20 @@ async function verifyCalendarMonthDragCreate(client, sessionId) {
   await waitForPaintedExpression(
     client,
     sessionId,
-    `Boolean(document.querySelector('.calendar-create-form'))`,
+    `Boolean(document.querySelector('.task-create-dialog'))`,
   );
   const draft = await evaluateValue(
     client,
     sessionId,
     `(() => {
-      const form = document.querySelector('.calendar-create-form');
+      const form = document.querySelector('.task-create-dialog');
       const field = (label) => [...(form?.querySelectorAll('label') ?? [])]
         .find((element) => element.querySelector(':scope > span')?.textContent === label)
         ?.querySelector('input');
       return {
         startDate: field('開始日')?.value ?? null,
         endDate: field('終了日')?.value ?? null,
-        isAllDay: Boolean(form?.querySelector('.calendar-all-day-toggle input')?.checked)
+        isAllDay: Boolean(form?.querySelector('.task-create-all-day-toggle input')?.checked)
       };
     })()`,
   );
@@ -2144,13 +2295,13 @@ async function verifyCalendarMonthDragCreate(client, sessionId) {
   await evaluate(
     client,
     sessionId,
-    `[...document.querySelectorAll('.calendar-create-form button')]
+    `[...document.querySelectorAll('.task-create-dialog button')]
       .find((button) => button.textContent?.trim() === 'キャンセル')?.click()`,
   );
   await waitForPaintedExpression(
     client,
     sessionId,
-    `!document.querySelector('.calendar-create-form')`,
+    `!document.querySelector('.task-create-dialog')`,
   );
   return { commands: await takeInvokeLog(client, sessionId) };
 }
@@ -3444,6 +3595,13 @@ function buildTauriInvokeMockSource(profile) {
         list_task_rows: () => clone(taskRows),
         list_calendar_items: () => clone(calendarItems),
         list_week_calendar_items: () => clone(calendarItems),
+        create_task: () => {
+          if (args.request?.title === "失敗保持テスト") {
+            throw new Error("作成失敗の入力保持テスト");
+          }
+          return clone(tasks[0]);
+        },
+        create_scheduled_task: () => clone(tasks[0]),
         toggle_task_favorite: () => {
           const task = tasks.find(
             (candidate) => candidate.id === args.request?.taskId

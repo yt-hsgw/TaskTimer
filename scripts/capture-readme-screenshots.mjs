@@ -20,6 +20,10 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 const outputDir = path.join(repoRoot, "docs", "assets", "readme");
 const outputPath = path.join(outputDir, "tasktimer-overview.png");
 const kanbanOutputPath = path.join(outputDir, "tasktimer-kanban.png");
+const taskCreateOutputPath = path.join(
+  outputDir,
+  "tasktimer-task-create.png",
+);
 const chromePath = await resolveChromePath();
 
 const vitePort = await getFreePort();
@@ -291,12 +295,12 @@ try {
   await waitForExpression(
     client,
     sessionId,
-    `Boolean(document.querySelector(".calendar-create-form"))`,
+    `Boolean(document.querySelector(".task-create-dialog"))`,
   );
   await client.send(
     "Runtime.evaluate",
     {
-      expression: `document.querySelector(".calendar-create-form-heading .inline-icon-button")?.click()`,
+      expression: `document.querySelector(".task-create-dialog-heading .inline-icon-button")?.click()`,
       awaitPromise: true,
     },
     sessionId,
@@ -403,6 +407,80 @@ try {
   await client.send(
     "Runtime.evaluate",
     {
+      expression: `document.querySelector('.task-panel .task-add-button')?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `Boolean(
+      document.querySelector('.task-create-dialog') &&
+      document.activeElement === document.querySelector(
+        '.task-create-dialog input[placeholder="例: 週次レビュー"]'
+      )
+    )`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `(() => {
+        const dialog = document.querySelector('.task-create-dialog');
+        const setValue = (input, value) => {
+          if (!(input instanceof HTMLInputElement) &&
+              !(input instanceof HTMLTextAreaElement)) return;
+          const prototype = input instanceof HTMLTextAreaElement
+            ? HTMLTextAreaElement.prototype
+            : HTMLInputElement.prototype;
+          Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(input, value);
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        const field = (label) => [...(dialog?.querySelectorAll('label') ?? [])]
+          .find((element) => element.querySelector(':scope > span')?.textContent === label)
+          ?.querySelector('input, textarea');
+        setValue(field('タスク名'), '次回スプリントを計画');
+        setValue(field('期限日'), '2026-07-15');
+        setValue(field('期限時刻'), '17:00');
+        setValue(field('メモ'), '優先順位と担当を整理して、チームへ共有する。');
+      })()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `document.querySelector(
+      '.task-create-dialog input[placeholder="例: 週次レビュー"]'
+    )?.value === '次回スプリントを計画'`,
+  );
+  await sleep(200);
+  const taskCreateScreenshot = await client.send(
+    "Page.captureScreenshot",
+    { format: "png", fromSurface: true, captureBeyondViewport: false },
+    sessionId,
+  );
+  await writeFile(
+    taskCreateOutputPath,
+    Buffer.from(taskCreateScreenshot.data, "base64"),
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
+      expression: `document.querySelector('.task-create-dialog-heading .inline-icon-button')?.click()`,
+      awaitPromise: true,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `!document.querySelector('.task-create-dialog')`,
+  );
+  await client.send(
+    "Runtime.evaluate",
+    {
       expression: `document.querySelector(".task-row-content")?.click()`,
       awaitPromise: true,
     },
@@ -444,6 +522,9 @@ try {
   console.log(`README screenshot written: ${path.relative(repoRoot, outputPath)}`);
   console.log(
     `README screenshot written: ${path.relative(repoRoot, kanbanOutputPath)}`,
+  );
+  console.log(
+    `README screenshot written: ${path.relative(repoRoot, taskCreateOutputPath)}`,
   );
 } finally {
   if (chromeProcess) {
