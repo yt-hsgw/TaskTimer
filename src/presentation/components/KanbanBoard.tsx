@@ -3,10 +3,12 @@ import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
+  pointerWithin,
   PointerSensor,
   useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
@@ -21,6 +23,9 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
+  CalendarCheck2,
+  CalendarClock,
+  CalendarPlus2,
   Check,
   EllipsisVertical,
   ListPlus,
@@ -34,8 +39,10 @@ import type {
   BoardColumn,
   TaskRow,
   TaskWithSubtasks,
+  WorkScheduleDraft,
 } from "../../application/usecases/contracts";
 import { usePresentationRenderProbe } from "../renderProbe";
+import { ScheduleAssignmentDialog } from "./ScheduleAssignmentDialog";
 
 type KanbanBoardProps = {
   columns: BoardColumn[];
@@ -49,6 +56,7 @@ type KanbanBoardProps = {
   totalTaskCount: number;
   hasMoreTasks: boolean;
   pendingTaskActionIds: ReadonlySet<string>;
+  todayDate: string;
   onSelectTask(taskId: string): void;
   onRequestCreateTask(boardColumnId: string, boardColumnTitle: string): void;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
@@ -58,12 +66,26 @@ type KanbanBoardProps = {
   onDeleteColumn(columnId: string, moveTasksToColumnId: string): Promise<boolean>;
   onDeleteCompletedTasks(boardColumnId: string): Promise<boolean>;
   onMoveTask(taskId: string, boardColumnId: string): Promise<boolean>;
+  onAssignWorkSchedule(
+    taskId: string,
+    schedule: WorkScheduleDraft,
+  ): Promise<boolean>;
   onLoadMoreTasks(): Promise<void>;
 };
 
 const columnDragId = (columnId: string) => `column:${columnId}`;
 const columnDropId = (columnId: string) => `column-drop:${columnId}`;
 const taskDragId = (taskId: string) => `task:${taskId}`;
+
+type KanbanScheduleTarget = "today" | "tomorrow" | "custom";
+
+const scheduleDropId = (target: KanbanScheduleTarget) =>
+  `schedule-target:${target}`;
+
+const kanbanCollisionDetection: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args);
+  return pointerCollisions.length > 0 ? pointerCollisions : closestCenter(args);
+};
 
 type PendingTaskMove = {
   taskId: string;
@@ -126,6 +148,7 @@ export function KanbanBoard({
   totalTaskCount,
   hasMoreTasks,
   pendingTaskActionIds,
+  todayDate,
   onSelectTask,
   onRequestCreateTask,
   onToggleTaskCompletion,
@@ -135,6 +158,7 @@ export function KanbanBoard({
   onDeleteColumn,
   onDeleteCompletedTasks,
   onMoveTask,
+  onAssignWorkSchedule,
   onLoadMoreTasks,
 }: KanbanBoardProps) {
   usePresentationRenderProbe("KanbanBoard");
@@ -147,6 +171,9 @@ export function KanbanBoard({
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
   const [pendingTaskMove, setPendingTaskMove] = useState<PendingTaskMove | null>(
+    null,
+  );
+  const [scheduleDialogTaskId, setScheduleDialogTaskId] = useState<string | null>(
     null,
   );
   const sensors = useSensors(
@@ -183,6 +210,9 @@ export function KanbanBoard({
   const activeTaskRow = activeTaskId
     ? taskRows.find((row) => row.id === activeTaskId) ?? null
     : null;
+  const scheduleDialogTask = scheduleDialogTaskId
+    ? taskRows.find((row) => row.id === scheduleDialogTaskId) ?? null
+    : null;
   const deletionDestinations = columns.filter(
     (column) => column.id !== pendingDeleteColumnId,
   );
@@ -209,8 +239,10 @@ export function KanbanBoard({
   }
 
   function handleDragOver(event: DragOverEvent) {
+    const isScheduleTarget =
+      event.over?.data.current?.type === "schedule-target";
     setDragOverColumnId(
-      event.active.data.current?.type === "task"
+      event.active.data.current?.type === "task" && !isScheduleTarget
         ? ((event.over?.data.current?.columnId as string | undefined) ?? null)
         : null,
     );
@@ -245,6 +277,24 @@ export function KanbanBoard({
 
     if (activeType === "task") {
       const taskId = active.data.current?.taskId as string | undefined;
+      const activeRow = taskId
+        ? taskRows.find((row) => row.id === taskId) ?? null
+        : null;
+      const scheduleTarget = over.data.current?.scheduleTarget as
+        | KanbanScheduleTarget
+        | undefined;
+      if (taskId && activeRow?.schedule === null && scheduleTarget) {
+        if (scheduleTarget === "custom") {
+          setScheduleDialogTaskId(taskId);
+        } else {
+          const date =
+            scheduleTarget === "today"
+              ? todayDate
+              : addDaysToDateInput(todayDate, 1);
+          void assignAllDaySchedule(taskId, date);
+        }
+        return;
+      }
       const sourceColumnId = active.data.current?.columnId as string | undefined;
       const destinationColumnId = over.data.current?.columnId as
         | string
@@ -259,6 +309,10 @@ export function KanbanBoard({
         void persistTaskMove(move);
       }
     }
+  }
+
+  function assignAllDaySchedule(taskId: string, date: string) {
+    return onAssignWorkSchedule(taskId, createAllDaySchedule(date));
   }
 
   async function persistTaskMove(move: PendingTaskMove) {
@@ -326,7 +380,7 @@ export function KanbanBoard({
 
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={kanbanCollisionDetection}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragCancel={() => {
@@ -359,12 +413,17 @@ export function KanbanBoard({
                     isCreatingTaskPending={isCreatingTaskPending}
                     canDelete={columns.length > 1}
                     pendingTaskActionIds={pendingTaskActionIds}
+                    todayDate={todayDate}
                     onSelectTask={onSelectTask}
                     onRequestCreateTask={onRequestCreateTask}
                     onToggleTaskCompletion={onToggleTaskCompletion}
                     onRenameColumn={onRenameColumn}
                     onRequestDelete={openDeleteDialog}
                     onDeleteCompletedTasks={onDeleteCompletedTasks}
+                    onAssignAllDaySchedule={assignAllDaySchedule}
+                    onRequestCustomSchedule={(taskId) =>
+                      setScheduleDialogTaskId(taskId)
+                    }
                   />
                 ))
               : null}
@@ -422,8 +481,17 @@ export function KanbanBoard({
             ) : null}
           </div>
         </SortableContext>
+        {activeTaskRow?.schedule === null
+          ? createPortal(
+              <KanbanScheduleTargets
+                taskTitle={activeTaskRow.title}
+                todayDate={todayDate}
+              />,
+              document.body,
+            )
+          : null}
         {createPortal(
-          <DragOverlay dropAnimation={null} zIndex={1000}>
+          <DragOverlay dropAnimation={null} zIndex={1200}>
             {activeTaskRow ? (
               <KanbanCardOverlay
                 row={activeTaskRow}
@@ -449,6 +517,20 @@ export function KanbanBoard({
             </span>
           </button>
         </div>
+      ) : null}
+
+      {scheduleDialogTask ? (
+        <ScheduleAssignmentDialog
+          initialDate={todayDate}
+          isPending={
+            isMutating || pendingTaskActionIds.has(scheduleDialogTask.id)
+          }
+          task={scheduleDialogTask}
+          onClose={() => setScheduleDialogTaskId(null)}
+          onSubmit={(schedule) =>
+            onAssignWorkSchedule(scheduleDialogTask.id, schedule)
+          }
+        />
       ) : null}
 
       {pendingDeleteColumn ? (
@@ -501,6 +583,80 @@ export function KanbanBoard({
   );
 }
 
+type KanbanScheduleTargetsProps = {
+  taskTitle: string;
+  todayDate: string;
+};
+
+function KanbanScheduleTargets({
+  taskTitle,
+  todayDate,
+}: KanbanScheduleTargetsProps) {
+  const tomorrowDate = addDaysToDateInput(todayDate, 1);
+  return (
+    <section
+      aria-label={`${taskTitle}の予定設定先`}
+      className="kanban-schedule-targets"
+    >
+      <header>
+        <span>予定を設定</span>
+        <strong title={taskTitle}>{taskTitle}</strong>
+      </header>
+      <div>
+        <KanbanScheduleDropTarget
+          target="today"
+          label="今日"
+          meta={formatDateLabel(todayDate)}
+        />
+        <KanbanScheduleDropTarget
+          target="tomorrow"
+          label="明日"
+          meta={formatDateLabel(tomorrowDate)}
+        />
+        <KanbanScheduleDropTarget
+          target="custom"
+          label="日時を選択"
+          meta="ダイアログ"
+        />
+      </div>
+    </section>
+  );
+}
+
+type KanbanScheduleDropTargetProps = {
+  target: KanbanScheduleTarget;
+  label: string;
+  meta: string;
+};
+
+function KanbanScheduleDropTarget({
+  target,
+  label,
+  meta,
+}: KanbanScheduleDropTargetProps) {
+  const { isOver, setNodeRef } = useDroppable({
+    id: scheduleDropId(target),
+    data: { type: "schedule-target", scheduleTarget: target },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`kanban-schedule-target ${isOver ? "is-over" : ""}`}
+      data-schedule-target={target}
+    >
+      {target === "today" ? (
+        <CalendarCheck2 aria-hidden="true" size={19} />
+      ) : target === "tomorrow" ? (
+        <CalendarPlus2 aria-hidden="true" size={19} />
+      ) : (
+        <CalendarClock aria-hidden="true" size={19} />
+      )}
+      <span>{label}</span>
+      <small>{meta}</small>
+    </div>
+  );
+}
+
 type SortableKanbanColumnProps = {
   column: BoardColumn;
   rows: TaskRow[];
@@ -511,12 +667,15 @@ type SortableKanbanColumnProps = {
   isCreatingTaskPending: boolean;
   canDelete: boolean;
   pendingTaskActionIds: ReadonlySet<string>;
+  todayDate: string;
   onSelectTask(taskId: string): void;
   onRequestCreateTask(boardColumnId: string, boardColumnTitle: string): void;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onRenameColumn(columnId: string, title: string): Promise<boolean>;
   onRequestDelete(columnId: string): void;
   onDeleteCompletedTasks(boardColumnId: string): Promise<boolean>;
+  onAssignAllDaySchedule(taskId: string, date: string): Promise<boolean>;
+  onRequestCustomSchedule(taskId: string): void;
 };
 
 function SortableKanbanColumn({
@@ -529,12 +688,15 @@ function SortableKanbanColumn({
   isCreatingTaskPending,
   canDelete,
   pendingTaskActionIds,
+  todayDate,
   onSelectTask,
   onRequestCreateTask,
   onToggleTaskCompletion,
   onRenameColumn,
   onRequestDelete,
   onDeleteCompletedTasks,
+  onAssignAllDaySchedule,
+  onRequestCustomSchedule,
 }: SortableKanbanColumnProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -827,8 +989,11 @@ function SortableKanbanColumn({
                 task={taskById.get(row.id) ?? null}
                 isSelected={row.id === selectedTaskId}
                 isMutating={isMutating || pendingTaskActionIds.has(row.id)}
+                todayDate={todayDate}
                 onSelectTask={onSelectTask}
                 onToggleTaskCompletion={onToggleTaskCompletion}
+                onAssignAllDaySchedule={onAssignAllDaySchedule}
+                onRequestCustomSchedule={onRequestCustomSchedule}
               />
             ))}
           </div>
@@ -854,8 +1019,11 @@ function SortableKanbanColumn({
                     task={taskById.get(row.id) ?? null}
                     isSelected={row.id === selectedTaskId}
                     isMutating={isMutating || pendingTaskActionIds.has(row.id)}
+                    todayDate={todayDate}
                     onSelectTask={onSelectTask}
                     onToggleTaskCompletion={onToggleTaskCompletion}
+                    onAssignAllDaySchedule={onAssignAllDaySchedule}
+                    onRequestCustomSchedule={onRequestCustomSchedule}
                   />
                 ))}
               </div>
@@ -872,8 +1040,11 @@ type SortableKanbanCardProps = {
   task: TaskWithSubtasks | null;
   isSelected: boolean;
   isMutating: boolean;
+  todayDate: string;
   onSelectTask(taskId: string): void;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
+  onAssignAllDaySchedule(taskId: string, date: string): Promise<boolean>;
+  onRequestCustomSchedule(taskId: string): void;
 };
 
 function SortableKanbanCard({
@@ -881,8 +1052,11 @@ function SortableKanbanCard({
   task,
   isSelected,
   isMutating,
+  todayDate,
   onSelectTask,
   onToggleTaskCompletion,
+  onAssignAllDaySchedule,
+  onRequestCustomSchedule,
 }: SortableKanbanCardProps) {
   const {
     listeners,
@@ -906,7 +1080,9 @@ function SortableKanbanCard({
       ref={setNodeRef}
       className={`kanban-card ${isSelected ? "is-selected" : ""} ${
         row.status === "done" ? "is-done" : ""
-      } ${isDragging ? "is-dragging" : ""}`}
+      } ${isDragging ? "is-dragging" : ""} ${
+        row.schedule === null ? "has-schedule-menu" : ""
+      }`}
       data-task-id={row.id}
       style={{
         transform: CSS.Transform.toString(transform),
@@ -945,7 +1121,163 @@ function SortableKanbanCard({
           progressPercent={progressPercent}
         />
       </button>
+      {row.schedule === null ? (
+        <KanbanCardScheduleMenu
+          taskId={row.id}
+          taskTitle={row.title}
+          todayDate={todayDate}
+          disabled={isMutating}
+          onAssignAllDaySchedule={onAssignAllDaySchedule}
+          onRequestCustomSchedule={onRequestCustomSchedule}
+        />
+      ) : null}
     </article>
+  );
+}
+
+type KanbanCardScheduleMenuProps = {
+  taskId: string;
+  taskTitle: string;
+  todayDate: string;
+  disabled: boolean;
+  onAssignAllDaySchedule(taskId: string, date: string): Promise<boolean>;
+  onRequestCustomSchedule(taskId: string): void;
+};
+
+function KanbanCardScheduleMenu({
+  taskId,
+  taskTitle,
+  todayDate,
+  disabled,
+  onAssignAllDaySchedule,
+  onRequestCustomSchedule,
+}: KanbanCardScheduleMenuProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 });
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const focusFrame = window.requestAnimationFrame(() => {
+      menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    });
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        !menuRef.current?.contains(target) &&
+        !triggerRef.current?.contains(target)
+      ) {
+        setIsOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  async function assignDate(date: string) {
+    setIsOpen(false);
+    await onAssignAllDaySchedule(taskId, date);
+    triggerRef.current?.focus();
+  }
+
+  function toggleMenu() {
+    if (isOpen) {
+      setIsOpen(false);
+      return;
+    }
+    const bounds = triggerRef.current?.getBoundingClientRect();
+    if (bounds) {
+      const menuHeight = 118;
+      const menuTop =
+        bounds.bottom + 4 + menuHeight <= window.innerHeight - 8
+          ? bounds.bottom + 4
+          : Math.max(8, bounds.top - menuHeight - 4);
+      setMenuPosition({
+        left: Math.max(8, Math.min(bounds.right - 200, window.innerWidth - 208)),
+        top: menuTop,
+      });
+    }
+    setIsOpen(true);
+  }
+
+  return (
+    <div
+      className="kanban-card-schedule-menu-wrap"
+      onKeyDown={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      <button
+        ref={triggerRef}
+        aria-label={`${taskTitle}の予定設定メニューを開く`}
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        className="kanban-card-schedule-menu-trigger"
+        disabled={disabled}
+        title="予定を設定"
+        type="button"
+        onClick={toggleMenu}
+      >
+        <EllipsisVertical aria-hidden="true" size={16} />
+      </button>
+      {isOpen
+        ? createPortal(
+            <div
+              ref={menuRef}
+              aria-label={`${taskTitle}の予定設定`}
+              className="kanban-card-schedule-menu"
+              role="menu"
+              style={menuPosition}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void assignDate(todayDate)}
+              >
+                <CalendarCheck2 aria-hidden="true" size={16} />
+                <span>今日</span>
+                <small>{formatDateLabel(todayDate)}</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void assignDate(addDaysToDateInput(todayDate, 1))}
+              >
+                <CalendarPlus2 aria-hidden="true" size={16} />
+                <span>明日</span>
+                <small>{formatDateLabel(addDaysToDateInput(todayDate, 1))}</small>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setIsOpen(false);
+                  onRequestCustomSchedule(taskId);
+                }}
+              >
+                <CalendarClock aria-hidden="true" size={16} />
+                <span>日時を選択</span>
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
   );
 }
 
@@ -1032,6 +1364,25 @@ function KanbanCardDetails({
       ) : null}
     </>
   );
+}
+
+function createAllDaySchedule(date: string): WorkScheduleDraft {
+  return {
+    startDate: date,
+    startTime: null,
+    endDate: date,
+    endTime: null,
+    isAllDay: true,
+  };
+}
+
+function addDaysToDateInput(value: string, amount: number) {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day + amount);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+    2,
+    "0",
+  )}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function formatDateLabel(value: string) {

@@ -38,6 +38,7 @@ const thresholds = {
   kanban: 1500,
   kanban_rename_blur: 1000,
   kanban_drag: 1500,
+  kanban_assign_unscheduled: 3000,
   pomodoro: 1000,
   pomodoro_start: 1000,
   same_navigation: 250,
@@ -333,6 +334,43 @@ try {
       thresholds.kanban_drag,
     ),
   );
+  const kanbanScheduleStartedAt = performance.now();
+  const kanbanScheduleResult = await verifyKanbanScheduleAssignment(
+    client,
+    sessionId,
+  );
+  const expectedCalendarDayItemCount =
+    profile.taskCount - kanbanScheduleResult.assignedOutsideTodayCount;
+  assertCommandScope("かんばん未設定タスク予定化", kanbanScheduleResult.commands, {
+    required: ["assign_work_schedule", "list_task_page"],
+    forbidden: [
+      "move_task_to_board_column",
+      "list_calendar_items",
+      "update_task",
+      "update_subtask",
+      "resize_scheduled_work_item",
+    ],
+  });
+  const kanbanScheduleCommandCount = kanbanScheduleResult.commands.filter(
+    (command) => command === "assign_work_schedule",
+  ).length;
+  if (kanbanScheduleCommandCount !== 3) {
+    throw new Error(
+      `かんばん予定化の保存回数が不正です: ${kanbanScheduleCommandCount}`,
+    );
+  }
+  assertComponentsDidNotRender(
+    "かんばん未設定タスク予定化",
+    kanbanScheduleResult.renderCounts,
+    ["LeftNavigation", "WeekCalendar", "SettingsPanel"],
+  );
+  measurements.push(
+    createMeasurement(
+      "kanban_assign_unscheduled",
+      performance.now() - kanbanScheduleStartedAt,
+      thresholds.kanban_assign_unscheduled,
+    ),
+  );
   measurements.push(
     await measureView({
       client,
@@ -524,7 +562,7 @@ try {
           const visibleCount = document.querySelectorAll(".calendar-item").length;
           const hiddenCount = [...document.querySelectorAll(".calendar-more")]
             .reduce((total, element) => total + Number(element.textContent?.match(/\\d+/)?.[0] ?? 0), 0);
-          return visibleCount + hiddenCount === ${profile.taskCount};
+          return visibleCount + hiddenCount === ${expectedCalendarDayItemCount};
         })()`,
     }),
   );
@@ -2116,6 +2154,346 @@ async function verifyKanbanCardDrag(client, sessionId) {
   };
 }
 
+async function verifyKanbanScheduleAssignment(client, sessionId) {
+  const commands = [];
+  await resetRenderCounts(client, sessionId);
+
+  await resetInvokeLog(client, sessionId);
+  const todayDrop = await dragKanbanCardToScheduleTarget(
+    client,
+    sessionId,
+    "today",
+  );
+  const immediateTodayPlacement = await inspectKanbanCardPlacement(
+    client,
+    sessionId,
+    todayDrop.taskId,
+    todayDrop.sourceColumnIndex,
+  );
+  if (!immediateTodayPlacement?.inSourceColumn) {
+    throw new Error(
+      `予定化直後にカードの列が変わりました: ${JSON.stringify(immediateTodayPlacement)}`,
+    );
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const card = document.querySelector(
+        '[data-task-id="' + CSS.escape(${JSON.stringify(todayDrop.taskId)}) + '"]'
+      );
+      return Boolean(
+        card &&
+        !card.classList.contains('has-schedule-menu') &&
+        !document.querySelector('.kanban-schedule-targets') &&
+        !document.querySelector('.kanban-card-overlay') &&
+        !document.querySelector('.task-detail-pane') &&
+        window.__taskTimerInvokeLog?.includes('assign_work_schedule') &&
+        window.__taskTimerInvokeLog?.includes('list_task_page') &&
+        !document.querySelector('.app-alert')
+      );
+    })()`,
+  );
+  const todayRequest = await evaluateValue(
+    client,
+    sessionId,
+    `window.__lastAssignWorkScheduleRequest`,
+  );
+  if (
+    todayRequest?.taskId !== todayDrop.taskId ||
+    todayRequest.schedule?.startDate !== todayDrop.todayDate ||
+    todayRequest.schedule?.endDate !== todayDrop.todayDate ||
+    todayRequest.schedule?.isAllDay !== true
+  ) {
+    throw new Error(`今日への予定化内容が不正です: ${JSON.stringify(todayRequest)}`);
+  }
+  commands.push(...(await takeInvokeLog(client, sessionId)));
+
+  await resetInvokeLog(client, sessionId);
+  const customDrop = await dragKanbanCardToScheduleTarget(
+    client,
+    sessionId,
+    "custom",
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.schedule-dialog')) &&
+      !document.querySelector('.kanban-schedule-targets') &&
+      !document.querySelector('.kanban-card-overlay')`,
+  );
+  const commandsBeforeCustomSubmit = await takeInvokeLog(client, sessionId);
+  if (
+    commandsBeforeCustomSubmit.includes("assign_work_schedule") ||
+    commandsBeforeCustomSubmit.includes("move_task_to_board_column")
+  ) {
+    throw new Error(
+      `日時選択の確定前に更新されました: ${JSON.stringify(commandsBeforeCustomSubmit)}`,
+    );
+  }
+  await resetInvokeLog(client, sessionId);
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.schedule-dialog .primary-button')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const card = document.querySelector(
+        '[data-task-id="' + CSS.escape(${JSON.stringify(customDrop.taskId)}) + '"]'
+      );
+      return Boolean(
+        !document.querySelector('.schedule-dialog') &&
+        card &&
+        !card.classList.contains('has-schedule-menu') &&
+        window.__taskTimerInvokeLog?.includes('assign_work_schedule') &&
+        window.__taskTimerInvokeLog?.includes('list_task_page') &&
+        !document.querySelector('.app-alert')
+      );
+    })()`,
+  );
+  const customRequest = await evaluateValue(
+    client,
+    sessionId,
+    `window.__lastAssignWorkScheduleRequest`,
+  );
+  if (
+    customRequest?.taskId !== customDrop.taskId ||
+    customRequest.schedule?.startDate !== customDrop.todayDate
+  ) {
+    throw new Error(`日時選択の予定化内容が不正です: ${JSON.stringify(customRequest)}`);
+  }
+  commands.push(...(await takeInvokeLog(client, sessionId)));
+
+  await resetInvokeLog(client, sessionId);
+  const menuTarget = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const card = [...document.querySelectorAll(
+        '.kanban-card.has-schedule-menu:not(.is-done)'
+      )].find((candidate) => {
+        const index = Number(candidate.dataset.taskId?.split('-').at(-1));
+        return Number.isFinite(index) && index >= 7;
+      });
+      const trigger = card?.querySelector('.kanban-card-schedule-menu-trigger');
+      if (!card?.dataset.taskId || !(trigger instanceof HTMLButtonElement)) {
+        return null;
+      }
+      trigger.click();
+      return { taskId: card.dataset.taskId };
+    })()`,
+  );
+  if (!menuTarget?.taskId) {
+    throw new Error("カード予定設定メニューの検証対象がありません");
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.kanban-card-schedule-menu')) &&
+      document.activeElement?.getAttribute('role') === 'menuitem' &&
+      !document.querySelector('.kanban-card-overlay')`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `[...document.querySelectorAll('.kanban-card-schedule-menu [role="menuitem"]')]
+      .find((button) => button.querySelector('span')?.textContent === '明日')?.click()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const card = document.querySelector(
+        '[data-task-id="' + CSS.escape(${JSON.stringify(menuTarget.taskId)}) + '"]'
+      );
+      return Boolean(
+        card &&
+        !card.classList.contains('has-schedule-menu') &&
+        !document.querySelector('.kanban-card-schedule-menu') &&
+        !document.querySelector('.kanban-schedule-targets') &&
+        window.__taskTimerInvokeLog?.includes('assign_work_schedule') &&
+        window.__taskTimerInvokeLog?.includes('list_task_page') &&
+        !document.querySelector('.app-alert')
+      );
+    })()`,
+  );
+  const menuRequest = await evaluateValue(
+    client,
+    sessionId,
+    `(() => ({
+      request: window.__lastAssignWorkScheduleRequest,
+      expectedDate: (() => {
+        const [year, month, day] = window.__taskTimerToday.split('-').map(Number);
+        const date = new Date(year, month - 1, day + 1);
+        return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-');
+      })()
+    }))()`,
+  );
+  if (
+    menuRequest?.request?.taskId !== menuTarget.taskId ||
+    menuRequest.request.schedule?.startDate !== menuRequest.expectedDate ||
+    menuRequest.request.schedule?.endDate !== menuRequest.expectedDate ||
+    menuRequest.request.schedule?.isAllDay !== true
+  ) {
+    throw new Error(`明日への予定化内容が不正です: ${JSON.stringify(menuRequest)}`);
+  }
+  commands.push(...(await takeInvokeLog(client, sessionId)));
+
+  return {
+    commands,
+    assignedOutsideTodayCount:
+      menuRequest.request.schedule.startDate === todayDrop.todayDate ? 0 : 1,
+    renderCounts: await takeRenderCounts(client, sessionId),
+  };
+}
+
+async function dragKanbanCardToScheduleTarget(client, sessionId, target) {
+  const geometry = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const cards = [...document.querySelectorAll(
+        '.kanban-card.has-schedule-menu:not(.is-done)'
+      )];
+      const source = cards.find((card) => {
+        const index = Number(card.dataset.taskId?.split('-').at(-1));
+        return Number.isFinite(index) && index >= 7;
+      });
+      const column = source?.closest('.kanban-column');
+      const columns = [...document.querySelectorAll('.kanban-column')];
+      if (!source?.dataset.taskId || !column) {
+        return null;
+      }
+      source.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const bounds = source.getBoundingClientRect();
+      return {
+        taskId: source.dataset.taskId,
+        sourceColumnIndex: columns.indexOf(column),
+        sourceX: bounds.left + bounds.width * 0.55,
+        sourceY: bounds.top + Math.min(bounds.height / 2, 36),
+        todayDate: window.__taskTimerToday
+      };
+    })()`,
+  );
+  if (!geometry || geometry.sourceColumnIndex < 0) {
+    throw new Error("かんばん予定化D&Dの対象カードがありません");
+  }
+
+  await client.send(
+    "Input.dispatchMouseEvent",
+    { type: "mouseMoved", x: geometry.sourceX, y: geometry.sourceY },
+    sessionId,
+  );
+  await client.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mousePressed",
+      x: geometry.sourceX,
+      y: geometry.sourceY,
+      button: "left",
+      buttons: 1,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  await client.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseMoved",
+      x: geometry.sourceX + 12,
+      y: geometry.sourceY + 8,
+      button: "left",
+      buttons: 1,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `(() => {
+      const overlay = document.querySelector('.kanban-card-overlay');
+      const targets = document.querySelector('.kanban-schedule-targets');
+      return Boolean(
+        overlay &&
+        targets &&
+        Number(getComputedStyle(targets).zIndex) >
+          Number(getComputedStyle(overlay.parentElement).zIndex)
+      );
+    })()`,
+    5000,
+  );
+  const targetGeometry = await evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const dropTarget = document.querySelector(
+        '[data-schedule-target=${JSON.stringify(target)}]'
+      );
+      if (!dropTarget) return null;
+      const bounds = dropTarget.getBoundingClientRect();
+      return {
+        x: bounds.left + bounds.width / 2,
+        y: bounds.top + bounds.height / 2
+      };
+    })()`,
+  );
+  if (!targetGeometry) {
+    throw new Error(`予定設定ターゲットが見つかりません: ${target}`);
+  }
+  await client.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseMoved",
+      x: targetGeometry.x,
+      y: targetGeometry.y,
+      button: "left",
+      buttons: 1,
+    },
+    sessionId,
+  );
+  await waitForExpression(
+    client,
+    sessionId,
+    `document.querySelector('[data-schedule-target=${JSON.stringify(target)}]')
+      ?.classList.contains('is-over') === true`,
+    5000,
+  );
+  await client.send(
+    "Input.dispatchMouseEvent",
+    {
+      type: "mouseReleased",
+      x: targetGeometry.x,
+      y: targetGeometry.y,
+      button: "left",
+      buttons: 0,
+      clickCount: 1,
+    },
+    sessionId,
+  );
+  return geometry;
+}
+
+function inspectKanbanCardPlacement(client, sessionId, taskId, sourceColumnIndex) {
+  return evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const selector = '[data-task-id="' + CSS.escape(${JSON.stringify(taskId)}) + '"]';
+      const columns = [...document.querySelectorAll('.kanban-column')];
+      const card = document.querySelector(selector);
+      return {
+        exists: Boolean(card),
+        inSourceColumn: Boolean(columns[${sourceColumnIndex}]?.querySelector(selector)),
+        hasOverlay: Boolean(document.querySelector('.kanban-card-overlay')),
+        hasScheduleTargets: Boolean(document.querySelector('.kanban-schedule-targets'))
+      };
+    })()`,
+  );
+}
+
 async function verifyCalendarOverflowPopup(
   client,
   sessionId,
@@ -3232,7 +3610,7 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
     sessionId,
     `(() => {
       const item = document.querySelector(
-        '.calendar-month-day .calendar-item.marker-scheduled:not(.is-calendar-preview)'
+        '.calendar-month-day .calendar-item.marker-scheduled:not(.is-calendar-preview):has(.calendar-month-range-time)'
       );
       const sourceCell = item?.closest('.calendar-month-day');
       const sourceDate = sourceCell?.dataset.calendarDate;
@@ -3286,11 +3664,6 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
             client,
             sessionId,
             `(() => {
-            const source = document.querySelector(
-              '.calendar-month-day[data-calendar-date=${JSON.stringify(
-                resizeGeometry.sourceDate,
-              )}] .calendar-item.marker-scheduled:not(.is-calendar-preview)'
-            );
             const previewStart = document.querySelector(
               '.calendar-month-day[data-calendar-date=${JSON.stringify(
                 resizeGeometry.targetDate,
@@ -3316,7 +3689,6 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
               startBounds.left > endBounds.left
             );
             return Boolean(
-              source &&
               previewStart?.querySelector('.calendar-preview-label')?.textContent === '変更後' &&
               previewStart?.querySelector('.calendar-month-range-time')?.textContent === '14:15' &&
               (
@@ -3385,12 +3757,12 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
       const target = document.querySelector(
         '.calendar-month-day[data-calendar-date=${JSON.stringify(
           resizeGeometry.targetDate,
-        )}] .calendar-item.marker-scheduled:not(.is-calendar-preview)'
+        )}] .calendar-item.marker-scheduled.connects-after:not(.is-calendar-preview)'
       );
       const source = document.querySelector(
         '.calendar-month-day[data-calendar-date=${JSON.stringify(
           resizeGeometry.sourceDate,
-        )}] .calendar-item.marker-scheduled:not(.is-calendar-preview)'
+        )}] .calendar-item.marker-scheduled.connects-before:not(.is-calendar-preview)'
       );
       const sourceBounds = source?.getBoundingClientRect();
       const targetBounds = target?.getBoundingClientRect();
@@ -3440,7 +3812,7 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
       ].join('-');
       const source = document.querySelector(
         '.calendar-month-day[data-calendar-date="' + sourceDate + '"] ' +
-        '.calendar-item.marker-scheduled:not(.is-calendar-preview) .calendar-item-content'
+        '.calendar-item.marker-scheduled.connects-before:not(.is-calendar-preview) .calendar-item-content'
       );
       const destinationCell = document.querySelector(
         '.calendar-month-day[data-calendar-date="' + destinationDate + '"]'
@@ -3502,7 +3874,7 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
         destinationEndDate,
         previewState,
         movedImmediately: Boolean(destinationCell.querySelector(
-          '.calendar-item.marker-scheduled:not(.is-calendar-preview)'
+          '.calendar-item.marker-scheduled.connects-after:not(.is-calendar-preview)'
         ))
       };
     })()`,
@@ -3525,12 +3897,12 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
       const destination = document.querySelector(
         '.calendar-month-day[data-calendar-date=${JSON.stringify(
           moveResult.destinationDate,
-        )}] .calendar-item.marker-scheduled:not(.is-calendar-preview)'
+        )}] .calendar-item.marker-scheduled.connects-after:not(.is-calendar-preview)'
       );
       const destinationEnd = document.querySelector(
         '.calendar-month-day[data-calendar-date=${JSON.stringify(
           moveResult.destinationEndDate,
-        )}] .calendar-item.marker-scheduled:not(.is-calendar-preview)'
+        )}] .calendar-item.marker-scheduled.connects-before:not(.is-calendar-preview)'
       );
       return Boolean(
         destination?.classList.contains('connects-after') &&
@@ -4058,6 +4430,8 @@ async function inspectPage(client, sessionId) {
         taskRows: document.querySelectorAll(".task-row").length,
         kanbanCards: document.querySelectorAll(".kanban-card").length,
         calendarItems: document.querySelectorAll(".calendar-item").length,
+        calendarHiddenItems: [...document.querySelectorAll(".calendar-more")]
+          .reduce((total, element) => total + Number(element.textContent?.match(/\d+/)?.[0] ?? 0), 0),
         timelineBars: document.querySelectorAll(".timeline-task-bar").length,
         activeWorkspaceMode: document.querySelector('.workspace-mode-switcher [role="tab"][aria-selected="true"]')?.textContent ?? null,
         visiblePanel: document.querySelector('.timeline-panel, .calendar-panel, .kanban-board, .task-panel')?.className ?? null,
@@ -4321,6 +4695,8 @@ function buildTauriInvokeMockSource(profile) {
   };
 
   window.__taskTimerInvokeLog = [];
+  window.__taskTimerToday = today;
+  window.__lastAssignWorkScheduleRequest = null;
   window.__TASKTIMER_RENDER_COUNTS__ = {};
   window.__TAURI_INTERNALS__ = {
     invoke(command, args = {}) {
@@ -4432,6 +4808,7 @@ function buildTauriInvokeMockSource(profile) {
         },
         create_scheduled_task: () => clone(tasks[0]),
         assign_work_schedule: () => new Promise((resolve, reject) => {
+          window.__lastAssignWorkScheduleRequest = clone(args.request);
           setTimeout(() => {
             const task = tasks.find(
               (candidate) => candidate.id === args.request?.taskId

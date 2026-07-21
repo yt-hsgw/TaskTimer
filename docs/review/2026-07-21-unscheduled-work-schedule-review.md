@@ -66,12 +66,24 @@ flowchart TD
 - GitHub #181で基盤とカレンダー／タイムラインを実装する。
 - GitHub #182でかんばんの `@dnd-kit` ターゲットを実装する。
 
+## #182 実装前レビュー
+
+判断: 承認。
+
+- [x] `schedule-target` と通常列のドロップを型で分離する。
+- [x] 今日／明日への割り当ては予定期間だけを変更し、状態を変更しない。
+- [x] 日時選択はダイアログ確定まで永続化しない。
+- [x] キーボード代替操作をカードメニューから提供する。
+- [x] 既設定、削除済み、アーカイブ済み、二重送信は#181のUse Caseと条件付きUPDATEで拒否する。
+- [x] 新しいDB列、外部通信、OS権限、Tauri capabilityを追加しない。
+- [x] 実装後に列移動、予定設定、Overlay前面表示、局所再同期を確認する。
+
 ## 実装後確認
 
 - `cargo test --lib`: 115件成功。初回割り当て、二重割り当て拒否、アーカイブ済み／削除済み拒否、Task/TaskRow Read Model整合を含む。
 - `cargo clippy --all-targets --all-features -- -D warnings`: 成功。
 - `npm run build`: 成功。
-- `npm run perf:ui -- --profile smoke --fail-on-warning`: 50タスク、警告0。
-- `npm run perf:ui -- --profile standard --fail-on-warning`: 401タスク、1,604サブタスク、警告0。週時刻枠、月日付セル、タイムライン軸への予定化と既存移動／期間変更を確認。
+- `npm run perf:ui -- --profile smoke --fail-on-warning`: 50タスク、警告0。かんばんで今日へのD&D、日時選択の確定前非保存、カードメニューからの明日設定、列位置維持、Overlay前面表示を確認。
+- `npm run perf:ui -- --profile standard --fail-on-warning`: 401タスク、1,604サブタスク、警告0。列内スクロール後の予定化、既存列D&D、週時刻枠、月日付セル、タイムライン軸への予定化と既存移動／期間変更を確認。
 - `npm run screenshots:readme`: 成功。1,440pxの画像生成に加え、1,024pxと760pxでペイン外スクロールや横方向のはみ出しがないことを確認。
 - `npm run audit:runtime-privacy`: 外部通信API、実行時ログ、リモートアセット、更新権限の検出なし。
