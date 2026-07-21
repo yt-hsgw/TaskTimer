@@ -140,6 +140,10 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<void>("resize_scheduled_work_item", {
       request: { target, schedule },
     }),
+  assignWorkSchedule: (taskId: string, schedule: WorkScheduleDraft) =>
+    invoke<void>("assign_work_schedule", {
+      request: { taskId, schedule },
+    }),
   moveScheduledWorkItem: (
     target: WorkTargetRef,
     destination: WorkScheduleMoveDraft,

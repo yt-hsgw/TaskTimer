@@ -18,6 +18,14 @@ export type TaskTag = {
   name: string;
 };
 
+export type WorkSchedule = {
+  startDate: string;
+  startTime: string | null;
+  endDate: string;
+  endTime: string | null;
+  isAllDay: boolean;
+};
+
 export type Task = {
   id: string;
   listId: string;
@@ -25,6 +33,7 @@ export type Task = {
   status: WorkStatus;
   isFavorite: boolean;
   colorToken: TaskColorToken | null;
+  schedule: WorkSchedule | null;
   plannedStartDate: string | null;
   dueDate: string | null;
   dueTime: string | null;

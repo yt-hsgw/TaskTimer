@@ -1714,6 +1714,14 @@ impl TaskTimerCommandRepository for SqliteDatabase {
         self.with_transaction(|transaction| update_work_schedule_row(transaction, &target, input))
     }
 
+    fn assign_work_schedule(
+        &self,
+        task_id: String,
+        input: WorkScheduleUpdate,
+    ) -> RepositoryResult<()> {
+        self.with_transaction(|transaction| assign_work_schedule_row(transaction, &task_id, input))
+    }
+
     fn move_scheduled_work_item(
         &self,
         target: WorkTargetRef,
@@ -3186,6 +3194,69 @@ fn update_work_schedule_row(
         return Err(format!("更新対象の{target_label}が存在しません"));
     }
     Ok(())
+}
+
+fn assign_work_schedule_row(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    input: WorkScheduleUpdate,
+) -> RepositoryResult<()> {
+    let schedule = input.schedule;
+    let updated = transaction
+        .execute(
+            "
+            UPDATE tasks
+            SET scheduled_start_date = ?1,
+                scheduled_start_time = ?2,
+                scheduled_end_date = ?3,
+                scheduled_end_time = ?4,
+                scheduled_is_all_day = ?5,
+                updated_at = ?6
+            WHERE id = ?7
+              AND deleted_at IS NULL
+              AND status <> 'archived'
+              AND scheduled_start_date IS NULL
+            ",
+            params![
+                schedule.start_date,
+                schedule.start_time,
+                schedule.end_date,
+                schedule.end_time,
+                i64::from(schedule.is_all_day),
+                input.now,
+                task_id
+            ],
+        )
+        .map_err(|error| format!("タスクへ予定期間を設定できません: {error}"))?;
+    if updated == 1 {
+        return Ok(());
+    }
+
+    let state = transaction
+        .query_row(
+            "
+            SELECT deleted_at, status, scheduled_start_date
+            FROM tasks
+            WHERE id = ?1
+            ",
+            params![task_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| format!("タスクの予定設定状態を確認できません: {error}"))?;
+
+    match state {
+        Some((None, status, Some(_))) if status != "archived" => {
+            Err("タスクにはすでに予定期間が設定されています".to_string())
+        }
+        _ => Err("予定設定対象のタスクが存在しません".to_string()),
+    }
 }
 
 fn select_work_schedule_for_move(
@@ -4731,6 +4802,11 @@ fn select_task_page_tasks(
                    tasks.created_at,
                    tasks.updated_at,
                    tasks.color_token,
+                   tasks.scheduled_start_date,
+                   tasks.scheduled_start_time,
+                   tasks.scheduled_end_date,
+                   tasks.scheduled_end_time,
+                   tasks.scheduled_is_all_day,
                    recurrence_rules.id AS recurrence_rule_id,
                    recurrence_rules.target_type AS recurrence_target_type,
                    recurrence_rules.target_id AS recurrence_target_id,
@@ -4956,6 +5032,11 @@ fn select_task_rows_by_ids(
                tasks.title,
                tasks.status,
                tasks.is_favorite,
+               tasks.scheduled_start_date,
+               tasks.scheduled_start_time,
+               tasks.scheduled_end_date,
+               tasks.scheduled_end_time,
+               tasks.scheduled_is_all_day,
                tasks.planned_start_date,
                tasks.due_date,
                tasks.due_time,
@@ -4989,6 +5070,11 @@ fn select_task_rows_by_ids(
                  tasks.title,
                  tasks.status,
                  tasks.is_favorite,
+                 tasks.scheduled_start_date,
+                 tasks.scheduled_start_time,
+                 tasks.scheduled_end_date,
+                 tasks.scheduled_end_time,
+                 tasks.scheduled_is_all_day,
                  tasks.planned_start_date,
                  tasks.due_date,
                  tasks.due_time,
@@ -5075,6 +5161,8 @@ fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec
                    planned_start_date, due_date, due_time, timer_target_seconds, memo,
                    sort_order, completed_at, deleted_at, created_at, updated_at,
                    color_token,
+                   scheduled_start_date, scheduled_start_time,
+                   scheduled_end_date, scheduled_end_time, scheduled_is_all_day,
                    recurrence_rule_id, recurrence_target_type, recurrence_target_id,
                    recurrence_frequency, recurrence_interval, recurrence_deleted_at,
                    recurrence_created_at, recurrence_updated_at
@@ -5095,6 +5183,11 @@ fn select_task_list(connection: &Connection, limit: i64) -> RepositoryResult<Vec
                      tasks.created_at,
                      tasks.updated_at,
                      tasks.color_token,
+                     tasks.scheduled_start_date,
+                     tasks.scheduled_start_time,
+                     tasks.scheduled_end_date,
+                     tasks.scheduled_end_time,
+                     tasks.scheduled_is_all_day,
                      recurrence_rules.id AS recurrence_rule_id,
                      recurrence_rules.target_type AS recurrence_target_type,
                      recurrence_rules.target_id AS recurrence_target_id,
@@ -5256,6 +5349,11 @@ fn select_task_rows(
                    tasks.title,
                    tasks.status,
                    tasks.is_favorite,
+                   tasks.scheduled_start_date,
+                   tasks.scheduled_start_time,
+                   tasks.scheduled_end_date,
+                   tasks.scheduled_end_time,
+                   tasks.scheduled_is_all_day,
                    tasks.planned_start_date,
                    tasks.due_date,
                    tasks.due_time,
@@ -5294,6 +5392,11 @@ fn select_task_rows(
                      tasks.title,
                      tasks.status,
                      tasks.is_favorite,
+                     tasks.scheduled_start_date,
+                     tasks.scheduled_start_time,
+                     tasks.scheduled_end_date,
+                     tasks.scheduled_end_time,
+                     tasks.scheduled_is_all_day,
                      tasks.planned_start_date,
                      tasks.due_date,
                      tasks.due_time,
@@ -6503,6 +6606,8 @@ fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<Task
                    planned_start_date, due_date, due_time, timer_target_seconds, memo,
                    sort_order, completed_at, deleted_at, created_at, updated_at,
                    color_token,
+                   scheduled_start_date, scheduled_start_time,
+                   scheduled_end_date, scheduled_end_time, scheduled_is_all_day,
                    recurrence_rule_id, recurrence_target_type, recurrence_target_id,
                    recurrence_frequency, recurrence_interval, recurrence_deleted_at,
                    recurrence_created_at, recurrence_updated_at
@@ -6523,6 +6628,11 @@ fn select_task_by_id(connection: &Connection, id: &str) -> RepositoryResult<Task
                      tasks.created_at,
                      tasks.updated_at,
                      tasks.color_token,
+                     tasks.scheduled_start_date,
+                     tasks.scheduled_start_time,
+                     tasks.scheduled_end_date,
+                     tasks.scheduled_end_time,
+                     tasks.scheduled_is_all_day,
                      recurrence_rules.id AS recurrence_rule_id,
                      recurrence_rules.target_type AS recurrence_target_type,
                      recurrence_rules.target_id AS recurrence_target_id,
@@ -6556,6 +6666,8 @@ fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryRe
                    planned_start_date, due_date, due_time, timer_target_seconds, memo,
                    sort_order, completed_at, deleted_at, created_at, updated_at,
                    color_token,
+                   scheduled_start_date, scheduled_start_time,
+                   scheduled_end_date, scheduled_end_time, scheduled_is_all_day,
                    recurrence_rule_id, recurrence_target_type, recurrence_target_id,
                    recurrence_frequency, recurrence_interval, recurrence_deleted_at,
                    recurrence_created_at, recurrence_updated_at
@@ -6576,6 +6688,11 @@ fn select_existing_task_by_id(connection: &Connection, id: &str) -> RepositoryRe
                      tasks.created_at,
                      tasks.updated_at,
                      tasks.color_token,
+                     tasks.scheduled_start_date,
+                     tasks.scheduled_start_time,
+                     tasks.scheduled_end_date,
+                     tasks.scheduled_end_time,
+                     tasks.scheduled_is_all_day,
                      recurrence_rules.id AS recurrence_rule_id,
                      recurrence_rules.target_type AS recurrence_target_type,
                      recurrence_rules.target_id AS recurrence_target_id,
@@ -6711,7 +6828,6 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
         due_date: row.get(6)?,
         due_time: row.get(7)?,
         timer_target_seconds: row.get(8)?,
-        recurrence_rule: map_optional_recurrence_rule(row, 16)?,
         memo: row.get(9)?,
         sort_order: row.get(10)?,
         completed_at: row.get(11)?,
@@ -6719,6 +6835,8 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRecord> {
         created_at: row.get(13)?,
         updated_at: row.get(14)?,
         color_token: row.get(15)?,
+        schedule: map_optional_work_schedule(row, 16)?,
+        recurrence_rule: map_optional_recurrence_rule(row, 21)?,
         tags: Vec::new(),
     })
 }
@@ -6765,9 +6883,37 @@ fn map_optional_recurrence_rule(
     }))
 }
 
+fn map_optional_work_schedule(
+    row: &rusqlite::Row<'_>,
+    start_index: usize,
+) -> rusqlite::Result<Option<WorkSchedule>> {
+    let start_date: Option<String> = row.get(start_index)?;
+    let start_time: Option<String> = row.get(start_index + 1)?;
+    let end_date: Option<String> = row.get(start_index + 2)?;
+    let end_time: Option<String> = row.get(start_index + 3)?;
+    let is_all_day = row.get::<_, i64>(start_index + 4)? != 0;
+
+    let Some(start_date) = start_date else {
+        if start_time.is_some() || end_date.is_some() || end_time.is_some() || is_all_day {
+            return Err(db_value_error("予定期間データが不完全です".to_string()));
+        }
+        return Ok(None);
+    };
+    let end_date = end_date.ok_or_else(|| db_value_error("予定終了日がありません".to_string()))?;
+    WorkSchedule::parse(
+        &start_date,
+        start_time.as_deref(),
+        &end_date,
+        end_time.as_deref(),
+        is_all_day,
+    )
+    .map(Some)
+    .map_err(db_value_error)
+}
+
 fn map_task_read_model_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRowRecord> {
-    let active_target_type_text: Option<String> = row.get(16)?;
-    let active_target_id: Option<String> = row.get(17)?;
+    let active_target_type_text: Option<String> = row.get(21)?;
+    let active_target_id: Option<String> = row.get(22)?;
     let active_timer_target = match (active_target_type_text, active_target_id) {
         (Some(target_type_text), Some(target_id)) => Some(target_ref(
             WorkTargetType::from_db(&target_type_text).map_err(db_value_error)?,
@@ -6783,16 +6929,17 @@ fn map_task_read_model_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskRowR
         title: row.get(3)?,
         status: WorkStatus::from_db(&row.get::<_, String>(4)?).map_err(db_value_error)?,
         is_favorite: row.get::<_, i64>(5)? != 0,
-        planned_start_date: row.get(6)?,
-        due_date: row.get(7)?,
-        due_time: row.get(8)?,
-        timer_target_seconds: row.get(9)?,
-        sort_order: row.get(10)?,
-        completed_at: row.get(11)?,
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
-        subtask_total_count: row.get(14)?,
-        completed_subtask_count: row.get(15)?,
+        schedule: map_optional_work_schedule(row, 6)?,
+        planned_start_date: row.get(11)?,
+        due_date: row.get(12)?,
+        due_time: row.get(13)?,
+        timer_target_seconds: row.get(14)?,
+        sort_order: row.get(15)?,
+        completed_at: row.get(16)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
+        subtask_total_count: row.get(19)?,
+        completed_subtask_count: row.get(20)?,
         active_timer_target,
         tags: Vec::new(),
     })
@@ -15881,6 +16028,99 @@ mod tests {
         assert_eq!(notification_gateway.messages().len(), 1);
         assert_eq!(registered_count, 1);
         assert_eq!(next_notification, None);
+    }
+
+    #[test]
+    fn assign_work_schedule_sets_only_an_unscheduled_task_once() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-21T00:00:00Z",
+        };
+        let task = usecases::create_task(&database, &clock, draft("予定未設定タスク"))
+            .expect("create task");
+
+        usecases::assign_work_schedule(
+            &database,
+            &clock,
+            task.id.clone(),
+            usecases::WorkScheduleDraft {
+                start_date: "2026-07-22".to_string(),
+                start_time: Some("09:15".to_string()),
+                end_date: "2026-07-22".to_string(),
+                end_time: Some("10:15".to_string()),
+                is_all_day: false,
+            },
+        )
+        .expect("assign work schedule");
+
+        let task_detail = database
+            .get_task_with_subtasks(&task.id)
+            .expect("task detail after assignment");
+        let rows = database
+            .list_task_rows(None, 20)
+            .expect("task rows after assignment");
+        let expected = WorkSchedule::parse(
+            "2026-07-22",
+            Some("09:15"),
+            "2026-07-22",
+            Some("10:15"),
+            false,
+        )
+        .expect("expected schedule");
+        assert_eq!(task_detail.task.schedule.as_ref(), Some(&expected));
+        assert_eq!(rows[0].schedule.as_ref(), Some(&expected));
+        assert_eq!(task_detail.task.planned_start_date, None);
+        assert_eq!(task_detail.task.due_date, None);
+
+        let error = usecases::assign_work_schedule(
+            &database,
+            &clock,
+            task.id,
+            usecases::WorkScheduleDraft {
+                start_date: "2026-07-23".to_string(),
+                start_time: None,
+                end_date: "2026-07-23".to_string(),
+                end_time: None,
+                is_all_day: true,
+            },
+        )
+        .expect_err("second assignment must fail");
+        assert!(error.contains("すでに予定期間"));
+
+        let persisted = database
+            .list_task_rows(None, 20)
+            .expect("task rows after rejected assignment");
+        assert_eq!(persisted[0].schedule.as_ref(), Some(&expected));
+    }
+
+    #[test]
+    fn assign_work_schedule_rejects_archived_and_deleted_tasks() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-21T00:00:00Z",
+        };
+        let archived = usecases::create_task(&database, &clock, draft("アーカイブ予定"))
+            .expect("create archived task");
+        let deleted = usecases::create_task(&database, &clock, draft("削除予定"))
+            .expect("create deleted task");
+        usecases::archive_task(&database, &clock, archived.id.clone()).expect("archive task");
+        usecases::delete_task(&database, &clock, deleted.id.clone()).expect("delete task");
+
+        let schedule = usecases::WorkScheduleDraft {
+            start_date: "2026-07-22".to_string(),
+            start_time: None,
+            end_date: "2026-07-22".to_string(),
+            end_time: None,
+            is_all_day: true,
+        };
+        let archived_error =
+            usecases::assign_work_schedule(&database, &clock, archived.id, schedule.clone())
+                .expect_err("archived task must be rejected");
+        let deleted_error = usecases::assign_work_schedule(&database, &clock, deleted.id, schedule)
+            .expect_err("deleted task must be rejected");
+
+        assert!(archived_error.contains("存在しません"));
+        assert!(deleted_error.contains("存在しません"));
     }
 
     #[test]

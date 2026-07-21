@@ -5,6 +5,7 @@ import type {
   Subtask,
   Task,
   TaskColorToken,
+  WorkSchedule,
   WorkTargetRef,
 } from "../../domain/task/types";
 
@@ -294,6 +295,7 @@ export type TaskRow = {
   title: string;
   status: Task["status"];
   isFavorite: boolean;
+  schedule: WorkSchedule | null;
   plannedStartDate: string | null;
   dueDate: string | null;
   dueTime: string | null;
@@ -410,6 +412,7 @@ export type TaskTimerGateway = {
     target: WorkTargetRef,
     schedule: WorkScheduleDraft,
   ): Promise<void>;
+  assignWorkSchedule(taskId: string, schedule: WorkScheduleDraft): Promise<void>;
   moveScheduledWorkItem(
     target: WorkTargetRef,
     destination: WorkScheduleMoveDraft,

@@ -47,6 +47,7 @@ const thresholds = {
   calendar_week: 1500,
   calendar_overflow_popup: 500,
   calendar_overlap_layout: 500,
+  calendar_assign_unscheduled: 1500,
   calendar_drag_create: 1500,
   calendar_move: 1500,
   calendar_resize: 1500,
@@ -57,6 +58,7 @@ const thresholds = {
   calendar_month_date_change: 1500,
   calendar_multiday_header: 2000,
   timeline: 2000,
+  timeline_assign_unscheduled: 1500,
   timeline_load_more: 1500,
   task_detail: 1000,
 };
@@ -684,6 +686,32 @@ try {
       thresholds.calendar_multiday_header,
     ),
   );
+  const calendarAssignStartedAt = performance.now();
+  const calendarAssignResult = await verifyCalendarAssignUnscheduled(
+    client,
+    sessionId,
+  );
+  assertCommandScope(
+    "カレンダー未設定タスク予定化",
+    calendarAssignResult.commands,
+    {
+      required: ["assign_work_schedule", "list_task_page", "list_calendar_items"],
+      forbidden: [
+        "update_task",
+        "update_subtask",
+        "move_scheduled_work_item",
+        "resize_scheduled_work_item",
+        "sync_notifications",
+      ],
+    },
+  );
+  measurements.push(
+    createMeasurement(
+      "calendar_assign_unscheduled",
+      performance.now() - calendarAssignStartedAt,
+      thresholds.calendar_assign_unscheduled,
+    ),
+  );
   measurements.push(
     await measureView({
       client,
@@ -693,10 +721,37 @@ try {
       action: clickWorkspaceMode("タイムライン"),
       ready: `document.querySelector('.workspace-mode-switcher [role="tab"][aria-selected="true"]')?.textContent === "タイムライン" &&
         document.querySelector(".timeline-panel") &&
-        document.querySelectorAll(".timeline-task-bar").length === ${initialTaskPageCount} &&
+        document.querySelectorAll(".timeline-task-bar").length > 0 &&
+        document.querySelector(".timeline-summary")?.textContent?.includes("読み込み済み ${initialTaskPageCount}/${profile.totalTaskCount}件") &&
         document.querySelectorAll(".timeline-scale-switch [role=tab]").length === 3 &&
         document.querySelector(".timeline-scroll")?.scrollWidth > document.querySelector(".timeline-scroll")?.clientWidth`,
     }),
+  );
+  const timelineAssignStartedAt = performance.now();
+  const timelineAssignResult = await verifyTimelineAssignUnscheduled(
+    client,
+    sessionId,
+  );
+  assertCommandScope(
+    "タイムライン未設定タスク予定化",
+    timelineAssignResult.commands,
+    {
+      required: ["assign_work_schedule", "list_task_page"],
+      forbidden: [
+        "list_calendar_items",
+        "update_task",
+        "update_subtask",
+        "move_scheduled_work_item",
+        "resize_scheduled_work_item",
+      ],
+    },
+  );
+  measurements.push(
+    createMeasurement(
+      "timeline_assign_unscheduled",
+      performance.now() - timelineAssignStartedAt,
+      thresholds.timeline_assign_unscheduled,
+    ),
   );
   await resetInvokeLog(client, sessionId);
   await resetRenderCounts(client, sessionId);
@@ -728,7 +783,11 @@ try {
     await takeRenderCounts(client, sessionId),
     ["LeftNavigation", "WeekCalendar", "KanbanBoard", "SettingsPanel"],
   );
-  await evaluate(client, sessionId, `document.querySelector('.timeline-task-bar')?.click()`);
+  await evaluate(
+    client,
+    sessionId,
+    `document.querySelector('.timeline-task-bar.is-selected')?.click()`,
+  );
   await waitForPaintedExpression(
     client,
     sessionId,
@@ -742,10 +801,7 @@ try {
         name: "timeline_load_more",
         thresholdMs: thresholds.timeline_load_more,
         action: `document.querySelector(".timeline-load-more button")?.click()`,
-        ready: `document.querySelectorAll(".timeline-task-bar").length === ${Math.min(
-          profile.taskCount,
-          taskPageSize * 2,
-        )} &&
+        ready: `document.querySelectorAll(".timeline-task-bar").length > ${initialTaskPageCount} &&
           document.querySelector(".timeline-summary")?.textContent?.includes("${Math.min(
             profile.taskCount,
             taskPageSize * 2,
@@ -3494,6 +3550,271 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
   };
 }
 
+async function verifyCalendarAssignUnscheduled(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  const title = await beginPendingNativeDrag(
+    client,
+    sessionId,
+    ".calendar-unscheduled-list > div > button:first-child",
+    9,
+    '.calendar-time-cell[data-calendar-hour="13"]',
+  );
+  if (!title) {
+    throw new Error("カレンダー予定化のドラッグ対象が見つかりません");
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.calendar-unscheduled-list > div.is-dragging'))`,
+  );
+  await dragOverPendingNativeDrag(client, sessionId);
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector('.calendar-item.is-assignment-preview .calendar-preview-label')?.textContent === "設定後"`,
+  );
+  const result = await finishPendingNativeDrag(client, sessionId);
+  if (
+    result?.title !== title ||
+    result.previewLabel !== "設定後" ||
+    result.previewTitle !== title
+  ) {
+    throw new Error(
+      `カレンダー予定化プレビューが不正です: ${JSON.stringify(result)}`,
+    );
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const title = ${JSON.stringify(title)};
+      const stillUnscheduled = [...document.querySelectorAll(
+        '.calendar-unscheduled-list span'
+      )].some((element) => element.textContent === title);
+      const scheduled = [...document.querySelectorAll(
+        '.calendar-item.marker-scheduled:not(.is-calendar-preview) .calendar-item-title'
+      )].some((element) => element.textContent === title);
+      return Boolean(
+        !stillUnscheduled &&
+        scheduled &&
+        !document.querySelector('.calendar-item.is-assignment-preview') &&
+        !document.querySelector('.task-detail-pane') &&
+        window.__taskTimerInvokeLog?.includes('assign_work_schedule') &&
+        window.__taskTimerInvokeLog?.includes('list_task_page') &&
+        window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
+        !document.querySelector('.app-alert')
+      );
+    })()`,
+  );
+  await evaluate(client, sessionId, clickCalendarMode("月"));
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.calendar-month-grid'))`,
+  );
+  await evaluate(
+    client,
+    sessionId,
+    `(() => {
+      const tray = document.querySelector('.calendar-unscheduled');
+      if (tray && !tray.open) {
+        tray.querySelector('summary')?.click();
+      }
+    })()`,
+  );
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.calendar-unscheduled-list'))`,
+  );
+  const monthTitle = await beginPendingNativeDrag(
+    client,
+    sessionId,
+    ".calendar-unscheduled-list > div > button:first-child",
+    10,
+    ".calendar-month-day:not(.is-outside-month)",
+  );
+  if (!monthTitle) {
+    throw new Error("月カレンダー予定化のドラッグ対象が見つかりません");
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.calendar-unscheduled-list > div.is-dragging'))`,
+  );
+  await dragOverPendingNativeDrag(client, sessionId);
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector('.calendar-month-day .calendar-item.is-assignment-preview .calendar-preview-label')?.textContent === "設定後"`,
+  );
+  const monthResult = await finishPendingNativeDrag(client, sessionId);
+  if (monthResult?.title !== monthTitle || monthResult.previewLabel !== "設定後") {
+    throw new Error(
+      `月カレンダー予定化プレビューが不正です: ${JSON.stringify(monthResult)}`,
+    );
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const title = ${JSON.stringify(monthTitle)};
+      const stillUnscheduled = [...document.querySelectorAll(
+        '.calendar-unscheduled-list span'
+      )].some((element) => element.textContent === title);
+      const scheduled = [...document.querySelectorAll(
+        '.calendar-month-day .calendar-item.marker-scheduled:not(.is-calendar-preview) .calendar-item-title'
+      )].some((element) => element.textContent === title);
+      return Boolean(!stillUnscheduled && scheduled && !document.querySelector('.app-alert'));
+    })()`,
+  );
+  await evaluate(client, sessionId, clickCalendarMode("週"));
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector('.calendar-view-switch .is-active')?.textContent === "週" &&
+      Boolean(document.querySelector('.calendar-time-grid:not(.is-day-mode)'))`,
+  );
+  return { commands: await takeInvokeLog(client, sessionId) };
+}
+
+async function verifyTimelineAssignUnscheduled(client, sessionId) {
+  await resetInvokeLog(client, sessionId);
+  const title = await beginPendingNativeDrag(
+    client,
+    sessionId,
+    ".timeline-unscheduled-item > button:first-child",
+    9,
+    ".timeline-axis > div",
+  );
+  if (!title) {
+    throw new Error("タイムライン予定化のドラッグ対象が見つかりません");
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `Boolean(document.querySelector('.timeline-unscheduled-item.is-dragging'))`,
+  );
+  await dragOverPendingNativeDrag(client, sessionId);
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `document.querySelector('.timeline-assignment-preview')?.textContent?.includes('へ設定')`,
+  );
+  const result = await finishPendingNativeDrag(client, sessionId);
+  if (result?.title !== title || !result.previewText?.includes("へ設定")) {
+    throw new Error(
+      `タイムライン予定化プレビューが不正です: ${JSON.stringify(result)}`,
+    );
+  }
+  await waitForPaintedExpression(
+    client,
+    sessionId,
+    `(() => {
+      const title = ${JSON.stringify(title)};
+      const stillUnscheduled = [...document.querySelectorAll(
+        '.timeline-unscheduled-item span'
+      )].some((element) => element.textContent === title);
+      const scheduled = [...document.querySelectorAll('.timeline-task-bar span')]
+        .some((element) => element.textContent === title);
+      return Boolean(
+        !stillUnscheduled &&
+        scheduled &&
+        !document.querySelector('.timeline-assignment-preview') &&
+        !document.querySelector('.task-detail-pane') &&
+        window.__taskTimerInvokeLog?.includes('assign_work_schedule') &&
+        window.__taskTimerInvokeLog?.includes('list_task_page') &&
+        !window.__taskTimerInvokeLog?.includes('list_calendar_items') &&
+        !document.querySelector('.app-alert')
+      );
+    })()`,
+  );
+  return { commands: await takeInvokeLog(client, sessionId) };
+}
+
+async function beginPendingNativeDrag(
+  client,
+  sessionId,
+  sourceSelector,
+  preferredIndex,
+  targetSelector,
+) {
+  return evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const sources = [...document.querySelectorAll(${JSON.stringify(sourceSelector)})];
+      const source = sources[${preferredIndex}] ?? sources.at(-1);
+      const target = document.querySelector(${JSON.stringify(targetSelector)});
+      if (!source || !target) {
+        return null;
+      }
+      const transfer = new DataTransfer();
+      const title = source.querySelector('span')?.textContent ?? '';
+      window.__taskTimerPendingNativeDrag = { source, target, transfer, title };
+      source.dispatchEvent(new DragEvent('dragstart', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer
+      }));
+      return title;
+    })()`,
+  );
+}
+
+async function dragOverPendingNativeDrag(client, sessionId) {
+  await evaluate(
+    client,
+    sessionId,
+    `(() => {
+      const pending = window.__taskTimerPendingNativeDrag;
+      if (!pending) return;
+      const bounds = pending.target.getBoundingClientRect();
+      pending.target.dispatchEvent(new DragEvent('dragover', {
+        bubbles: true,
+        cancelable: true,
+        clientX: bounds.left + bounds.width / 2,
+        clientY: bounds.top + bounds.height / 2,
+        dataTransfer: pending.transfer
+      }));
+    })()`,
+  );
+}
+
+async function finishPendingNativeDrag(client, sessionId) {
+  return evaluateValue(
+    client,
+    sessionId,
+    `(() => {
+      const pending = window.__taskTimerPendingNativeDrag;
+      if (!pending) return null;
+      const preview = document.querySelector(
+        '.calendar-item.is-assignment-preview, .timeline-assignment-preview'
+      );
+      const result = {
+        title: pending.title,
+        previewLabel: preview?.querySelector('.calendar-preview-label')?.textContent ?? null,
+        previewTitle: preview?.querySelector('.calendar-item-title')?.textContent ?? null,
+        previewText: preview?.textContent ?? null
+      };
+      const bounds = pending.target.getBoundingClientRect();
+      pending.target.dispatchEvent(new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        clientX: bounds.left + bounds.width / 2,
+        clientY: bounds.top + bounds.height / 2,
+        dataTransfer: pending.transfer
+      }));
+      pending.source.dispatchEvent(new DragEvent('dragend', {
+        bubbles: true,
+        dataTransfer: pending.transfer
+      }));
+      delete window.__taskTimerPendingNativeDrag;
+      return result;
+    })()`,
+  );
+}
+
 async function verifyCalendarMultiDayHeader(
   client,
   sessionId,
@@ -3737,6 +4058,9 @@ async function inspectPage(client, sessionId) {
         taskRows: document.querySelectorAll(".task-row").length,
         kanbanCards: document.querySelectorAll(".kanban-card").length,
         calendarItems: document.querySelectorAll(".calendar-item").length,
+        timelineBars: document.querySelectorAll(".timeline-task-bar").length,
+        activeWorkspaceMode: document.querySelector('.workspace-mode-switcher [role="tab"][aria-selected="true"]')?.textContent ?? null,
+        visiblePanel: document.querySelector('.timeline-panel, .calendar-panel, .kanban-board, .task-panel')?.className ?? null,
         activeNavigation: document.querySelector('button.nav-item[aria-current="page"]')?.getAttribute("aria-label") ?? null,
         alert: document.querySelector(".app-alert")?.textContent ?? null
       })`,
@@ -3858,6 +4182,7 @@ function buildTauriInvokeMockSource(profile) {
       status: index % 4 === 0 ? "in_progress" : "todo",
       isFavorite: index % 3 === 0,
       colorToken: index % 5 === 0 ? "blue" : null,
+      schedule: null,
       plannedStartDate: null,
       dueDate: index % 2 === 0 ? today : addDays(today, 1),
       dueTime: index % 5 === 0 ? "16:00" : null,
@@ -3879,6 +4204,13 @@ function buildTauriInvokeMockSource(profile) {
   let scheduledStartTime = "09:00";
   let scheduledEndDate = today;
   let scheduledEndTime = "10:00";
+  tasks[0].schedule = {
+    startDate: scheduledStartDate,
+    startTime: scheduledStartTime,
+    endDate: scheduledEndDate,
+    endTime: scheduledEndTime,
+    isAllDay: false
+  };
   const taskRows = tasks.map((task, index) => ({
     id: task.id,
     listId: task.listId,
@@ -3886,6 +4218,7 @@ function buildTauriInvokeMockSource(profile) {
     title: task.title,
     status: task.status,
     isFavorite: task.isFavorite,
+    schedule: task.schedule,
     plannedStartDate: task.plannedStartDate,
     dueDate: task.dueDate,
     dueTime: task.dueTime,
@@ -4022,6 +4355,23 @@ function buildTauriInvokeMockSource(profile) {
             listColorToken: "green"
           };
         }
+        if (task.schedule) {
+          return {
+            id: "calendar-perf-assigned-" + pad(index),
+            target: { type: "task", id: task.id },
+            title: task.title,
+            parentTitle: null,
+            date: task.schedule.startDate,
+            time: task.schedule.startTime,
+            endDate: task.schedule.endDate,
+            endTime: task.schedule.endTime,
+            isAllDay: task.schedule.isAllDay,
+            marker: "scheduled",
+            status: task.status,
+            colorToken: task.colorToken ?? "green",
+            listColorToken: "green"
+          };
+        }
         const overlap = overlapSchedules.get(index);
         if (overlap) {
           const subtask = overlap.isSubtask ? task.subtasks[1] : null;
@@ -4081,6 +4431,24 @@ function buildTauriInvokeMockSource(profile) {
           return clone(tasks[0]);
         },
         create_scheduled_task: () => clone(tasks[0]),
+        assign_work_schedule: () => new Promise((resolve, reject) => {
+          setTimeout(() => {
+            const task = tasks.find(
+              (candidate) => candidate.id === args.request?.taskId
+            );
+            const row = taskRows.find(
+              (candidate) => candidate.id === args.request?.taskId
+            );
+            const schedule = args.request?.schedule;
+            if (!task || !row || !schedule?.startDate || row.schedule) {
+              reject(new Error("予定を設定できません"));
+              return;
+            }
+            task.schedule = clone(schedule);
+            row.schedule = clone(schedule);
+            resolve(null);
+          }, 120);
+        }),
         toggle_task_favorite: () => {
           const task = tasks.find(
             (candidate) => candidate.id === args.request?.taskId
@@ -4198,6 +4566,14 @@ function buildTauriInvokeMockSource(profile) {
             scheduledStartTime = destination.startTime;
             scheduledEndDate = nextEnd.date;
             scheduledEndTime = nextEnd.time;
+            tasks[0].schedule = {
+              startDate: scheduledStartDate,
+              startTime: scheduledStartTime,
+              endDate: scheduledEndDate,
+              endTime: scheduledEndTime,
+              isAllDay: false
+            };
+            taskRows[0].schedule = clone(tasks[0].schedule);
             resolve(null);
           }, 120);
         }),
@@ -4219,6 +4595,8 @@ function buildTauriInvokeMockSource(profile) {
             scheduledStartTime = schedule.startTime;
             scheduledEndDate = schedule.endDate;
             scheduledEndTime = schedule.endTime;
+            tasks[0].schedule = clone(schedule);
+            taskRows[0].schedule = clone(schedule);
             resolve(null);
           }, 120);
         }),

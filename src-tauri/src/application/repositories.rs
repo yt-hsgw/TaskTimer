@@ -297,6 +297,7 @@ pub struct TaskRecord {
     pub status: WorkStatus,
     pub is_favorite: bool,
     pub color_token: Option<String>,
+    pub schedule: Option<WorkSchedule>,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub due_time: Option<String>,
@@ -344,6 +345,7 @@ pub struct TaskRowRecord {
     pub title: String,
     pub status: WorkStatus,
     pub is_favorite: bool,
+    pub schedule: Option<WorkSchedule>,
     pub planned_start_date: Option<String>,
     pub due_date: Option<String>,
     pub due_time: Option<String>,
@@ -787,6 +789,12 @@ pub trait TaskTimerCommandRepository {
     fn resize_scheduled_work_item(
         &self,
         target: WorkTargetRef,
+        input: WorkScheduleUpdate,
+    ) -> RepositoryResult<()>;
+
+    fn assign_work_schedule(
+        &self,
+        task_id: String,
         input: WorkScheduleUpdate,
     ) -> RepositoryResult<()>;
 

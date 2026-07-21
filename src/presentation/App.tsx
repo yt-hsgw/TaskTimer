@@ -2096,6 +2096,23 @@ export function App() {
     [runMutation],
   );
 
+  const handleAssignWorkSchedule = useCallback(
+    (taskId: string, schedule: WorkScheduleDraft) =>
+      runTaskActionMutation(
+        taskId,
+        async () => {
+          await tauriTaskTimerGateway.assignWorkSchedule(taskId, schedule);
+        },
+        {
+          refresh: {
+            taskPage: true,
+          },
+          invalidateCalendar: true,
+        },
+      ),
+    [runTaskActionMutation],
+  );
+
   const handleMoveScheduledCalendarItem = useCallback(
     (item: WeekCalendarItem, destination: WorkScheduleMoveDraft) => {
       if (item.marker !== "scheduled") {
@@ -2394,6 +2411,9 @@ export function App() {
                 viewMode={calendarViewMode}
                 anchorDate={calendarAnchorDate}
                 items={items}
+                tasks={visibleTasks}
+                taskRows={visibleTaskRows}
+                taskLists={taskLists}
                 isLoading={isLoading || isCalendarLoading}
                 isTaskCreateOpen={taskCreatePreset !== null}
                 isReschedulingItem={isCalendarMutating || isDetailMutating}
@@ -2403,10 +2423,12 @@ export function App() {
                 onNextRange={handleNextCalendarRange}
                 onToday={handleTodayCalendarRange}
                 onSelectItem={handleSelectCalendarItem}
+                onSelectTask={handleSelectTask}
                 onRequestCreateTask={handleRequestScheduledTaskCreate}
                 onRescheduleItem={handleRescheduleCalendarItem}
                 onResizeItem={handleResizeCalendarItem}
                 onMoveScheduledItem={handleMoveScheduledCalendarItem}
+                onAssignWorkSchedule={handleAssignWorkSchedule}
               />
               {selectedTask ? (
                 <MemoizedTaskDetailPane
@@ -2459,6 +2481,7 @@ export function App() {
                 hasMoreTasks={taskPageState.nextCursor !== null}
                 onSelectTask={handleSelectTask}
                 onLoadMoreTasks={handleLoadMoreTasks}
+                onAssignWorkSchedule={handleAssignWorkSchedule}
               />
               {selectedTask ? (
                 <MemoizedTaskDetailPane

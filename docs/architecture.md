@@ -166,6 +166,7 @@ flowchart LR
 | GetTaskDetail | 検索結果など一覧ページ外の親タスクIDから、詳細表示に必要なタスクとサブタスクを取得する。読み取り専用。 |
 | SearchWorkItems | タスク名、サブタスク名、メモ、タグ名をSQLiteで横断検索し、親タスクIDを含む最大50件の結果を返す。読み取り専用。 |
 | ListCalendarItems | 日付範囲とリスト、今日、お気に入り、タグ、かんばんのスコープを検証し、予定期間が重なるCalendar Read Modelを取得する。読み取り専用。 |
+| AssignWorkSchedule | 日時未設定の親タスクへカレンダー予定期間を初回割り当てする。既に予定がある場合は上書きしない。 |
 | ToggleTaskFavorite | タスク1件のお気に入り状態を更新する。 |
 | UpdateTaskStatus | かんばん画面から `todo`、`in_progress`、`done` のいずれかへ状態を変更する。`done` へ移動する場合は未完了サブタスク確認を維持し、`todo` / `in_progress` へ戻す場合は `completed_at` を解除する。 |
 | UpdateTaskSchedule | タスクの開始予定日、期限、通知ルールを同一トランザクションで更新する。 |
@@ -214,6 +215,8 @@ GitHub #158では、親タスク作成の開閉状態と `TaskCreatePreset` をA
 Issue #83 では、カレンダー上の期限マーカー移動も既存の `UpdateTask` / `UpdateSubtask` を使う。Presentationはドラッグ中の対象とドロップ先セルを一時状態として持ち、新しい `due_date` と `due_time` を組み立てる。開始予定日、タイトル、メモ、繰り返し設定、目標時間は既存値を保持し、保存と通知ルール同期はApplication/Infrastructureの既存境界に委ねる。リサイズや開始/終了期間モデルはGitHub #127で先行設計してから扱う。
 
 GitHub #127では、期限と独立したローカル予定期間を `scheduled_start_date/time`、`scheduled_end_date/time`、`scheduled_is_all_day` でタスクとサブタスクに追加する。`ResizeScheduledWorkItem` が対象と期間を検証して1トランザクションで保存し、Calendar Read Modelは表示範囲と重なる期間を返す。週/日は15分、終日/月は1日単位で両端を調整する。予定期間の変更では `planned_start_date`、`due_date/time`、期限通知を変更しない。
+
+GitHub #181では、既存タスクへの予定期間初回割り当てを `AssignWorkSchedule` へ分離する。Applicationは対象と期間を検証し、Infrastructureは `scheduled_start_date IS NULL` を含む条件付きUPDATEを1トランザクションで実行する。競合または二重ドロップでは既存予定を上書きしない。`TaskRecord` と `TaskRowItem` は予定期間を構造化DTOで返し、Presentationは `schedule = null` を予定未設定の正とする。開始予定、期限、通知ルール、タイマー、かんばん状態は変更しない。
 
 Issue #84 では、カレンダー項目の色をリスト単位で管理する。`TaskList` に `color_token` を追加し、`UpdateTaskList` がリスト名と色トークンの検証・保存トランザクション境界を持つ。Calendar Read Modelはタスクまたは親タスクの所属リスト色を `WeekCalendarItem` へ含め、Presentationは許可済みトークンからCSSクラスを選ぶ。当時は変更操作をタスク詳細に配置したが、GitHub #159でリスト色編集を左ペインへ移し、タスク詳細は個別タスク色の編集に分離する。
 

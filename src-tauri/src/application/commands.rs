@@ -512,6 +512,20 @@ pub fn resize_scheduled_work_item(
 }
 
 #[tauri::command]
+pub fn assign_work_schedule(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::AssignWorkScheduleRequestDto,
+) -> Result<(), String> {
+    super::usecases::assign_work_schedule(
+        database.inner(),
+        clock.inner(),
+        request.task_id,
+        request.schedule.into(),
+    )
+}
+
+#[tauri::command]
 pub fn move_scheduled_work_item(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,

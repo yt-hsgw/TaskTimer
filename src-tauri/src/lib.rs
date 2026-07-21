@@ -3,12 +3,12 @@ mod domain;
 mod infrastructure;
 
 use application::commands::{
-    archive_task, attach_tag_to_task, cancel_pomodoro, complete_pomodoro_break,
-    complete_pomodoro_work_phase, complete_subtask, complete_task, create_board_column,
-    create_csv_export, create_json_export, create_scheduled_task, create_sqlite_backup,
-    create_subtask, create_tag, create_task, create_task_in_board_column, create_task_list,
-    delete_board_column, delete_completed_tasks_in_board_column, delete_subtask, delete_tag,
-    delete_task, delete_task_list, detach_tag_from_task, dispatch_due_notifications,
+    archive_task, assign_work_schedule, attach_tag_to_task, cancel_pomodoro,
+    complete_pomodoro_break, complete_pomodoro_work_phase, complete_subtask, complete_task,
+    create_board_column, create_csv_export, create_json_export, create_scheduled_task,
+    create_sqlite_backup, create_subtask, create_tag, create_task, create_task_in_board_column,
+    create_task_list, delete_board_column, delete_completed_tasks_in_board_column, delete_subtask,
+    delete_tag, delete_task, delete_task_list, detach_tag_from_task, dispatch_due_notifications,
     get_active_pomodoro, get_active_timer, get_next_pending_notification,
     get_notification_display_mode, get_notifications_enabled, get_pomodoro_settings,
     get_task_detail, get_task_timer_settings, get_ui_preferences, health_check,
@@ -96,6 +96,7 @@ pub fn run() {
             update_task,
             update_subtask,
             resize_scheduled_work_item,
+            assign_work_schedule,
             move_scheduled_work_item,
             start_timer,
             start_standalone_pomodoro,
