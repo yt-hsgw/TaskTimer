@@ -2357,6 +2357,7 @@ export function App() {
                 totalTaskCount={taskPageState.totalCount}
                 hasMoreTasks={taskPageState.nextCursor !== null}
                 pendingTaskActionIds={visiblePendingTaskActionIds}
+                todayDate={todayDate}
                 onSelectTask={handleSelectTask}
                 onRequestCreateTask={handleRequestTaskCreate}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
@@ -2366,6 +2367,7 @@ export function App() {
                 onDeleteColumn={handleDeleteBoardColumn}
                 onDeleteCompletedTasks={handleDeleteCompletedBoardColumnTasks}
                 onMoveTask={handleMoveTaskToBoardColumn}
+                onAssignWorkSchedule={handleAssignWorkSchedule}
                 onLoadMoreTasks={handleLoadMoreTasks}
               />
               {selectedTask ? (

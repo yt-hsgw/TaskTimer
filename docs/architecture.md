@@ -218,6 +218,8 @@ GitHub #127では、期限と独立したローカル予定期間を `scheduled_
 
 GitHub #181では、既存タスクへの予定期間初回割り当てを `AssignWorkSchedule` へ分離する。Applicationは対象と期間を検証し、Infrastructureは `scheduled_start_date IS NULL` を含む条件付きUPDATEを1トランザクションで実行する。競合または二重ドロップでは既存予定を上書きしない。`TaskRecord` と `TaskRowItem` は予定期間を構造化DTOで返し、Presentationは `schedule = null` を予定未設定の正とする。開始予定、期限、通知ルール、タイマー、かんばん状態は変更しない。
 
+GitHub #182では、かんばんD&D内の予定設定先を `schedule-target`、通常の状態列を `column-drop` として識別する。Pointer位置の衝突を優先し、予定設定先では `AssignWorkSchedule` だけ、状態列では既存の状態移動だけを実行する。今日と明日は1日終日予定を即時保存し、任意日時はダイアログ確定まで保存しない。キーボード利用者にはカードの操作メニューから同じApplication境界へ到達する経路を用意する。状態変更と予定設定を同じドロップで行う案は、2更新間の部分成功と意図しない状態変更を生むため採用しない。
+
 Issue #84 では、カレンダー項目の色をリスト単位で管理する。`TaskList` に `color_token` を追加し、`UpdateTaskList` がリスト名と色トークンの検証・保存トランザクション境界を持つ。Calendar Read Modelはタスクまたは親タスクの所属リスト色を `WeekCalendarItem` へ含め、Presentationは許可済みトークンからCSSクラスを選ぶ。当時は変更操作をタスク詳細に配置したが、GitHub #159でリスト色編集を左ペインへ移し、タスク詳細は個別タスク色の編集に分離する。
 
 GitHub #159では、`tasks.color_token` をnullableで追加し、nullを所属リスト色の継承として扱う。`UpdateTask` は所属リスト変更とタスク色変更を同じトランザクションで保存し、Domain/Applicationの許可リストとSQLiteのCHECK制約で任意CSS値を拒否する。サブタスクは独立した色を保存せず、Calendar Read Modelで親タスクの実効色を継承する。`WeekCalendarItem` は本文用の実効タスク色と左端用のリスト色を分けて返し、Presentationは許可済みトークンだけをCSSクラスへ変換する。タスク色を必須値として作成時にリスト色をコピーする案は、後からリスト色を変更した際に継承意図が失われるため採用しない。

@@ -21,6 +21,25 @@ GitHub Issue: #182
 - GitHub #181の `AssignWorkSchedule` と `TaskRow.schedule` を利用する。
 - `@dnd-kit` の既存カードD&Dコンテキスト内で実装し、カレンダーのnative drag dataを持ち込まない。
 
+## D&D境界
+
+- 予定設定ターゲットは `type: schedule-target`、通常列とカードは従来どおり `columnId` を持つDroppableとして識別する。
+- Pointer位置にあるDroppableを優先し、Pointer情報がないキーボードD&Dでは既存の近傍判定へフォールバックする。
+- `schedule-target` へのドロップを検出した場合は列移動処理へ進まず、列へのドロップを検出した場合は予定期間を変更しない。
+- `今日` と `明日` はドロップ時に1日終日予定を保存する。`日時を選択` はダイアログを開くだけとし、利用者が確定した時点で保存する。
+- 保存成功後は現在のTaskPageだけを再同期し、列位置は維持する。失敗時はカードと列を変更せず、Application境界のエラーを表示する。
+
+```mermaid
+flowchart TD
+  Drag["予定未設定カードをドラッグ"] --> Hit{"ドロップ先のtype"}
+  Hit -->|schedule-target| Schedule{"対象"}
+  Hit -->|column / task| Move["既存の状態移動"]
+  Schedule -->|今日 / 明日| Assign["AssignWorkSchedule"]
+  Schedule -->|日時を選択| Dialog["予定設定ダイアログ"]
+  Dialog --> Assign
+  Assign --> Refresh["現在TaskPageを局所再同期"]
+```
+
 ## 設計理由
 
 予定設定と状態変更を1ドロップで暗黙に組み合わせると、利用者が意図しない状態変更を起こし、2つの更新を原子的に扱う専用Use Caseも必要になる。初回はドロップ先の責務を分離し、予定設定ターゲットでは予定だけを更新する。
@@ -42,6 +61,8 @@ GitHub Issue: #182
 - Overlayが列の背面へ入り、ドロップ先を視認できない。
 - 保存後に全画面再取得して移動元カードが一瞬戻る。
 - 予定済みカードを古い表示から再度ドロップして既存予定を上書きする。
+- `日時を選択` へのドロップだけで既定日時を保存し、利用者の確定前に予定が作られる。
+- カードメニュー操作がPointerSensorを起動し、意図せず状態移動になる。
 
 ## セキュリティと権限
 
