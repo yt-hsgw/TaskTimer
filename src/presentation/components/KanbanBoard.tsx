@@ -33,7 +33,14 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import type {
   BoardColumn,
@@ -55,6 +62,7 @@ type KanbanBoardProps = {
   isLoadingMore: boolean;
   totalTaskCount: number;
   hasMoreTasks: boolean;
+  workspaceModeSwitcher?: ReactNode;
   pendingTaskActionIds: ReadonlySet<string>;
   todayDate: string;
   onSelectTask(taskId: string): void;
@@ -147,6 +155,7 @@ export function KanbanBoard({
   isLoadingMore,
   totalTaskCount,
   hasMoreTasks,
+  workspaceModeSwitcher,
   pendingTaskActionIds,
   todayDate,
   onSelectTask,
@@ -368,6 +377,7 @@ export function KanbanBoard({
           <h2 id="kanban-title">状態別ビュー</h2>
         </div>
         <div className="kanban-heading-actions">
+          {workspaceModeSwitcher}
           <span
             className="task-count-badge"
             aria-label={`タスク総件数 ${totalTaskCount}件`}

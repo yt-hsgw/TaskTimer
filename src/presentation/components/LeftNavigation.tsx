@@ -16,8 +16,6 @@ import {
   ChevronDown,
   CircleDot,
   EllipsisVertical,
-  PanelLeftClose,
-  PanelLeftOpen,
   Pencil,
   Plus,
   Settings,
@@ -74,7 +72,6 @@ type LeftNavigationProps = {
     colorToken: TaskListColorToken,
   ): Promise<boolean>;
   onDeleteTaskList(listId: string): Promise<boolean>;
-  onToggle(): void;
 };
 
 export function LeftNavigation({
@@ -89,7 +86,6 @@ export function LeftNavigation({
   onCreateTaskList,
   onUpdateTaskList,
   onDeleteTaskList,
-  onToggle,
 }: LeftNavigationProps) {
   usePresentationRenderProbe("LeftNavigation");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -102,6 +98,7 @@ export function LeftNavigation({
   const [listMenu, setListMenu] = useState<ListMenuState | null>(null);
   const navigationRef = useRef<HTMLElement>(null);
   const listMenuRef = useRef<HTMLDivElement>(null);
+  const isSavingCreateRef = useRef(false);
   const listMenuTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const pendingListMenuFocusId = useRef<string | null>(null);
   const activeMenuList = listMenu
@@ -267,26 +264,59 @@ export function LeftNavigation({
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    await saveNewList();
+  };
+
+  const resetCreateDraft = () => {
+    setIsCreateOpen(false);
+    setNewListName("");
+  };
+
+  const saveNewList = async () => {
+    if (isSavingCreateRef.current) {
+      return;
+    }
     if (hasReachedTaskListLimit) {
-      setIsCreateOpen(false);
-      setNewListName("");
+      resetCreateDraft();
       return;
     }
     const name = newListName.trim();
     if (!name) {
+      resetCreateDraft();
       return;
     }
-    const created = await onCreateTaskList(name);
-    if (created) {
-      setNewListName("");
-      setIsCreateOpen(false);
+    isSavingCreateRef.current = true;
+    try {
+      const created = await onCreateTaskList(name);
+      if (created) {
+        resetCreateDraft();
+      }
+    } finally {
+      isSavingCreateRef.current = false;
     }
+  };
+
+  const handleCreateBlur = (event: ReactFocusEvent<HTMLFormElement>) => {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+    void saveNewList();
+  };
+
+  const handleCreateKeyDown = (
+    event: ReactKeyboardEvent<HTMLFormElement>,
+  ) => {
+    if (event.key !== "Escape") {
+      return;
+    }
+    event.preventDefault();
+    resetCreateDraft();
   };
 
   useEffect(() => {
     if (hasReachedTaskListLimit && isCreateOpen) {
-      setIsCreateOpen(false);
-      setNewListName("");
+      resetCreateDraft();
     }
   }, [hasReachedTaskListLimit, isCreateOpen]);
 
@@ -397,34 +427,6 @@ export function LeftNavigation({
       className="left-navigation"
       aria-label="主要ナビゲーション"
     >
-      <div className="nav-header">
-        {isOpen ? (
-          <div className="nav-brand">
-            <strong>TaskTimer</strong>
-            <span>ローカルタスク</span>
-          </div>
-        ) : null}
-        <button
-          className="nav-icon-button"
-          type="button"
-          aria-label={isOpen ? "左ペインを閉じる" : "左ペインを開く"}
-          title="左ペインを開閉"
-          aria-expanded={isOpen}
-          onClick={() => {
-            closeListMenu();
-            setIsCreateOpen(false);
-            setEditingListId(null);
-            onToggle();
-          }}
-        >
-          {isOpen ? (
-            <PanelLeftClose aria-hidden="true" size={20} strokeWidth={1.8} />
-          ) : (
-            <PanelLeftOpen aria-hidden="true" size={20} strokeWidth={1.8} />
-          )}
-        </button>
-      </div>
-
       <nav className="nav-sections" aria-label="ビュー">
         <div className="nav-section">
           <NavButton
@@ -562,21 +564,21 @@ export function LeftNavigation({
                 />
               ) : null}
               {isOpen && isCreateOpen ? (
-                <form className="nav-list-form nav-list-create" onSubmit={handleCreate}>
+                <form
+                  className="nav-list-form nav-list-create"
+                  onSubmit={handleCreate}
+                  onBlur={handleCreateBlur}
+                  onKeyDown={handleCreateKeyDown}
+                >
                   <input
                     value={newListName}
                     onChange={(event) => setNewListName(event.target.value)}
                     placeholder="新しいリスト"
                     maxLength={80}
                     disabled={isMutating}
+                    aria-label="新しいリスト名"
                     autoFocus
                   />
-                  <button
-                    type="submit"
-                    disabled={isMutating || !newListName.trim()}
-                  >
-                    追加
-                  </button>
                 </form>
               ) : null}
               {isOpen && !isCreateOpen ? (

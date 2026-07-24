@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type {
   ActivePomodoro,
   BoardColumn,
@@ -2269,6 +2270,28 @@ export function App() {
 
   const closeDetailPane = clearDetailSelection;
 
+  const workspaceModeSwitcher =
+    activeView.kind !== "settings" && activeView.kind !== "pomodoro" ? (
+      <div
+        className="workspace-mode-switcher"
+        role="tablist"
+        aria-label="表示形式"
+      >
+        {workspaceModes.map((mode) => (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceMode === mode.value}
+            className={workspaceMode === mode.value ? "is-active" : ""}
+            key={mode.value}
+            onClick={() => handleSelectWorkspaceMode(mode.value)}
+          >
+            {mode.label}
+          </button>
+        ))}
+      </div>
+    ) : null;
+
   return (
     <main
       className={`app-shell ${
@@ -2277,6 +2300,20 @@ export function App() {
     >
       <header className="top-bar">
         <div className="top-bar-title">
+          <button
+            className="top-bar-icon-button app-nav-toggle-button"
+            type="button"
+            aria-label={isNavigationOpen ? "左ペインを閉じる" : "左ペインを開く"}
+            title="左ペインを開閉"
+            aria-expanded={isNavigationOpen}
+            onClick={handleToggleNavigation}
+          >
+            {isNavigationOpen ? (
+              <PanelLeftClose aria-hidden="true" size={20} strokeWidth={1.8} />
+            ) : (
+              <PanelLeftOpen aria-hidden="true" size={20} strokeWidth={1.8} />
+            )}
+          </button>
           <h1>TaskTimer</h1>
         </div>
         <MemoizedGlobalSearch
@@ -2327,32 +2364,9 @@ export function App() {
           onCreateTaskList={handleCreateTaskList}
           onUpdateTaskList={handleUpdateTaskList}
           onDeleteTaskList={handleDeleteTaskList}
-          onToggle={handleToggleNavigation}
         />
 
         <section className="workspace-main" aria-label="現在のビュー">
-          {activeView.kind !== "settings" && activeView.kind !== "pomodoro" ? (
-            <div className="workspace-mode-bar">
-              <div
-                className="workspace-mode-switcher"
-                role="tablist"
-                aria-label="表示形式"
-              >
-                {workspaceModes.map((mode) => (
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={workspaceMode === mode.value}
-                    className={workspaceMode === mode.value ? "is-active" : ""}
-                    key={mode.value}
-                    onClick={() => handleSelectWorkspaceMode(mode.value)}
-                  >
-                    {mode.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
           {activeView.kind === "list" ||
           activeView.kind === "today" ||
           activeView.kind === "favorites" ||
@@ -2393,6 +2407,7 @@ export function App() {
                 isLoadingMore={isLoadingMoreTasks}
                 totalTaskCount={taskPageState.totalCount}
                 hasMoreTasks={taskPageState.nextCursor !== null}
+                workspaceModeSwitcher={workspaceModeSwitcher}
                 pendingTaskActionIds={visiblePendingTaskActionIds}
                 selectedSubtaskId={selectedSubtaskId}
                 onSelectTask={handleSelectTask}
@@ -2460,6 +2475,7 @@ export function App() {
                 isLoadingMore={isLoadingMoreTasks}
                 totalTaskCount={taskPageState.totalCount}
                 hasMoreTasks={taskPageState.nextCursor !== null}
+                workspaceModeSwitcher={workspaceModeSwitcher}
                 pendingTaskActionIds={visiblePendingTaskActionIds}
                 todayDate={todayDate}
                 onSelectTask={handleSelectTask}
@@ -2524,6 +2540,7 @@ export function App() {
                 isTaskCreateOpen={taskCreatePreset !== null}
                 isReschedulingItem={isCalendarMutating || isDetailMutating}
                 selectedTarget={selectedCalendarTarget}
+                workspaceModeSwitcher={workspaceModeSwitcher}
                 onChangeViewMode={handleChangeCalendarViewMode}
                 onPreviousRange={handlePreviousCalendarRange}
                 onNextRange={handleNextCalendarRange}
