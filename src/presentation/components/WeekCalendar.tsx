@@ -6,6 +6,7 @@ import type {
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
+import { flushSync } from "react-dom";
 import { CalendarClock, GripHorizontal, GripVertical, X } from "lucide-react";
 import type {
   TaskListItem,
@@ -796,7 +797,9 @@ export function WeekCalendar({
     if (!preview) {
       return false;
     }
-    setPendingMove({ item: preview, isSaved: false });
+    flushSync(() => {
+      setPendingMove({ item: preview, isSaved: false });
+    });
     const saved =
       item.marker === "scheduled"
         ? await onMoveScheduledItem(item, {
@@ -845,7 +848,9 @@ export function WeekCalendar({
     if (!preview) {
       return false;
     }
-    setPendingMove({ item: preview, isSaved: false });
+    flushSync(() => {
+      setPendingMove({ item: preview, isSaved: false });
+    });
     const saved = await persistResizeItem(item, schedule);
     setPendingMove((current) =>
       current?.item.id === item.id && saved
@@ -2396,8 +2401,8 @@ function getCalendarRangeSegment(
   ) {
     return null;
   }
-  const boundaryStart = rangeBoundaryStart ?? getWeekStartDate(displayDate);
-  const boundaryEnd = rangeBoundaryEnd ?? getWeekEndDate(displayDate);
+  const boundaryStart = rangeBoundaryStart ?? item.date;
+  const boundaryEnd = rangeBoundaryEnd ?? item.endDate;
   const connectsBefore = displayDate > item.date && displayDate > boundaryStart;
   const connectsAfter = displayDate < item.endDate && displayDate < boundaryEnd;
   return {

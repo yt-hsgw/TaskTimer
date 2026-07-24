@@ -3804,7 +3804,7 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
       const sourceDate = ${JSON.stringify(resizeGeometry.sourceDate)};
       const [year, month, day] = sourceDate.split('-').map(Number);
       const destination = new Date(year, month - 1, day);
-      destination.setDate(destination.getDate() + 2);
+      destination.setDate(destination.getDate() + 1);
       const destinationDate = [
         destination.getFullYear(),
         String(destination.getMonth() + 1).padStart(2, '0'),
@@ -3855,6 +3855,12 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
           previewStart?.classList.contains('connects-after') &&
           previewEnd?.classList.contains('connects-before')
         ),
+        wrapsToNextWeekRow: Boolean(
+          previewStartBounds &&
+          previewEndBounds &&
+          previewEndBounds.top > previewStartBounds.top &&
+          previewEndBounds.left < previewStartBounds.left
+        ),
         gap: previewStartBounds && previewEndBounds
           ? Math.abs(previewStartBounds.right - previewEndBounds.left)
           : null
@@ -3884,7 +3890,8 @@ async function verifyCalendarMonthDateChange(client, sessionId) {
     moveResult.previewState?.label !== "移動後" ||
     !moveResult.previewState?.hasTwoDayRange ||
     moveResult.previewState?.gap === null ||
-    moveResult.previewState.gap > 2
+    (!moveResult.previewState?.wrapsToNextWeekRow &&
+      moveResult.previewState.gap > 2)
   ) {
     throw new Error(
       `月表示のドロップ直後の日付が不正です: ${JSON.stringify(moveResult)}`,
