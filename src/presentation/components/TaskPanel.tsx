@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, EllipsisVertical, Pause, Play, Square } from "lucide-react";
 import type {
   TaskListItem,
@@ -278,6 +278,8 @@ type TaskRowItemProps = {
   onStopTimer(): Promise<boolean>;
 };
 
+type TaskRowMenuMode = "actions" | "due" | "list" | null;
+
 function TaskRowItem({
   row,
   task,
@@ -304,15 +306,14 @@ function TaskRowItem({
 }: TaskRowItemProps) {
   const hasProgress = row.subtaskTotalCount > 0;
   const subtasks = task?.subtasks ?? [];
-  const [menuMode, setMenuMode] = useState<"actions" | "due" | "list" | null>(
-    null,
-  );
+  const [menuMode, setMenuMode] = useState<TaskRowMenuMode>(null);
   const [dueDraft, setDueDraft] = useState({
     dueDate: row.dueDate ?? "",
     dueTime: row.dueTime ?? "",
   });
   const [isDueTimePickerOpen, setIsDueTimePickerOpen] = useState(false);
   const menuAnchorRef = useRef<HTMLSpanElement | null>(null);
+  const isDueCommitPendingRef = useRef(false);
   const progressPercent = hasProgress
     ? Math.round((row.completedSubtaskCount / row.subtaskTotalCount) * 100)
     : 0;
@@ -320,8 +321,44 @@ function TaskRowItem({
   const memoPreview = formatMemoPreview(task?.memo ?? "");
   const canEditTask = task !== null && !isMutating;
 
+  const commitDueDraft = useCallback(
+    async (nextMode: TaskRowMenuMode) => {
+      if (isDueCommitPendingRef.current) {
+        return false;
+      }
+      if (!task) {
+        setMenuMode(nextMode);
+        return false;
+      }
+
+      const dueDate = dueDraft.dueDate.trim() || null;
+      const dueTime = dueDate ? dueDraft.dueTime || null : null;
+      const currentDueDate = task.dueDate ?? null;
+      const currentDueTime = task.dueTime ?? null;
+      if (dueDate === currentDueDate && dueTime === currentDueTime) {
+        setMenuMode(nextMode);
+        return true;
+      }
+
+      isDueCommitPendingRef.current = true;
+      try {
+        const saved = await onUpdateTask(
+          task.id,
+          toTaskUpdateDraft(task, { dueDate, dueTime }),
+        );
+        if (saved) {
+          setMenuMode(nextMode);
+        }
+        return saved;
+      } finally {
+        isDueCommitPendingRef.current = false;
+      }
+    },
+    [dueDraft.dueDate, dueDraft.dueTime, onUpdateTask, task],
+  );
+
   useEffect(() => {
-    if (menuMode && isMutating) {
+    if (menuMode && isMutating && !isDueCommitPendingRef.current) {
       setMenuMode(null);
     }
   }, [isMutating, menuMode]);
@@ -341,12 +378,21 @@ function TaskRowItem({
         event.target instanceof Node &&
         !menuAnchorRef.current?.contains(event.target)
       ) {
-        setMenuMode(null);
+        if (menuMode === "due") {
+          void commitDueDraft(null);
+        } else {
+          setMenuMode(null);
+        }
       }
     }
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setMenuMode(null);
+        event.preventDefault();
+        if (menuMode === "due") {
+          void commitDueDraft(null);
+        } else {
+          setMenuMode(null);
+        }
       }
     }
     document.addEventListener("pointerdown", handlePointerDown);
@@ -355,23 +401,7 @@ function TaskRowItem({
       document.removeEventListener("pointerdown", handlePointerDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [menuMode]);
-
-  async function applyDue(dueDate: string | null, dueTime: string | null) {
-    if (!task) {
-      return;
-    }
-    const saved = await onUpdateTask(
-      task.id,
-      toTaskUpdateDraft(task, {
-        dueDate,
-        dueTime: dueDate ? dueTime : null,
-      }),
-    );
-    if (saved) {
-      setMenuMode(null);
-    }
-  }
+  }, [commitDueDraft, menuMode]);
 
   async function applyListChange(nextListId: string) {
     if (!task || nextListId === task.listId) {
@@ -505,17 +535,20 @@ function TaskRowItem({
             disabled={isMutating}
             onClick={(event) => {
               event.stopPropagation();
-              setMenuMode((current) => {
-                if (current) {
-                  return null;
-                }
-                setDueDraft({
-                  dueDate: row.dueDate ?? "",
-                  dueTime: row.dueTime ?? "",
-                });
-                setIsDueTimePickerOpen(false);
-                return "actions";
+              if (menuMode === "due") {
+                void commitDueDraft(null);
+                return;
+              }
+              if (menuMode) {
+                setMenuMode(null);
+                return;
+              }
+              setDueDraft({
+                dueDate: row.dueDate ?? "",
+                dueTime: row.dueTime ?? "",
               });
+              setIsDueTimePickerOpen(false);
+              setMenuMode("actions");
             }}
           >
             <EllipsisVertical aria-hidden="true" size={17} />
@@ -611,14 +644,17 @@ function TaskRowItem({
               ) : null}
 
               {menuMode === "due" ? (
-                <form
+                <div
                   className="task-row-menu-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void applyDue(
-                      dueDraft.dueDate.trim() || null,
-                      dueDraft.dueDate.trim() ? dueDraft.dueTime || null : null,
-                    );
+                  onBlur={(event) => {
+                    const nextTarget = event.relatedTarget;
+                    if (
+                      nextTarget instanceof Node &&
+                      menuAnchorRef.current?.contains(nextTarget)
+                    ) {
+                      return;
+                    }
+                    void commitDueDraft(null);
                   }}
                 >
                   <div className="task-row-menu-dialog-heading">
@@ -626,7 +662,7 @@ function TaskRowItem({
                       className="task-row-menu-back"
                       type="button"
                       aria-label="操作メニューへ戻る"
-                      onClick={() => setMenuMode("actions")}
+                      onClick={() => void commitDueDraft("actions")}
                     >
                       <ArrowLeft aria-hidden="true" size={15} />
                     </button>
@@ -707,18 +743,18 @@ function TaskRowItem({
                     ) : null}
                   </div>
                   <div className="task-row-menu-actions">
-                    <button type="submit" disabled={!canEditTask}>
-                      保存
-                    </button>
                     <button
                       type="button"
                       disabled={!canEditTask}
-                      onClick={() => void applyDue(null, null)}
+                      onClick={() => {
+                        setDueDraft({ dueDate: "", dueTime: "" });
+                        setIsDueTimePickerOpen(false);
+                      }}
                     >
                       期限なし
                     </button>
                   </div>
-                </form>
+                </div>
               ) : null}
 
               {menuMode === "list" ? (

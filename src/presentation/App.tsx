@@ -1452,6 +1452,17 @@ export function App() {
     [runMutation],
   );
 
+  const handleUpdateTaskFromRow = useCallback(
+    (taskId: string, input: WorkItemUpdateDraft) =>
+      runTaskActionMutation(taskId, async () => {
+        await tauriTaskTimerGateway.updateTask({
+          ...input,
+          taskId,
+        });
+      }, TASK_CONTENT_REFRESH),
+    [runTaskActionMutation],
+  );
+
   const handleUpdateSubtask = useCallback(
     (subtaskId: string, input: WorkItemUpdateDraft) =>
       runMutation(async () => {
@@ -2389,7 +2400,7 @@ export function App() {
                 onRequestCreateTask={handleRequestTaskCreate}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
                 onToggleTaskFavorite={handleToggleTaskFavorite}
-                onUpdateTask={handleUpdateTask}
+                onUpdateTask={handleUpdateTaskFromRow}
                 onRequestCreateSubtask={handleRequestSubtaskCreate}
                 onDeleteTask={handleDeleteTask}
                 onReorderTask={handleReorderTaskWithinList}
