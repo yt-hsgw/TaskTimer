@@ -1267,14 +1267,6 @@ export function App() {
     [defaultTaskCreateList],
   );
 
-  const handleSubmitTaskCreate = useCallback(
-    (submission: TaskCreateSubmission) =>
-      submission.kind === "standard"
-        ? handleCreateTask(submission.input, submission.boardColumnId)
-        : handleCreateScheduledTask(submission.input),
-    [handleCreateScheduledTask, handleCreateTask],
-  );
-
   const handleCloseTaskCreate = useCallback(() => {
     if (!isCreatingTaskPending) {
       setTaskCreateErrorMessage(null);
@@ -1406,6 +1398,43 @@ export function App() {
         ...TASK_CONTENT_REFRESH,
       }),
     [runMutation],
+  );
+
+  const handleRequestSubtaskCreate = useCallback(
+    (taskId: string) => {
+      const task =
+        visibleTasks.find((candidate) => candidate.id === taskId) ??
+        (selectedTaskOverride?.id === taskId ? selectedTaskOverride : null);
+      if (!task) {
+        return;
+      }
+      setTaskCreateErrorMessage(null);
+      setTaskCreatePreset((current) =>
+        current ?? {
+          kind: "subtask",
+          taskId: task.id,
+          parentTitle: task.title,
+          listId: task.listId,
+          dueDate: null,
+          dueTime: null,
+          sourceLabel: `親タスク: ${task.title}`,
+        },
+      );
+    },
+    [selectedTaskOverride, visibleTasks],
+  );
+
+  const handleSubmitTaskCreate = useCallback(
+    (submission: TaskCreateSubmission) => {
+      if (submission.kind === "standard") {
+        return handleCreateTask(submission.input, submission.boardColumnId);
+      }
+      if (submission.kind === "scheduled") {
+        return handleCreateScheduledTask(submission.input);
+      }
+      return handleCreateSubtask(submission.taskId, submission.input);
+    },
+    [handleCreateScheduledTask, handleCreateSubtask, handleCreateTask],
   );
 
   const handleUpdateTask = useCallback(
@@ -2361,7 +2390,7 @@ export function App() {
                 onToggleTaskCompletion={handleToggleTaskCompletion}
                 onToggleTaskFavorite={handleToggleTaskFavorite}
                 onUpdateTask={handleUpdateTask}
-                onCreateSubtask={handleCreateSubtask}
+                onRequestCreateSubtask={handleRequestSubtaskCreate}
                 onDeleteTask={handleDeleteTask}
                 onReorderTask={handleReorderTaskWithinList}
                 onStartTimer={handleStartTimer}

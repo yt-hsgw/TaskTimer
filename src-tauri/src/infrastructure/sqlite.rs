@@ -88,6 +88,7 @@ const UI_VIEW_LIST: &str = "list";
 const UI_VIEW_TODAY: &str = "today";
 const UI_VIEW_FAVORITES: &str = "favorites";
 const UI_VIEW_BOARD: &str = "board";
+const ACTIVE_TASK_LIST_LIMIT: i64 = 10;
 const UI_VIEW_CALENDAR: &str = "calendar";
 const UI_VIEW_TIMELINE: &str = "timeline";
 const UI_VIEW_POMODORO: &str = "pomodoro";
@@ -2689,6 +2690,7 @@ fn insert_task_list(
     input: TaskListCreate,
 ) -> RepositoryResult<TaskListRecord> {
     ensure_default_task_list(transaction, &input.now)?;
+    ensure_task_list_capacity(transaction)?;
     ensure_unique_task_list_name(transaction, &input.name, None)?;
 
     let id = Uuid::new_v4().to_string();
@@ -5944,6 +5946,28 @@ fn ensure_unique_task_list_name(
     }
 
     Ok(())
+}
+
+fn ensure_task_list_capacity(connection: &Connection) -> RepositoryResult<()> {
+    let active_count: i64 = connection
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM task_lists
+            WHERE deleted_at IS NULL
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("タスクリスト数を確認できません: {error}"))?;
+
+    if active_count >= ACTIVE_TASK_LIST_LIMIT {
+        Err(format!(
+            "タスクリストは最大{ACTIVE_TASK_LIST_LIMIT}件まで作成できます"
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 fn select_tag_by_id(connection: &Connection, tag_id: &str) -> RepositoryResult<TagRecord> {
@@ -13949,6 +13973,39 @@ mod tests {
         assert_eq!(default_color_update.color_token, "gray");
         assert_eq!(renamed.name, "重複確認 2");
         assert_eq!(renamed.color_token, "violet");
+    }
+
+    #[test]
+    fn task_list_creation_is_limited_to_ten_active_lists() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+
+        for index in 1..ACTIVE_TASK_LIST_LIMIT {
+            usecases::create_task_list(
+                &database,
+                &clock,
+                usecases::TaskListDraft {
+                    name: format!("リスト {index}"),
+                    color_token: None,
+                },
+            )
+            .expect("create task list within limit");
+        }
+
+        let overflow = usecases::create_task_list(
+            &database,
+            &clock,
+            usecases::TaskListDraft {
+                name: "上限超過".to_string(),
+                color_token: None,
+            },
+        );
+        let lists = database.list_task_lists().expect("task lists");
+
+        assert!(overflow.expect_err("list limit").contains("最大10件"));
+        assert_eq!(lists.len(), ACTIVE_TASK_LIST_LIMIT as usize);
     }
 
     #[test]

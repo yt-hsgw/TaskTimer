@@ -4,7 +4,6 @@ import type {
   TaskListItem,
   TaskRow,
   TaskWithSubtasks,
-  WorkItemDraft,
   WorkItemUpdateDraft,
 } from "../../application/usecases/contracts";
 import type { ActivePomodoro } from "../../application/usecases/contracts";
@@ -37,7 +36,7 @@ type TaskPanelProps = {
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
   onUpdateTask(taskId: string, input: WorkItemUpdateDraft): Promise<boolean>;
-  onCreateSubtask(taskId: string, input: WorkItemDraft): Promise<boolean>;
+  onRequestCreateSubtask(taskId: string): void;
   onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
   onReorderTask(taskId: string, direction: "up" | "down"): Promise<boolean>;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
@@ -79,7 +78,7 @@ export function TaskPanel({
   onToggleTaskCompletion,
   onToggleTaskFavorite,
   onUpdateTask,
-  onCreateSubtask,
+  onRequestCreateSubtask,
   onDeleteTask,
   onReorderTask,
   onStartTimer,
@@ -177,7 +176,7 @@ export function TaskPanel({
             onToggleTaskCompletion={handleCompleteRow}
             onToggleTaskFavorite={onToggleTaskFavorite}
             onUpdateTask={onUpdateTask}
-            onCreateSubtask={onCreateSubtask}
+            onRequestCreateSubtask={onRequestCreateSubtask}
             onDeleteTask={onDeleteTask}
             onReorderTask={onReorderTask}
             activeTimer={activeTimer}
@@ -219,7 +218,7 @@ export function TaskPanel({
                     onToggleTaskCompletion={handleCompleteRow}
                     onToggleTaskFavorite={onToggleTaskFavorite}
                     onUpdateTask={onUpdateTask}
-                    onCreateSubtask={onCreateSubtask}
+                    onRequestCreateSubtask={onRequestCreateSubtask}
                     onDeleteTask={onDeleteTask}
                     onReorderTask={onReorderTask}
                     activeTimer={activeTimer}
@@ -269,7 +268,7 @@ type TaskRowItemProps = {
   onToggleTaskCompletion(row: TaskRow): void;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
   onUpdateTask(taskId: string, input: WorkItemUpdateDraft): Promise<boolean>;
-  onCreateSubtask(taskId: string, input: WorkItemDraft): Promise<boolean>;
+  onRequestCreateSubtask(taskId: string): void;
   onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
   onReorderTask(taskId: string, direction: "up" | "down"): Promise<boolean>;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
@@ -294,7 +293,7 @@ function TaskRowItem({
   onToggleTaskCompletion,
   onToggleTaskFavorite,
   onUpdateTask,
-  onCreateSubtask,
+  onRequestCreateSubtask,
   onDeleteTask,
   onReorderTask,
   onStartTimer,
@@ -304,15 +303,13 @@ function TaskRowItem({
 }: TaskRowItemProps) {
   const hasProgress = row.subtaskTotalCount > 0;
   const subtasks = task?.subtasks ?? [];
-  const [menuMode, setMenuMode] = useState<
-    "actions" | "due" | "subtask" | "list" | null
-  >(null);
+  const [menuMode, setMenuMode] = useState<"actions" | "due" | "list" | null>(
+    null,
+  );
   const [dueDraft, setDueDraft] = useState({
     dueDate: row.dueDate ?? "",
     dueTime: row.dueTime ?? "",
   });
-  const [subtaskTitle, setSubtaskTitle] = useState("");
-  const [listDraft, setListDraft] = useState(row.listId);
   const menuAnchorRef = useRef<HTMLSpanElement | null>(null);
   const progressPercent = hasProgress
     ? Math.round((row.completedSubtaskCount / row.subtaskTotalCount) * 100)
@@ -379,30 +376,6 @@ function TaskRowItem({
     );
     if (saved) {
       setMenuMode(null);
-    }
-  }
-
-  async function submitSubtask() {
-    if (!task) {
-      return;
-    }
-    const title = subtaskTitle.trim();
-    if (!title) {
-      return;
-    }
-    const saved = await onCreateSubtask(task.id, {
-      title,
-      plannedStartDate: null,
-      dueDate: null,
-      dueTime: null,
-      memo: null,
-    });
-    if (saved) {
-      setSubtaskTitle("");
-      setMenuMode(null);
-      if (!isExpanded) {
-        onToggleExpansion(row.id);
-      }
     }
   }
 
@@ -532,7 +505,6 @@ function TaskRowItem({
                   dueDate: row.dueDate ?? "",
                   dueTime: row.dueTime ?? "",
                 });
-                setListDraft(row.listId);
                 return "actions";
               });
             }}
@@ -561,8 +533,11 @@ function TaskRowItem({
                     role="menuitem"
                     disabled={!canEditTask}
                     onClick={() => {
-                      setSubtaskTitle("");
-                      setMenuMode("subtask");
+                      setMenuMode(null);
+                      onRequestCreateSubtask(row.id);
+                      if (!isExpanded) {
+                        onToggleExpansion(row.id);
+                      }
                     }}
                   >
                     サブタスク追加
@@ -679,61 +654,27 @@ function TaskRowItem({
                 </form>
               ) : null}
 
-              {menuMode === "subtask" ? (
-                <form
-                  className="task-row-menu-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void submitSubtask();
-                  }}
-                >
-                  <label>
-                    <span>サブタスク名</span>
-                    <input
-                      value={subtaskTitle}
-                      maxLength={120}
-                      autoFocus
-                      onChange={(event) => setSubtaskTitle(event.target.value)}
-                    />
-                  </label>
-                  <div className="task-row-menu-actions">
-                    <button
-                      type="submit"
-                      disabled={!canEditTask || !subtaskTitle.trim()}
-                    >
-                      追加
-                    </button>
-                  </div>
-                </form>
-              ) : null}
-
               {menuMode === "list" ? (
-                <form
-                  className="task-row-menu-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void applyListChange(listDraft);
-                  }}
-                >
-                  <label>
-                    <span>所属リスト</span>
-                    <select
-                      value={listDraft}
-                      onChange={(event) => setListDraft(event.target.value)}
+                <div className="task-row-list-options" aria-label="所属リスト">
+                  {taskLists.map((list) => (
+                    <button
+                      className={`task-row-list-option ${
+                        row.listId === list.id ? "is-selected" : ""
+                      }`}
+                      type="button"
+                      key={list.id}
+                      aria-pressed={row.listId === list.id}
+                      disabled={!canEditTask}
+                      onClick={() => void applyListChange(list.id)}
                     >
-                      {taskLists.map((list) => (
-                        <option key={list.id} value={list.id}>
-                          {list.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="task-row-menu-actions">
-                    <button type="submit" disabled={!canEditTask}>
-                      保存
+                      <span
+                        className={`task-row-list-dot color-${list.colorToken}`}
+                        aria-hidden="true"
+                      />
+                      <span>{list.name}</span>
                     </button>
-                  </div>
-                </form>
+                  ))}
+                </div>
               ) : null}
             </div>
           ) : null}

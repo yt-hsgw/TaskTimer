@@ -3655,6 +3655,42 @@ button {
   padding: 5px 9px;
 }
 
+.task-row-list-options {
+  display: grid;
+  gap: 4px;
+  max-height: 238px;
+  overflow-y: auto;
+}
+
+.task-row-list-option {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--ink);
+  display: flex;
+  font-weight: 800;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.task-row-list-option:hover:not(:disabled),
+.task-row-list-option:focus-visible,
+.task-row-list-option.is-selected {
+  background: #f1f8f5;
+  border-color: #c9d9d2;
+}
+
+.task-row-list-dot {
+  border-radius: 999px;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 10px;
+  width: 10px;
+}
+
 .task-timer-slot {
   align-items: center;
   display: inline-flex;
@@ -4302,6 +4338,114 @@ button {
   gap: 7px;
   line-height: 1.4;
   margin: -2px 0 0;
+}
+
+.task-create-parent-label {
+  background: #f6f9f8;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+}
+
+.task-create-parent-label strong {
+  color: var(--ink);
+}
+
+.task-create-list-picker {
+  border: 0;
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.task-create-list-picker legend {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  margin: 0 0 7px;
+  padding: 0;
+}
+
+.task-create-list-options {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.task-create-list-option {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  display: inline-flex;
+  font-weight: 800;
+  gap: 8px;
+  justify-content: flex-start;
+  min-height: 38px;
+  min-width: 0;
+  padding: 7px 10px;
+  text-align: left;
+}
+
+.task-create-list-option:hover:not(:disabled),
+.task-create-list-option:focus-visible,
+.task-create-list-option.is-selected {
+  background: #f1f8f5;
+  border-color: #a9cfc0;
+}
+
+.task-create-list-option span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-create-list-dot {
+  border-radius: 999px;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 11px;
+  width: 11px;
+}
+
+.task-row-list-dot.color-green,
+.task-create-list-dot.color-green {
+  background: var(--green);
+}
+
+.task-row-list-dot.color-blue,
+.task-create-list-dot.color-blue {
+  background: #3f7fb9;
+}
+
+.task-row-list-dot.color-amber,
+.task-create-list-dot.color-amber {
+  background: #c58b14;
+}
+
+.task-row-list-dot.color-rose,
+.task-create-list-dot.color-rose {
+  background: #c85d6d;
+}
+
+.task-row-list-dot.color-violet,
+.task-create-list-dot.color-violet {
+  background: #8167c8;
+}
+
+.task-row-list-dot.color-gray,
+.task-create-list-dot.color-gray {
+  background: #63727d;
 }
 
 .task-create-dialog-grid {

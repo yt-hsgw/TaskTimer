@@ -19,6 +19,15 @@ export type TaskCreatePreset =
       listId: string;
       schedule: WorkScheduleDraft;
       sourceLabel: string;
+    }
+  | {
+      kind: "subtask";
+      taskId: string;
+      parentTitle: string;
+      listId: string;
+      dueDate: string | null;
+      dueTime: string | null;
+      sourceLabel: string;
     };
 
 export type TaskCreateSubmission =
@@ -30,6 +39,11 @@ export type TaskCreateSubmission =
   | {
       kind: "scheduled";
       input: ScheduledTaskDraft;
+    }
+  | {
+      kind: "subtask";
+      taskId: string;
+      input: WorkItemDraft;
     };
 
 export type CalendarTaskCreatePreset = Pick<

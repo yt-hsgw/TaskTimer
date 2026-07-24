@@ -34,6 +34,7 @@ import { usePresentationRenderProbe } from "../renderProbe";
 const LIST_MENU_GAP = 4;
 const LIST_MENU_MARGIN = 8;
 const LIST_MENU_WIDTH = 148;
+const TASK_LIST_LIMIT = 10;
 
 type ListMenuState = {
   listId: string;
@@ -110,6 +111,7 @@ export function LeftNavigation({
     activeScope.kind === "list" ? activeScope.listId : ""
   }`;
   const previousNavigationContextKey = useRef(navigationContextKey);
+  const hasReachedTaskListLimit = taskLists.length >= TASK_LIST_LIMIT;
 
   const focusListMenuTrigger = useCallback((listId: string) => {
     const trigger = listMenuTriggerRefs.current.get(listId);
@@ -265,6 +267,11 @@ export function LeftNavigation({
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (hasReachedTaskListLimit) {
+      setIsCreateOpen(false);
+      setNewListName("");
+      return;
+    }
     const name = newListName.trim();
     if (!name) {
       return;
@@ -275,6 +282,13 @@ export function LeftNavigation({
       setIsCreateOpen(false);
     }
   };
+
+  useEffect(() => {
+    if (hasReachedTaskListLimit && isCreateOpen) {
+      setIsCreateOpen(false);
+      setNewListName("");
+    }
+  }, [hasReachedTaskListLimit, isCreateOpen]);
 
   const saveEditingList = async (listId: string, restoreFocus = false) => {
     const list = taskLists.find((candidate) => candidate.id === listId);
@@ -569,8 +583,16 @@ export function LeftNavigation({
                 <button
                   className="nav-list-add-button"
                   type="button"
-                  disabled={isMutating}
+                  disabled={isMutating || hasReachedTaskListLimit}
+                  title={
+                    hasReachedTaskListLimit
+                      ? `リストは最大${TASK_LIST_LIMIT}件までです`
+                      : "新しいリストを作成"
+                  }
                   onClick={() => {
+                    if (hasReachedTaskListLimit) {
+                      return;
+                    }
                     closeListMenu();
                     setEditingListId(null);
                     setIsCreateOpen(true);
