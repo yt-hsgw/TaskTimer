@@ -222,6 +222,10 @@ GitHub #182では、かんばんD&D内の予定設定先を `schedule-target`、
 
 GitHub #187では、中央ペインのD&Dとタイマー操作を局所更新に寄せる。カレンダーの予定ブロック移動/期間変更は保存前にPresentationの楽観表示へ即時反映し、保存成功後に表示中範囲だけを再同期する。通常タイマーの開始/一時停止/再開/終了はUse Case戻り値で `activeTimer` と該当 `TaskRowItem` の実行中状態を更新し、カウントダウン期限到来などタスク状態が変わる時だけTaskPageを再取得する。
 
+GitHub #188では、タスク行の補助操作を縦三点メニューへ集約する。期限設定、サブタスク追加、リスト選択、削除は既存Use Caseを再利用し、上/下移動だけ `ReorderTaskWithinList` としてApplication境界を追加する。Infrastructureは対象タスクの所属リスト内で隣接タスクと `sort_order` を1トランザクションで入れ替え、スマート範囲での操作も所属リスト順序の更新として扱う。タイムラインはコード削除ではなく中央ペインの通常表示切り替えから隠し、保存済み設定はリストへフォールバックする。
+
+GitHub #188のフォローアップでは、サブタスク追加も親タスク作成と同じ `TaskCreateDialog` に統合する。App Shellが `subtask` プリセットで親タスクIDを固定し、Presentationは親タスク名を参照表示して、保存時に既存の `CreateSubtask` Use Caseへ振り分ける。リスト選択はドロップダウンではなくポップアップ内の候補ボタンに変更し、選択即保存とする。リスト作成は初期リストを含め最大10件とし、Presentationの無効化とSQLiteトランザクション内の件数確認で二重に防ぐ。
+
 Issue #84 では、カレンダー項目の色をリスト単位で管理する。`TaskList` に `color_token` を追加し、`UpdateTaskList` がリスト名と色トークンの検証・保存トランザクション境界を持つ。Calendar Read Modelはタスクまたは親タスクの所属リスト色を `WeekCalendarItem` へ含め、Presentationは許可済みトークンからCSSクラスを選ぶ。当時は変更操作をタスク詳細に配置したが、GitHub #159でリスト色編集を左ペインへ移し、タスク詳細は個別タスク色の編集に分離する。
 
 GitHub #159では、`tasks.color_token` をnullableで追加し、nullを所属リスト色の継承として扱う。`UpdateTask` は所属リスト変更とタスク色変更を同じトランザクションで保存し、Domain/Applicationの許可リストとSQLiteのCHECK制約で任意CSS値を拒否する。サブタスクは独立した色を保存せず、Calendar Read Modelで親タスクの実効色を継承する。`WeekCalendarItem` は本文用の実効タスク色と左端用のリスト色を分けて返し、Presentationは許可済みトークンだけをCSSクラスへ変換する。タスク色を必須値として作成時にリスト色をコピーする案は、後からリスト色を変更した際に継承意図が失われるため採用しない。

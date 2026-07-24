@@ -443,6 +443,10 @@ export type TaskTimerGateway = {
   restoreArchivedTask(taskId: string): Promise<Task>;
   deleteTask(taskId: string): Promise<void>;
   deleteSubtask(subtaskId: string): Promise<void>;
+  reorderTaskWithinList(
+    taskId: string,
+    direction: "up" | "down",
+  ): Promise<Task>;
   updateNotificationDisplayMode(
     displayMode: NotificationDisplayMode,
   ): Promise<NotificationDisplayMode>;

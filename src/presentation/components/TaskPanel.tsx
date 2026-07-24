@@ -1,6 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { Pause, Play, Square } from "lucide-react";
-import type { TaskRow, TaskWithSubtasks } from "../../application/usecases/contracts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, EllipsisVertical, Pause, Play, Square } from "lucide-react";
+import type {
+  TaskListItem,
+  TaskRow,
+  TaskWithSubtasks,
+  WorkItemUpdateDraft,
+} from "../../application/usecases/contracts";
 import type { ActivePomodoro } from "../../application/usecases/contracts";
 import type { ActiveTimer } from "../../domain/timer/types";
 import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
@@ -9,6 +14,7 @@ import { usePresentationRenderProbe } from "../renderProbe";
 type TaskPanelProps = {
   tasks: TaskWithSubtasks[];
   taskRows: TaskRow[];
+  taskLists: TaskListItem[];
   selectedTaskId: string | null;
   selectedSubtaskId: string | null;
   activeTimer: ActiveTimer | null;
@@ -29,6 +35,10 @@ type TaskPanelProps = {
   onRequestCreateTask(): void;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
+  onUpdateTask(taskId: string, input: WorkItemUpdateDraft): Promise<boolean>;
+  onRequestCreateSubtask(taskId: string): void;
+  onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
+  onReorderTask(taskId: string, direction: "up" | "down"): Promise<boolean>;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
   onPauseTimer(): Promise<boolean>;
   onResumeTimer(): Promise<boolean>;
@@ -42,10 +52,12 @@ const statusLabels: Record<Task["status"], string> = {
   done: "完了",
   archived: "アーカイブ",
 };
+const dueTimeOptions = createTimeOptions(15);
 
 export function TaskPanel({
   tasks,
   taskRows,
+  taskLists,
   selectedTaskId,
   selectedSubtaskId,
   activeTimer,
@@ -66,6 +78,10 @@ export function TaskPanel({
   onRequestCreateTask,
   onToggleTaskCompletion,
   onToggleTaskFavorite,
+  onUpdateTask,
+  onRequestCreateSubtask,
+  onDeleteTask,
+  onReorderTask,
   onStartTimer,
   onPauseTimer,
   onResumeTimer,
@@ -150,6 +166,7 @@ export function TaskPanel({
             key={row.id}
             row={row}
             task={taskById.get(row.id) ?? null}
+            taskLists={taskLists}
             isSelected={row.id === selectedTaskId}
             selectedSubtaskId={selectedSubtaskId}
             isExpanded={expandedTaskIds.has(row.id)}
@@ -159,6 +176,10 @@ export function TaskPanel({
             onToggleExpansion={toggleTaskExpansion}
             onToggleTaskCompletion={handleCompleteRow}
             onToggleTaskFavorite={onToggleTaskFavorite}
+            onUpdateTask={onUpdateTask}
+            onRequestCreateSubtask={onRequestCreateSubtask}
+            onDeleteTask={onDeleteTask}
+            onReorderTask={onReorderTask}
             activeTimer={activeTimer}
             activePomodoro={activePomodoro}
             onStartTimer={onStartTimer}
@@ -187,6 +208,7 @@ export function TaskPanel({
                     key={row.id}
                     row={row}
                     task={taskById.get(row.id) ?? null}
+                    taskLists={taskLists}
                     isSelected={row.id === selectedTaskId}
                     selectedSubtaskId={selectedSubtaskId}
                     isExpanded={expandedTaskIds.has(row.id)}
@@ -196,6 +218,10 @@ export function TaskPanel({
                     onToggleExpansion={toggleTaskExpansion}
                     onToggleTaskCompletion={handleCompleteRow}
                     onToggleTaskFavorite={onToggleTaskFavorite}
+                    onUpdateTask={onUpdateTask}
+                    onRequestCreateSubtask={onRequestCreateSubtask}
+                    onDeleteTask={onDeleteTask}
+                    onReorderTask={onReorderTask}
                     activeTimer={activeTimer}
                     activePomodoro={activePomodoro}
                     onStartTimer={onStartTimer}
@@ -230,6 +256,7 @@ export function TaskPanel({
 type TaskRowItemProps = {
   row: TaskRow;
   task: TaskWithSubtasks | null;
+  taskLists: TaskListItem[];
   isSelected: boolean;
   selectedSubtaskId: string | null;
   isExpanded: boolean;
@@ -241,6 +268,10 @@ type TaskRowItemProps = {
   onToggleExpansion(taskId: string): void;
   onToggleTaskCompletion(row: TaskRow): void;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
+  onUpdateTask(taskId: string, input: WorkItemUpdateDraft): Promise<boolean>;
+  onRequestCreateSubtask(taskId: string): void;
+  onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
+  onReorderTask(taskId: string, direction: "up" | "down"): Promise<boolean>;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
   onPauseTimer(): Promise<boolean>;
   onResumeTimer(): Promise<boolean>;
@@ -250,6 +281,7 @@ type TaskRowItemProps = {
 function TaskRowItem({
   row,
   task,
+  taskLists,
   isSelected,
   selectedSubtaskId,
   isExpanded,
@@ -261,6 +293,10 @@ function TaskRowItem({
   onToggleExpansion,
   onToggleTaskCompletion,
   onToggleTaskFavorite,
+  onUpdateTask,
+  onRequestCreateSubtask,
+  onDeleteTask,
+  onReorderTask,
   onStartTimer,
   onPauseTimer,
   onResumeTimer,
@@ -268,11 +304,88 @@ function TaskRowItem({
 }: TaskRowItemProps) {
   const hasProgress = row.subtaskTotalCount > 0;
   const subtasks = task?.subtasks ?? [];
+  const [menuMode, setMenuMode] = useState<"actions" | "due" | "list" | null>(
+    null,
+  );
+  const [dueDraft, setDueDraft] = useState({
+    dueDate: row.dueDate ?? "",
+    dueTime: row.dueTime ?? "",
+  });
+  const [isDueTimePickerOpen, setIsDueTimePickerOpen] = useState(false);
+  const menuAnchorRef = useRef<HTMLSpanElement | null>(null);
   const progressPercent = hasProgress
     ? Math.round((row.completedSubtaskCount / row.subtaskTotalCount) * 100)
     : 0;
   const isDone = row.status === "done";
   const memoPreview = formatMemoPreview(task?.memo ?? "");
+  const canEditTask = task !== null && !isMutating;
+
+  useEffect(() => {
+    if (menuMode && isMutating) {
+      setMenuMode(null);
+    }
+  }, [isMutating, menuMode]);
+
+  useEffect(() => {
+    if (menuMode !== "due" || !dueDraft.dueDate) {
+      setIsDueTimePickerOpen(false);
+    }
+  }, [dueDraft.dueDate, menuMode]);
+
+  useEffect(() => {
+    if (!menuMode) {
+      return;
+    }
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        !menuAnchorRef.current?.contains(event.target)
+      ) {
+        setMenuMode(null);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuMode(null);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuMode]);
+
+  async function applyDue(dueDate: string | null, dueTime: string | null) {
+    if (!task) {
+      return;
+    }
+    const saved = await onUpdateTask(
+      task.id,
+      toTaskUpdateDraft(task, {
+        dueDate,
+        dueTime: dueDate ? dueTime : null,
+      }),
+    );
+    if (saved) {
+      setMenuMode(null);
+    }
+  }
+
+  async function applyListChange(nextListId: string) {
+    if (!task || nextListId === task.listId) {
+      setMenuMode(null);
+      return;
+    }
+    const saved = await onUpdateTask(
+      task.id,
+      toTaskUpdateDraft(task, { listId: nextListId }),
+    );
+    if (saved) {
+      setMenuMode(null);
+    }
+  }
 
   return (
     <div className="task-row-group">
@@ -380,6 +493,272 @@ function TaskRowItem({
         >
           {row.isFavorite ? "★" : "☆"}
         </button>
+
+        <span className="task-row-menu-anchor" ref={menuAnchorRef}>
+          <button
+            className="task-row-menu-trigger"
+            type="button"
+            aria-label={`${row.title}の操作`}
+            aria-haspopup="menu"
+            aria-expanded={menuMode !== null}
+            title="タスクの操作"
+            disabled={isMutating}
+            onClick={(event) => {
+              event.stopPropagation();
+              setMenuMode((current) => {
+                if (current) {
+                  return null;
+                }
+                setDueDraft({
+                  dueDate: row.dueDate ?? "",
+                  dueTime: row.dueTime ?? "",
+                });
+                setIsDueTimePickerOpen(false);
+                return "actions";
+              });
+            }}
+          >
+            <EllipsisVertical aria-hidden="true" size={17} />
+          </button>
+          {menuMode ? (
+            <div
+              className="task-row-menu"
+              role={menuMode === "actions" ? "menu" : "dialog"}
+              aria-label={`${row.title}の操作`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {menuMode === "actions" ? (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!canEditTask}
+                    onClick={() => setMenuMode("due")}
+                  >
+                    期限の設定
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!canEditTask}
+                    onClick={() => {
+                      setMenuMode(null);
+                      onRequestCreateSubtask(row.id);
+                      if (!isExpanded) {
+                        onToggleExpansion(row.id);
+                      }
+                    }}
+                  >
+                    サブタスク追加
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!canEditTask}
+                    onClick={() => setMenuMode("list")}
+                  >
+                    リスト選択
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={isMutating}
+                    onClick={() =>
+                      void onReorderTask(row.id, "up").then((moved) => {
+                        if (moved) {
+                          setMenuMode(null);
+                        }
+                      })
+                    }
+                  >
+                    上に移動
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={isMutating}
+                    onClick={() =>
+                      void onReorderTask(row.id, "down").then((moved) => {
+                        if (moved) {
+                          setMenuMode(null);
+                        }
+                      })
+                    }
+                  >
+                    下に移動
+                  </button>
+                  <button
+                    className="is-danger"
+                    type="button"
+                    role="menuitem"
+                    disabled={!canEditTask}
+                    onClick={() => {
+                      if (
+                        task &&
+                        window.confirm(`「${row.title}」を削除しますか？`)
+                      ) {
+                        void onDeleteTask(task).then((deleted) => {
+                          if (deleted) {
+                            setMenuMode(null);
+                          }
+                        });
+                      }
+                    }}
+                  >
+                    削除
+                  </button>
+                </>
+              ) : null}
+
+              {menuMode === "due" ? (
+                <form
+                  className="task-row-menu-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void applyDue(
+                      dueDraft.dueDate.trim() || null,
+                      dueDraft.dueDate.trim() ? dueDraft.dueTime || null : null,
+                    );
+                  }}
+                >
+                  <div className="task-row-menu-dialog-heading">
+                    <button
+                      className="task-row-menu-back"
+                      type="button"
+                      aria-label="操作メニューへ戻る"
+                      onClick={() => setMenuMode("actions")}
+                    >
+                      <ArrowLeft aria-hidden="true" size={15} />
+                    </button>
+                    <strong>期限を設定</strong>
+                  </div>
+                  <label>
+                    <span>期限日</span>
+                    <input
+                      type="date"
+                      value={dueDraft.dueDate}
+                      onChange={(event) =>
+                        setDueDraft((current) => ({
+                          ...current,
+                          dueDate: event.target.value,
+                          dueTime: event.target.value ? current.dueTime : "",
+                        }))
+                      }
+                    />
+                  </label>
+                  <div className="task-row-time-picker-field">
+                    <span>期限時刻</span>
+                    <button
+                      className="task-row-time-picker-trigger"
+                      type="button"
+                      aria-haspopup="listbox"
+                      aria-expanded={isDueTimePickerOpen}
+                      disabled={!dueDraft.dueDate}
+                      onClick={() =>
+                        setIsDueTimePickerOpen((current) => !current)
+                      }
+                    >
+                      {dueDraft.dueTime || "時刻なし"}
+                    </button>
+                    {isDueTimePickerOpen ? (
+                      <div
+                        className="task-row-time-picker"
+                        role="listbox"
+                        aria-label="期限時刻"
+                      >
+                        <button
+                          className={`task-row-time-option ${
+                            dueDraft.dueTime ? "" : "is-selected"
+                          }`}
+                          type="button"
+                          role="option"
+                          aria-selected={!dueDraft.dueTime}
+                          onClick={() => {
+                            setDueDraft((current) => ({
+                              ...current,
+                              dueTime: "",
+                            }));
+                            setIsDueTimePickerOpen(false);
+                          }}
+                        >
+                          時刻なし
+                        </button>
+                        {dueTimeOptions.map((time) => (
+                          <button
+                            className={`task-row-time-option ${
+                              dueDraft.dueTime === time ? "is-selected" : ""
+                            }`}
+                            type="button"
+                            key={time}
+                            role="option"
+                            aria-selected={dueDraft.dueTime === time}
+                            onClick={() => {
+                              setDueDraft((current) => ({
+                                ...current,
+                                dueTime: time,
+                              }));
+                              setIsDueTimePickerOpen(false);
+                            }}
+                          >
+                            {time}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="task-row-menu-actions">
+                    <button type="submit" disabled={!canEditTask}>
+                      保存
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canEditTask}
+                      onClick={() => void applyDue(null, null)}
+                    >
+                      期限なし
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+
+              {menuMode === "list" ? (
+                <div className="task-row-menu-dialog">
+                  <div className="task-row-menu-dialog-heading">
+                    <button
+                      className="task-row-menu-back"
+                      type="button"
+                      aria-label="操作メニューへ戻る"
+                      onClick={() => setMenuMode("actions")}
+                    >
+                      <ArrowLeft aria-hidden="true" size={15} />
+                    </button>
+                    <strong>リストを選択</strong>
+                  </div>
+                  <div className="task-row-list-options" aria-label="所属リスト">
+                    {taskLists.map((list) => (
+                      <button
+                        className={`task-row-list-option ${
+                          row.listId === list.id ? "is-selected" : ""
+                        }`}
+                        type="button"
+                        key={list.id}
+                        aria-pressed={row.listId === list.id}
+                        disabled={!canEditTask}
+                        onClick={() => void applyListChange(list.id)}
+                      >
+                        <span
+                          className={`task-row-list-dot color-${list.colorToken}`}
+                          aria-hidden="true"
+                        />
+                        <span>{list.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </span>
       </div>
 
       {isExpanded && subtasks.length > 0 ? (
@@ -617,4 +996,39 @@ function formatMemoPreview(value: string) {
     return "";
   }
   return normalized.length > 48 ? `${normalized.slice(0, 48)}...` : normalized;
+}
+
+function createTimeOptions(stepMinutes: number) {
+  const options: string[] = [];
+  for (let totalMinutes = 0; totalMinutes < 24 * 60; totalMinutes += stepMinutes) {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    options.push(
+      `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`,
+    );
+  }
+  return options;
+}
+
+function toTaskUpdateDraft(
+  task: TaskWithSubtasks,
+  overrides: Partial<WorkItemUpdateDraft>,
+): WorkItemUpdateDraft {
+  return {
+    listId: task.listId,
+    title: task.title,
+    plannedStartDate: task.plannedStartDate,
+    dueDate: task.dueDate,
+    dueTime: task.dueTime,
+    timerTargetSeconds: task.timerTargetSeconds,
+    colorToken: task.colorToken,
+    recurrenceRule: task.recurrenceRule
+      ? {
+          frequency: task.recurrenceRule.frequency,
+          interval: task.recurrenceRule.interval,
+        }
+      : null,
+    memo: task.memo,
+    ...overrides,
+  };
 }
