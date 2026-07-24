@@ -313,7 +313,9 @@ function TaskRowItem({
   });
   const [isDueTimePickerOpen, setIsDueTimePickerOpen] = useState(false);
   const menuAnchorRef = useRef<HTMLSpanElement | null>(null);
+  const dueTimeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const isDueCommitPendingRef = useRef(false);
+  const shouldKeepDueDialogOpenAfterDatePickRef = useRef(false);
   const progressPercent = hasProgress
     ? Math.round((row.completedSubtaskCount / row.subtaskTotalCount) * 100)
     : 0;
@@ -647,6 +649,13 @@ function TaskRowItem({
                 <div
                   className="task-row-menu-form"
                   onBlur={(event) => {
+                    if (shouldKeepDueDialogOpenAfterDatePickRef.current) {
+                      shouldKeepDueDialogOpenAfterDatePickRef.current = false;
+                      window.requestAnimationFrame(() => {
+                        dueTimeTriggerRef.current?.focus();
+                      });
+                      return;
+                    }
                     const nextTarget = event.relatedTarget;
                     if (
                       nextTarget instanceof Node &&
@@ -673,18 +682,23 @@ function TaskRowItem({
                     <input
                       type="date"
                       value={dueDraft.dueDate}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const nextDate = event.target.value;
+                        shouldKeepDueDialogOpenAfterDatePickRef.current =
+                          Boolean(nextDate);
+                        setIsDueTimePickerOpen(false);
                         setDueDraft((current) => ({
                           ...current,
-                          dueDate: event.target.value,
-                          dueTime: event.target.value ? current.dueTime : "",
-                        }))
-                      }
+                          dueDate: nextDate,
+                          dueTime: nextDate ? current.dueTime : "",
+                        }));
+                      }}
                     />
                   </label>
                   <div className="task-row-time-picker-field">
                     <span>期限時刻</span>
                     <button
+                      ref={dueTimeTriggerRef}
                       className="task-row-time-picker-trigger"
                       type="button"
                       aria-haspopup="listbox"
