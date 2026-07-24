@@ -372,7 +372,7 @@ button {
   align-items: center;
   display: flex;
   gap: 10px;
-  justify-content: space-between;
+  justify-content: flex-end;
   min-height: 40px;
 }
 
@@ -697,6 +697,7 @@ button {
 }
 
 .nav-list-create {
+  grid-template-columns: minmax(0, 1fr);
   margin-top: 6px;
 }
 

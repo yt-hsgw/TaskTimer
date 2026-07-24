@@ -102,6 +102,7 @@ export function LeftNavigation({
   const [listMenu, setListMenu] = useState<ListMenuState | null>(null);
   const navigationRef = useRef<HTMLElement>(null);
   const listMenuRef = useRef<HTMLDivElement>(null);
+  const isSavingCreateRef = useRef(false);
   const listMenuTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const pendingListMenuFocusId = useRef<string | null>(null);
   const activeMenuList = listMenu
@@ -267,26 +268,59 @@ export function LeftNavigation({
 
   const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    await saveNewList();
+  };
+
+  const resetCreateDraft = () => {
+    setIsCreateOpen(false);
+    setNewListName("");
+  };
+
+  const saveNewList = async () => {
+    if (isSavingCreateRef.current) {
+      return;
+    }
     if (hasReachedTaskListLimit) {
-      setIsCreateOpen(false);
-      setNewListName("");
+      resetCreateDraft();
       return;
     }
     const name = newListName.trim();
     if (!name) {
+      resetCreateDraft();
       return;
     }
-    const created = await onCreateTaskList(name);
-    if (created) {
-      setNewListName("");
-      setIsCreateOpen(false);
+    isSavingCreateRef.current = true;
+    try {
+      const created = await onCreateTaskList(name);
+      if (created) {
+        resetCreateDraft();
+      }
+    } finally {
+      isSavingCreateRef.current = false;
     }
+  };
+
+  const handleCreateBlur = (event: ReactFocusEvent<HTMLFormElement>) => {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+    void saveNewList();
+  };
+
+  const handleCreateKeyDown = (
+    event: ReactKeyboardEvent<HTMLFormElement>,
+  ) => {
+    if (event.key !== "Escape") {
+      return;
+    }
+    event.preventDefault();
+    resetCreateDraft();
   };
 
   useEffect(() => {
     if (hasReachedTaskListLimit && isCreateOpen) {
-      setIsCreateOpen(false);
-      setNewListName("");
+      resetCreateDraft();
     }
   }, [hasReachedTaskListLimit, isCreateOpen]);
 
@@ -398,12 +432,7 @@ export function LeftNavigation({
       aria-label="主要ナビゲーション"
     >
       <div className="nav-header">
-        {isOpen ? (
-          <div className="nav-brand">
-            <strong>TaskTimer</strong>
-            <span>ローカルタスク</span>
-          </div>
-        ) : null}
+        <span className="visually-hidden">TaskTimerのナビゲーション</span>
         <button
           className="nav-icon-button"
           type="button"
@@ -562,21 +591,21 @@ export function LeftNavigation({
                 />
               ) : null}
               {isOpen && isCreateOpen ? (
-                <form className="nav-list-form nav-list-create" onSubmit={handleCreate}>
+                <form
+                  className="nav-list-form nav-list-create"
+                  onSubmit={handleCreate}
+                  onBlur={handleCreateBlur}
+                  onKeyDown={handleCreateKeyDown}
+                >
                   <input
                     value={newListName}
                     onChange={(event) => setNewListName(event.target.value)}
                     placeholder="新しいリスト"
                     maxLength={80}
                     disabled={isMutating}
+                    aria-label="新しいリスト名"
                     autoFocus
                   />
-                  <button
-                    type="submit"
-                    disabled={isMutating || !newListName.trim()}
-                  >
-                    追加
-                  </button>
                 </form>
               ) : null}
               {isOpen && !isCreateOpen ? (
