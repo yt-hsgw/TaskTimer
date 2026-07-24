@@ -59,11 +59,11 @@ button {
 
 .top-bar {
   align-items: center;
-  display: flex;
+  display: grid;
   flex: 0 0 auto;
-  justify-content: space-between;
   margin: 0 auto 20px;
   max-width: 1240px;
+  grid-template-columns: 248px minmax(0, 1fr);
   width: 100%;
   gap: 16px;
 }
@@ -71,14 +71,17 @@ button {
 .top-bar-actions {
   align-items: center;
   display: flex;
+  justify-self: stretch;
   gap: 8px;
   min-width: 0;
+  width: 100%;
 }
 
 .global-search {
+  flex: 1 1 auto;
   min-width: 0;
   position: relative;
-  width: min(360px, 42vw);
+  width: 100%;
 }
 
 .global-search > input {
@@ -237,8 +240,13 @@ button {
 .top-bar-title {
   align-items: center;
   display: flex;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
+}
+
+.app-nav-toggle-button {
+  color: var(--ink);
+  flex: 0 0 auto;
 }
 
 .top-bar h1,
@@ -286,7 +294,6 @@ button {
 .workspace-main {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   height: 100%;
   min-height: 0;
   min-width: 0;
@@ -304,7 +311,7 @@ button {
   border: 1px solid var(--line);
   border-radius: 6px;
   display: inline-grid;
-  grid-template-columns: repeat(4, minmax(68px, 1fr));
+  grid-template-columns: repeat(3, minmax(64px, 1fr));
   padding: 2px;
 }
 
@@ -368,35 +375,6 @@ button {
   position: static;
 }
 
-.nav-header {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-  min-height: 40px;
-}
-
-.nav-brand {
-  display: grid;
-  flex: 1;
-  gap: 1px;
-  min-width: 0;
-}
-
-.is-nav-collapsed .nav-header {
-  justify-content: center;
-}
-
-.nav-brand strong {
-  color: var(--ink);
-  line-height: 1.2;
-}
-
-.nav-brand span {
-  color: var(--muted);
-  font-size: 12px;
-}
-
 .nav-sections {
   display: flex;
   flex: 1;
@@ -450,7 +428,6 @@ button {
   padding-top: 10px;
 }
 
-.nav-icon-button,
 .nav-item {
   align-items: center;
   border: 1px solid transparent;
@@ -458,19 +435,6 @@ button {
   display: inline-flex;
   justify-content: center;
   min-height: 38px;
-}
-
-.nav-icon-button {
-  background: transparent;
-  border: 0;
-  color: var(--ink);
-  min-width: 38px;
-  padding: 0;
-}
-
-.nav-icon-button:hover,
-.nav-icon-button:focus-visible {
-  background: #edf3f1;
 }
 
 .nav-mini-button {
@@ -1598,7 +1562,9 @@ button {
 .panel-heading-actions {
   align-items: center;
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 .app-alert {
@@ -5696,8 +5662,12 @@ button {
   }
 
   .top-bar {
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .top-bar-title {
+    justify-content: flex-start;
   }
 
   .top-bar-actions,

@@ -5,6 +5,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
+  ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
 import { CalendarClock, GripHorizontal, GripVertical, X } from "lucide-react";
@@ -34,6 +35,7 @@ type WeekCalendarProps = {
   isTaskCreateOpen: boolean;
   isReschedulingItem: boolean;
   selectedTarget: WorkTargetRef | null;
+  workspaceModeSwitcher?: ReactNode;
   onChangeViewMode(viewMode: CalendarViewMode): void;
   onPreviousRange(): void;
   onNextRange(): void;
@@ -164,6 +166,7 @@ export function WeekCalendar({
   isTaskCreateOpen,
   isReschedulingItem,
   selectedTarget,
+  workspaceModeSwitcher,
   onChangeViewMode,
   onPreviousRange,
   onNextRange,
@@ -947,6 +950,7 @@ export function WeekCalendar({
         </div>
 
         <div className="calendar-heading-controls">
+          {workspaceModeSwitcher}
           <div className="calendar-view-switch" aria-label="カレンダー表示切替">
             {(["week", "day", "month"] as const).map((mode) => (
               <button

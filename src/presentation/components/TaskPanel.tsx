@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ArrowLeft, EllipsisVertical, Pause, Play, Square } from "lucide-react";
 import type {
   TaskListItem,
@@ -29,6 +36,7 @@ type TaskPanelProps = {
   isLoadingMore: boolean;
   totalTaskCount: number;
   hasMoreTasks: boolean;
+  workspaceModeSwitcher?: ReactNode;
   pendingTaskActionIds: ReadonlySet<string>;
   onSelectTask(taskId: string): void;
   onSelectSubtask(taskId: string, subtaskId: string): void;
@@ -72,6 +80,7 @@ export function TaskPanel({
   isLoadingMore,
   totalTaskCount,
   hasMoreTasks,
+  workspaceModeSwitcher,
   pendingTaskActionIds,
   onSelectTask,
   onSelectSubtask,
@@ -129,6 +138,7 @@ export function TaskPanel({
           <h2 id="task-panel-title">{title}</h2>
         </div>
         <div className="panel-heading-actions">
+          {workspaceModeSwitcher}
           <span
             className="task-count-badge"
             aria-label={`タスク総件数 ${totalTaskCount}件`}

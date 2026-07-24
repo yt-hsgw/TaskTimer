@@ -16,8 +16,6 @@ import {
   ChevronDown,
   CircleDot,
   EllipsisVertical,
-  PanelLeftClose,
-  PanelLeftOpen,
   Pencil,
   Plus,
   Settings,
@@ -74,7 +72,6 @@ type LeftNavigationProps = {
     colorToken: TaskListColorToken,
   ): Promise<boolean>;
   onDeleteTaskList(listId: string): Promise<boolean>;
-  onToggle(): void;
 };
 
 export function LeftNavigation({
@@ -89,7 +86,6 @@ export function LeftNavigation({
   onCreateTaskList,
   onUpdateTaskList,
   onDeleteTaskList,
-  onToggle,
 }: LeftNavigationProps) {
   usePresentationRenderProbe("LeftNavigation");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -431,29 +427,6 @@ export function LeftNavigation({
       className="left-navigation"
       aria-label="主要ナビゲーション"
     >
-      <div className="nav-header">
-        <span className="visually-hidden">TaskTimerのナビゲーション</span>
-        <button
-          className="nav-icon-button"
-          type="button"
-          aria-label={isOpen ? "左ペインを閉じる" : "左ペインを開く"}
-          title="左ペインを開閉"
-          aria-expanded={isOpen}
-          onClick={() => {
-            closeListMenu();
-            setIsCreateOpen(false);
-            setEditingListId(null);
-            onToggle();
-          }}
-        >
-          {isOpen ? (
-            <PanelLeftClose aria-hidden="true" size={20} strokeWidth={1.8} />
-          ) : (
-            <PanelLeftOpen aria-hidden="true" size={20} strokeWidth={1.8} />
-          )}
-        </button>
-      </div>
-
       <nav className="nav-sections" aria-label="ビュー">
         <div className="nav-section">
           <NavButton
