@@ -205,6 +205,18 @@ pub struct BoardTaskMove {
     pub now: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskReorderDirection {
+    Up,
+    Down,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskReorder {
+    pub direction: TaskReorderDirection,
+    pub now: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecurrenceRuleInput {
     pub frequency: RecurrenceFrequency,
@@ -785,6 +797,12 @@ pub trait TaskTimerCommandRepository {
         subtask_id: String,
         input: WorkItemUpdate,
     ) -> RepositoryResult<SubtaskRecord>;
+
+    fn reorder_task_within_list(
+        &self,
+        task_id: String,
+        input: TaskReorder,
+    ) -> RepositoryResult<TaskRecord>;
 
     fn resize_scheduled_work_item(
         &self,

@@ -1,6 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
-import { Pause, Play, Square } from "lucide-react";
-import type { TaskRow, TaskWithSubtasks } from "../../application/usecases/contracts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { EllipsisVertical, Pause, Play, Square } from "lucide-react";
+import type {
+  TaskListItem,
+  TaskRow,
+  TaskWithSubtasks,
+  WorkItemDraft,
+  WorkItemUpdateDraft,
+} from "../../application/usecases/contracts";
 import type { ActivePomodoro } from "../../application/usecases/contracts";
 import type { ActiveTimer } from "../../domain/timer/types";
 import type { Subtask, Task, WorkTargetRef } from "../../domain/task/types";
@@ -9,6 +15,7 @@ import { usePresentationRenderProbe } from "../renderProbe";
 type TaskPanelProps = {
   tasks: TaskWithSubtasks[];
   taskRows: TaskRow[];
+  taskLists: TaskListItem[];
   selectedTaskId: string | null;
   selectedSubtaskId: string | null;
   activeTimer: ActiveTimer | null;
@@ -29,6 +36,10 @@ type TaskPanelProps = {
   onRequestCreateTask(): void;
   onToggleTaskCompletion(task: TaskWithSubtasks): Promise<boolean>;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
+  onUpdateTask(taskId: string, input: WorkItemUpdateDraft): Promise<boolean>;
+  onCreateSubtask(taskId: string, input: WorkItemDraft): Promise<boolean>;
+  onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
+  onReorderTask(taskId: string, direction: "up" | "down"): Promise<boolean>;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
   onPauseTimer(): Promise<boolean>;
   onResumeTimer(): Promise<boolean>;
@@ -46,6 +57,7 @@ const statusLabels: Record<Task["status"], string> = {
 export function TaskPanel({
   tasks,
   taskRows,
+  taskLists,
   selectedTaskId,
   selectedSubtaskId,
   activeTimer,
@@ -66,6 +78,10 @@ export function TaskPanel({
   onRequestCreateTask,
   onToggleTaskCompletion,
   onToggleTaskFavorite,
+  onUpdateTask,
+  onCreateSubtask,
+  onDeleteTask,
+  onReorderTask,
   onStartTimer,
   onPauseTimer,
   onResumeTimer,
@@ -150,6 +166,7 @@ export function TaskPanel({
             key={row.id}
             row={row}
             task={taskById.get(row.id) ?? null}
+            taskLists={taskLists}
             isSelected={row.id === selectedTaskId}
             selectedSubtaskId={selectedSubtaskId}
             isExpanded={expandedTaskIds.has(row.id)}
@@ -159,6 +176,10 @@ export function TaskPanel({
             onToggleExpansion={toggleTaskExpansion}
             onToggleTaskCompletion={handleCompleteRow}
             onToggleTaskFavorite={onToggleTaskFavorite}
+            onUpdateTask={onUpdateTask}
+            onCreateSubtask={onCreateSubtask}
+            onDeleteTask={onDeleteTask}
+            onReorderTask={onReorderTask}
             activeTimer={activeTimer}
             activePomodoro={activePomodoro}
             onStartTimer={onStartTimer}
@@ -187,6 +208,7 @@ export function TaskPanel({
                     key={row.id}
                     row={row}
                     task={taskById.get(row.id) ?? null}
+                    taskLists={taskLists}
                     isSelected={row.id === selectedTaskId}
                     selectedSubtaskId={selectedSubtaskId}
                     isExpanded={expandedTaskIds.has(row.id)}
@@ -196,6 +218,10 @@ export function TaskPanel({
                     onToggleExpansion={toggleTaskExpansion}
                     onToggleTaskCompletion={handleCompleteRow}
                     onToggleTaskFavorite={onToggleTaskFavorite}
+                    onUpdateTask={onUpdateTask}
+                    onCreateSubtask={onCreateSubtask}
+                    onDeleteTask={onDeleteTask}
+                    onReorderTask={onReorderTask}
                     activeTimer={activeTimer}
                     activePomodoro={activePomodoro}
                     onStartTimer={onStartTimer}
@@ -230,6 +256,7 @@ export function TaskPanel({
 type TaskRowItemProps = {
   row: TaskRow;
   task: TaskWithSubtasks | null;
+  taskLists: TaskListItem[];
   isSelected: boolean;
   selectedSubtaskId: string | null;
   isExpanded: boolean;
@@ -241,6 +268,10 @@ type TaskRowItemProps = {
   onToggleExpansion(taskId: string): void;
   onToggleTaskCompletion(row: TaskRow): void;
   onToggleTaskFavorite(taskId: string, isFavorite: boolean): Promise<boolean>;
+  onUpdateTask(taskId: string, input: WorkItemUpdateDraft): Promise<boolean>;
+  onCreateSubtask(taskId: string, input: WorkItemDraft): Promise<boolean>;
+  onDeleteTask(task: TaskWithSubtasks): Promise<boolean>;
+  onReorderTask(taskId: string, direction: "up" | "down"): Promise<boolean>;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
   onPauseTimer(): Promise<boolean>;
   onResumeTimer(): Promise<boolean>;
@@ -250,6 +281,7 @@ type TaskRowItemProps = {
 function TaskRowItem({
   row,
   task,
+  taskLists,
   isSelected,
   selectedSubtaskId,
   isExpanded,
@@ -261,6 +293,10 @@ function TaskRowItem({
   onToggleExpansion,
   onToggleTaskCompletion,
   onToggleTaskFavorite,
+  onUpdateTask,
+  onCreateSubtask,
+  onDeleteTask,
+  onReorderTask,
   onStartTimer,
   onPauseTimer,
   onResumeTimer,
@@ -268,11 +304,107 @@ function TaskRowItem({
 }: TaskRowItemProps) {
   const hasProgress = row.subtaskTotalCount > 0;
   const subtasks = task?.subtasks ?? [];
+  const [menuMode, setMenuMode] = useState<
+    "actions" | "due" | "subtask" | "list" | null
+  >(null);
+  const [dueDraft, setDueDraft] = useState({
+    dueDate: row.dueDate ?? "",
+    dueTime: row.dueTime ?? "",
+  });
+  const [subtaskTitle, setSubtaskTitle] = useState("");
+  const [listDraft, setListDraft] = useState(row.listId);
+  const menuAnchorRef = useRef<HTMLSpanElement | null>(null);
   const progressPercent = hasProgress
     ? Math.round((row.completedSubtaskCount / row.subtaskTotalCount) * 100)
     : 0;
   const isDone = row.status === "done";
   const memoPreview = formatMemoPreview(task?.memo ?? "");
+  const canEditTask = task !== null && !isMutating;
+
+  useEffect(() => {
+    if (menuMode && isMutating) {
+      setMenuMode(null);
+    }
+  }, [isMutating, menuMode]);
+
+  useEffect(() => {
+    if (!menuMode) {
+      return;
+    }
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        !menuAnchorRef.current?.contains(event.target)
+      ) {
+        setMenuMode(null);
+      }
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuMode(null);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuMode]);
+
+  async function applyDue(dueDate: string | null, dueTime: string | null) {
+    if (!task) {
+      return;
+    }
+    const saved = await onUpdateTask(
+      task.id,
+      toTaskUpdateDraft(task, {
+        dueDate,
+        dueTime: dueDate ? dueTime : null,
+      }),
+    );
+    if (saved) {
+      setMenuMode(null);
+    }
+  }
+
+  async function applyListChange(nextListId: string) {
+    if (!task || nextListId === task.listId) {
+      setMenuMode(null);
+      return;
+    }
+    const saved = await onUpdateTask(
+      task.id,
+      toTaskUpdateDraft(task, { listId: nextListId }),
+    );
+    if (saved) {
+      setMenuMode(null);
+    }
+  }
+
+  async function submitSubtask() {
+    if (!task) {
+      return;
+    }
+    const title = subtaskTitle.trim();
+    if (!title) {
+      return;
+    }
+    const saved = await onCreateSubtask(task.id, {
+      title,
+      plannedStartDate: null,
+      dueDate: null,
+      dueTime: null,
+      memo: null,
+    });
+    if (saved) {
+      setSubtaskTitle("");
+      setMenuMode(null);
+      if (!isExpanded) {
+        onToggleExpansion(row.id);
+      }
+    }
+  }
 
   return (
     <div className="task-row-group">
@@ -380,6 +512,232 @@ function TaskRowItem({
         >
           {row.isFavorite ? "★" : "☆"}
         </button>
+
+        <span className="task-row-menu-anchor" ref={menuAnchorRef}>
+          <button
+            className="task-row-menu-trigger"
+            type="button"
+            aria-label={`${row.title}の操作`}
+            aria-haspopup="menu"
+            aria-expanded={menuMode !== null}
+            title="タスクの操作"
+            disabled={isMutating}
+            onClick={(event) => {
+              event.stopPropagation();
+              setMenuMode((current) => {
+                if (current) {
+                  return null;
+                }
+                setDueDraft({
+                  dueDate: row.dueDate ?? "",
+                  dueTime: row.dueTime ?? "",
+                });
+                setListDraft(row.listId);
+                return "actions";
+              });
+            }}
+          >
+            <EllipsisVertical aria-hidden="true" size={17} />
+          </button>
+          {menuMode ? (
+            <div
+              className="task-row-menu"
+              role={menuMode === "actions" ? "menu" : "dialog"}
+              aria-label={`${row.title}の操作`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {menuMode === "actions" ? (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!canEditTask}
+                    onClick={() => setMenuMode("due")}
+                  >
+                    期限の設定
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!canEditTask}
+                    onClick={() => {
+                      setSubtaskTitle("");
+                      setMenuMode("subtask");
+                    }}
+                  >
+                    サブタスク追加
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!canEditTask}
+                    onClick={() => setMenuMode("list")}
+                  >
+                    リスト選択
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={isMutating}
+                    onClick={() =>
+                      void onReorderTask(row.id, "up").then((moved) => {
+                        if (moved) {
+                          setMenuMode(null);
+                        }
+                      })
+                    }
+                  >
+                    上に移動
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={isMutating}
+                    onClick={() =>
+                      void onReorderTask(row.id, "down").then((moved) => {
+                        if (moved) {
+                          setMenuMode(null);
+                        }
+                      })
+                    }
+                  >
+                    下に移動
+                  </button>
+                  <button
+                    className="is-danger"
+                    type="button"
+                    role="menuitem"
+                    disabled={!canEditTask}
+                    onClick={() => {
+                      if (
+                        task &&
+                        window.confirm(`「${row.title}」を削除しますか？`)
+                      ) {
+                        void onDeleteTask(task).then((deleted) => {
+                          if (deleted) {
+                            setMenuMode(null);
+                          }
+                        });
+                      }
+                    }}
+                  >
+                    削除
+                  </button>
+                </>
+              ) : null}
+
+              {menuMode === "due" ? (
+                <form
+                  className="task-row-menu-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void applyDue(
+                      dueDraft.dueDate.trim() || null,
+                      dueDraft.dueDate.trim() ? dueDraft.dueTime || null : null,
+                    );
+                  }}
+                >
+                  <label>
+                    <span>期限日</span>
+                    <input
+                      type="date"
+                      value={dueDraft.dueDate}
+                      onChange={(event) =>
+                        setDueDraft((current) => ({
+                          ...current,
+                          dueDate: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>期限時刻</span>
+                    <input
+                      type="time"
+                      value={dueDraft.dueTime}
+                      disabled={!dueDraft.dueDate}
+                      onChange={(event) =>
+                        setDueDraft((current) => ({
+                          ...current,
+                          dueTime: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <div className="task-row-menu-actions">
+                    <button type="submit" disabled={!canEditTask}>
+                      保存
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canEditTask}
+                      onClick={() => void applyDue(null, null)}
+                    >
+                      期限なし
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+
+              {menuMode === "subtask" ? (
+                <form
+                  className="task-row-menu-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void submitSubtask();
+                  }}
+                >
+                  <label>
+                    <span>サブタスク名</span>
+                    <input
+                      value={subtaskTitle}
+                      maxLength={120}
+                      autoFocus
+                      onChange={(event) => setSubtaskTitle(event.target.value)}
+                    />
+                  </label>
+                  <div className="task-row-menu-actions">
+                    <button
+                      type="submit"
+                      disabled={!canEditTask || !subtaskTitle.trim()}
+                    >
+                      追加
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+
+              {menuMode === "list" ? (
+                <form
+                  className="task-row-menu-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void applyListChange(listDraft);
+                  }}
+                >
+                  <label>
+                    <span>所属リスト</span>
+                    <select
+                      value={listDraft}
+                      onChange={(event) => setListDraft(event.target.value)}
+                    >
+                      {taskLists.map((list) => (
+                        <option key={list.id} value={list.id}>
+                          {list.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="task-row-menu-actions">
+                    <button type="submit" disabled={!canEditTask}>
+                      保存
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+            </div>
+          ) : null}
+        </span>
       </div>
 
       {isExpanded && subtasks.length > 0 ? (
@@ -617,4 +975,27 @@ function formatMemoPreview(value: string) {
     return "";
   }
   return normalized.length > 48 ? `${normalized.slice(0, 48)}...` : normalized;
+}
+
+function toTaskUpdateDraft(
+  task: TaskWithSubtasks,
+  overrides: Partial<WorkItemUpdateDraft>,
+): WorkItemUpdateDraft {
+  return {
+    listId: task.listId,
+    title: task.title,
+    plannedStartDate: task.plannedStartDate,
+    dueDate: task.dueDate,
+    dueTime: task.dueTime,
+    timerTargetSeconds: task.timerTargetSeconds,
+    colorToken: task.colorToken,
+    recurrenceRule: task.recurrenceRule
+      ? {
+          frequency: task.recurrenceRule.frequency,
+          interval: task.recurrenceRule.interval,
+        }
+      : null,
+    memo: task.memo,
+    ...overrides,
+  };
 }

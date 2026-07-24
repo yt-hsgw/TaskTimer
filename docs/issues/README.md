@@ -79,6 +79,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [071 日時未設定タスクをカレンダー／タイムラインへD&Dして予定化する](071-assign-unscheduled-work-schedule.md) / GitHub #181
 - [072 かんばんの未設定タスクをD&Dで予定化する](072-kanban-unscheduled-work-schedule.md) / GitHub #182
 - [073 中央ペインのD&D移動とタイマー操作ちらつきを修正する](073-center-pane-dnd-timer-flicker.md) / GitHub #187
+- [074 タスク行三点メニューとタイムライン一時非表示を整理する](074-task-row-menu-hide-timeline.md) / GitHub #188
 
 ## 運用
 

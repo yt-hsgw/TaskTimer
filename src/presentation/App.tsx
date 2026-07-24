@@ -70,7 +70,7 @@ const MemoizedPomodoroPanel = memo(PomodoroPanel);
 const MemoizedGlobalSearch = memo(GlobalSearch);
 const MemoizedTimelinePanel = memo(TimelinePanel);
 
-type WorkspaceMode = "list" | "board" | "calendar" | "timeline";
+type WorkspaceMode = "list" | "board" | "calendar";
 
 type LoadSnapshotOptions = {
   showLoading?: boolean;
@@ -120,7 +120,6 @@ const workspaceModes: { value: WorkspaceMode; label: string }[] = [
   { value: "list", label: "リスト" },
   { value: "board", label: "かんばん" },
   { value: "calendar", label: "カレンダー" },
-  { value: "timeline", label: "タイムライン" },
 ];
 const INITIAL_MUTATION_COUNTS: Record<MutationScope, number> = {
   navigation: 0,
@@ -1774,6 +1773,16 @@ export function App() {
     [runMutation],
   );
 
+  const handleReorderTaskWithinList = useCallback(
+    (taskId: string, direction: "up" | "down") =>
+      runTaskActionMutation(taskId, async () => {
+        await tauriTaskTimerGateway.reorderTaskWithinList(taskId, direction);
+      }, {
+        refresh: { taskPage: true },
+      }),
+    [runTaskActionMutation],
+  );
+
   const handleDeleteSubtask = useCallback(
     (subtask: Subtask) => {
       return runMutation(async () => {
@@ -1938,14 +1947,22 @@ export function App() {
         clearDetailSelection();
       } else if (
         view.kind === "board" ||
-        view.kind === "calendar" ||
-        view.kind === "timeline"
+        view.kind === "calendar"
       ) {
         if (workspaceMode === view.kind && isSameAppView(activeView, view)) {
           return;
         }
         setWorkspaceMode(view.kind);
         setActiveView(view);
+        clearDetailSelection();
+      } else if (view.kind === "timeline") {
+        const nextView: AppView =
+          workspaceScope.kind === "list" ? workspaceScope : { kind: "list", listId: lastTaskListId };
+        if (workspaceMode === "list" && isSameAppView(activeView, nextView)) {
+          return;
+        }
+        setWorkspaceMode("list");
+        setActiveView(nextView);
         clearDetailSelection();
       } else {
         if (isSameAppView(activeView, view)) {
@@ -1961,6 +1978,7 @@ export function App() {
     [
       activeView,
       clearDetailSelection,
+      lastTaskListId,
       workspaceMode,
       workspaceScope,
     ],
@@ -2307,6 +2325,7 @@ export function App() {
               <MemoizedTaskPanel
                 tasks={visibleTasks}
                 taskRows={visibleTaskRows}
+                taskLists={taskLists}
                 selectedTaskId={selectedTaskId}
                 activeTimer={activeTimer}
                 activePomodoro={activePomodoro}
@@ -2341,6 +2360,10 @@ export function App() {
                 onRequestCreateTask={handleRequestTaskCreate}
                 onToggleTaskCompletion={handleToggleTaskCompletion}
                 onToggleTaskFavorite={handleToggleTaskFavorite}
+                onUpdateTask={handleUpdateTask}
+                onCreateSubtask={handleCreateSubtask}
+                onDeleteTask={handleDeleteTask}
+                onReorderTask={handleReorderTaskWithinList}
                 onStartTimer={handleStartTimer}
                 onPauseTimer={handlePauseTimer}
                 onResumeTimer={handleResumeTimer}
@@ -2621,7 +2644,7 @@ function getTaskPanelEyebrow(scope: WorkspaceScope) {
 }
 
 function appViewFromPreferences(preferences: UiPreferences): AppView {
-  if (preferences.lastView === "list") {
+  if (preferences.lastView === "list" || preferences.lastView === "timeline") {
     return {
       kind: "list",
       listId: normalizeTaskListId(preferences.lastTaskListId),
@@ -2652,11 +2675,7 @@ function workspaceScopeFromPreferences(
 }
 
 function workspaceModeFromView(view: AppView): WorkspaceMode {
-  if (
-    view.kind === "board" ||
-    view.kind === "calendar" ||
-    view.kind === "timeline"
-  ) {
+  if (view.kind === "board" || view.kind === "calendar") {
     return view.kind;
   }
   return "list";

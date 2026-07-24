@@ -147,8 +147,7 @@ npm run perf:ui -- --profile standard --fail-on-warning
 | 今日、お気に入り、右詳細 | 1,000ms |
 | かんばん表示、カードD&D、週/日カレンダー | 1,500ms |
 | 月カレンダー | 2,000ms |
-| タイムライン表示 | 2,000ms |
-| タイムライン追加200件 | 1,500ms |
+| タイムライン一時非表示の確認 | 250ms |
 
 標準UIプロファイルは401件を用意し、初期200件と追加200件を分けて描画する。追加読み込み後も選択中タスク、サブタスク展開、詳細表示が維持されることを完了条件に含める。SQLite側は別計測で5,000件を最後までカーソル巡回し、UI側はDOM負荷を1回200件に制限する。
 
@@ -253,6 +252,7 @@ Presentation描画計測結果:
 | 日時 | OS/ブラウザ | TaskTimer commit | プロファイル | コマンド | WARN件数 | メモ |
 | --- | --- | --- | --- | --- | ---: | --- |
 | 2026-07-20 | Darwin / headless Chrome | #160作業ブランチ | 401タスク / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | タイムライン初期200件117ms、追加200件84ms。日/週/月、横スクロール、詳細開閉、参照操作中command 0件を検証し、全項目閾値内。 |
+| 2026-07-24 | Darwin / headless Chrome | #188作業ブランチ | 401タスク / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | タイムラインを通常導線から一時非表示にした状態で `timeline_hidden` 32ms。タスク行三点メニュー追加後も一覧、かんばん、カレンダー、タイマー操作は全項目閾値内。 |
 | 2026-07-19 | Darwin / headless Chrome | #152作業ブランチ | 401タスク / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 日・週表示の全時間ラベル/セルのGrid行列、上端、水平・垂直罫線、予定レイヤー範囲を検証。週表示40ms、日表示25ms、全項目閾値内。 |
 | 2026-07-19 | Darwin / headless Chrome | #148作業ブランチ | 401タスク / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 月・日/週上部の省略予定一覧、Esc・外側クリック・詳細選択・フォーカス復帰・中央ペイン内配置を含む。一覧開閉401ms、操作中command 0件、全項目閾値内。 |
 | 2026-07-19 | Darwin / headless Chrome | #147作業ブランチ | 401タスク / 1,604サブタスク / 12リスト | `npm run perf:ui -- --profile standard --fail-on-warning` | 0 | 完全重複・境界一致・連鎖重複・サブタスク・複数時間カードを含む。重複レイアウト3ms、週表示48ms、全項目閾値内。 |

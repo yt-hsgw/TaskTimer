@@ -3321,7 +3321,7 @@ button {
   color: var(--ink);
   display: grid;
   gap: 10px;
-  grid-template-columns: 34px 28px minmax(0, 1fr) 122px 34px;
+  grid-template-columns: 34px 28px minmax(0, 1fr) 122px 34px 34px;
   min-height: 58px;
   min-width: 0;
   padding: 8px;
@@ -3548,6 +3548,111 @@ button {
 
 .favorite-button.is-favorite {
   color: var(--gold);
+}
+
+.task-row-menu-anchor {
+  display: inline-flex;
+  justify-content: center;
+  position: relative;
+}
+
+.task-row-menu-trigger {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  display: inline-flex;
+  height: 34px;
+  justify-content: center;
+  min-width: 34px;
+  padding: 0;
+}
+
+.task-row-menu-trigger:hover:not(:disabled),
+.task-row-menu-trigger:focus-visible {
+  background: var(--soft-green);
+  border-color: #c9d9d2;
+  color: var(--green);
+}
+
+.task-row-menu {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 14px 34px rgb(23 32 38 / 16%);
+  display: grid;
+  gap: 3px;
+  min-width: 198px;
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 60;
+}
+
+.task-row-menu > button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--ink);
+  display: flex;
+  font-weight: 700;
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.task-row-menu > button:hover:not(:disabled),
+.task-row-menu > button:focus-visible {
+  background: #f1f8f5;
+}
+
+.task-row-menu > button.is-danger {
+  color: #b23b32;
+}
+
+.task-row-menu-form {
+  display: grid;
+  gap: 8px;
+}
+
+.task-row-menu-form label {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 4px;
+}
+
+.task-row-menu-form input,
+.task-row-menu-form select {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--ink);
+  font: inherit;
+  min-height: 34px;
+  min-width: 0;
+  padding: 6px 8px;
+}
+
+.task-row-menu-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.task-row-menu-actions button {
+  background: var(--soft-green);
+  border: 1px solid #c9d9d2;
+  border-radius: 5px;
+  color: var(--green);
+  font-weight: 800;
+  min-height: 32px;
+  padding: 5px 9px;
 }
 
 .task-timer-slot {
