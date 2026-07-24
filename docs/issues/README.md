@@ -78,6 +78,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [070 左ペインとカンバンの操作配置を整理する](070-navigation-kanban-action-layout.md) / GitHub #178
 - [071 日時未設定タスクをカレンダー／タイムラインへD&Dして予定化する](071-assign-unscheduled-work-schedule.md) / GitHub #181
 - [072 かんばんの未設定タスクをD&Dで予定化する](072-kanban-unscheduled-work-schedule.md) / GitHub #182
+- [073 中央ペインのD&D移動とタイマー操作ちらつきを修正する](073-center-pane-dnd-timer-flicker.md) / GitHub #187
 
 ## 運用
 

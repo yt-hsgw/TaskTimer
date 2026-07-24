@@ -28,7 +28,7 @@ import type {
   WorkScheduleMoveDraft,
 } from "../application/usecases/contracts";
 import type { NotificationDisplayMode } from "../domain/notification/types";
-import type { ActiveTimer } from "../domain/timer/types";
+import type { ActiveTimer, TimerSession } from "../domain/timer/types";
 import {
   DEFAULT_TASK_LIST_ID,
   type Task,
@@ -139,9 +139,6 @@ const TASK_LIFECYCLE_REFRESH = {
   invalidateCalendar: true,
   invalidateBoardColumns: true,
 } satisfies MutationRefreshOptions;
-const TASK_TIMER_REFRESH = {
-  refresh: { taskPage: true, runtime: true, notifications: true },
-} satisfies MutationRefreshOptions;
 const POMODORO_REFRESH = {
   refresh: { runtime: true, notifications: true },
 } satisfies MutationRefreshOptions;
@@ -242,6 +239,7 @@ export function App() {
   const runtimeRequestIdRef = useRef(0);
   const settingsRequestIdRef = useRef(0);
   const notificationsRequestIdRef = useRef(0);
+  const timerMutationInFlightRef = useRef(false);
   const hasLoadedInitialSnapshotRef = useRef(false);
   const isInitialSnapshotLoadingRef = useRef(false);
   const loadedTaskScopeKeyRef = useRef<string | null>(null);
@@ -1441,15 +1439,71 @@ export function App() {
     [runMutation],
   );
 
+  const patchTaskRowsForTimerTarget = useCallback(
+    (target: WorkTargetRef, activeTarget: WorkTargetRef | null) => {
+      const ownerTaskId = resolveTaskIdForTarget(tasks, target);
+
+      setTaskRows((currentRows) =>
+        currentRows.map((row) => {
+          const shouldOwnTimer = ownerTaskId === row.id && activeTarget !== null;
+          const currentlyOwnsTarget =
+            row.activeTimerTarget !== null &&
+            isSameWorkTarget(row.activeTimerTarget, target);
+          if (!shouldOwnTimer && !currentlyOwnsTarget) {
+            return row;
+          }
+          return {
+            ...row,
+            activeTimerTarget: shouldOwnTimer ? activeTarget : null,
+            isTimerActive: shouldOwnTimer,
+          };
+        }),
+      );
+    },
+    [tasks],
+  );
+
+  const runTimerMutation = useCallback(
+    async (
+      operation: () => Promise<ActiveTimer | TimerSession | null>,
+      options?: { activeTarget?: WorkTargetRef | null },
+    ) => {
+      if (timerMutationInFlightRef.current) {
+        return false;
+      }
+      timerMutationInFlightRef.current = true;
+      setErrorMessage(null);
+
+      try {
+        const timer = await operation();
+        const activeTarget = options?.activeTarget ?? timer?.target ?? null;
+        setActiveTimer(
+          timer && timer.stoppedAt === null ? (timer as ActiveTimer) : null,
+        );
+        if (activeTarget) {
+          patchTaskRowsForTimerTarget(
+            activeTarget,
+            timer && timer.stoppedAt === null ? timer.target : null,
+          );
+        }
+        await refreshAfterMutation({ refresh: { notifications: true } });
+        return true;
+      } catch (error) {
+        setErrorMessage(toErrorMessage(error));
+        return false;
+      } finally {
+        timerMutationInFlightRef.current = false;
+      }
+    },
+    [patchTaskRowsForTimerTarget, refreshAfterMutation],
+  );
+
   const handleStartTimer = useCallback(
     (target: WorkTargetRef) =>
-      runMutation(async () => {
-        await tauriTaskTimerGateway.startTimer(target);
-      }, {
-        scope: "detail",
-        ...TASK_TIMER_REFRESH,
+      runTimerMutation(() => tauriTaskTimerGateway.startTimer(target), {
+        activeTarget: target,
       }),
-    [runMutation],
+    [runTimerMutation],
   );
 
   const handleStartPomodoro = useCallback(
@@ -1556,35 +1610,22 @@ export function App() {
 
   const handlePauseTimer = useCallback(
     () =>
-      runMutation(async () => {
-        await tauriTaskTimerGateway.pauseActiveTimer();
-      }, {
-        scope: "detail",
-        ...TASK_TIMER_REFRESH,
-      }),
-    [runMutation],
+      runTimerMutation(() => tauriTaskTimerGateway.pauseActiveTimer()),
+    [runTimerMutation],
   );
 
   const handleResumeTimer = useCallback(
     () =>
-      runMutation(async () => {
-        await tauriTaskTimerGateway.resumeActiveTimer();
-      }, {
-        scope: "detail",
-        ...TASK_TIMER_REFRESH,
-      }),
-    [runMutation],
+      runTimerMutation(() => tauriTaskTimerGateway.resumeActiveTimer()),
+    [runTimerMutation],
   );
 
   const handleStopTimer = useCallback(
     () =>
-      runMutation(async () => {
-        await tauriTaskTimerGateway.stopActiveTimer();
-      }, {
-        scope: "detail",
-        ...TASK_TIMER_REFRESH,
+      runTimerMutation(() => tauriTaskTimerGateway.stopActiveTimer(), {
+        activeTarget: activeTimer?.target ?? null,
       }),
-    [runMutation],
+    [activeTimer?.target, runTimerMutation],
   );
 
   const handleToggleTaskCompletion = useCallback(
@@ -2834,6 +2875,13 @@ function isSameTarget(
   return (
     selectedTarget?.type === target.type && selectedTarget.id === target.id
   );
+}
+
+function isSameWorkTarget(
+  left: WorkTargetRef | null,
+  right: WorkTargetRef | null,
+) {
+  return left?.type === right?.type && left?.id === right?.id;
 }
 
 function combineNotificationSummaries(
