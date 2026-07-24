@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { EllipsisVertical, Pause, Play, Square } from "lucide-react";
+import { ArrowLeft, EllipsisVertical, Pause, Play, Square } from "lucide-react";
 import type {
   TaskListItem,
   TaskRow,
@@ -612,6 +612,17 @@ function TaskRowItem({
                     );
                   }}
                 >
+                  <div className="task-row-menu-dialog-heading">
+                    <button
+                      className="task-row-menu-back"
+                      type="button"
+                      aria-label="操作メニューへ戻る"
+                      onClick={() => setMenuMode("actions")}
+                    >
+                      <ArrowLeft aria-hidden="true" size={15} />
+                    </button>
+                    <strong>期限を設定</strong>
+                  </div>
                   <label>
                     <span>期限日</span>
                     <input
@@ -655,25 +666,38 @@ function TaskRowItem({
               ) : null}
 
               {menuMode === "list" ? (
-                <div className="task-row-list-options" aria-label="所属リスト">
-                  {taskLists.map((list) => (
+                <div className="task-row-menu-dialog">
+                  <div className="task-row-menu-dialog-heading">
                     <button
-                      className={`task-row-list-option ${
-                        row.listId === list.id ? "is-selected" : ""
-                      }`}
+                      className="task-row-menu-back"
                       type="button"
-                      key={list.id}
-                      aria-pressed={row.listId === list.id}
-                      disabled={!canEditTask}
-                      onClick={() => void applyListChange(list.id)}
+                      aria-label="操作メニューへ戻る"
+                      onClick={() => setMenuMode("actions")}
                     >
-                      <span
-                        className={`task-row-list-dot color-${list.colorToken}`}
-                        aria-hidden="true"
-                      />
-                      <span>{list.name}</span>
+                      <ArrowLeft aria-hidden="true" size={15} />
                     </button>
-                  ))}
+                    <strong>リストを選択</strong>
+                  </div>
+                  <div className="task-row-list-options" aria-label="所属リスト">
+                    {taskLists.map((list) => (
+                      <button
+                        className={`task-row-list-option ${
+                          row.listId === list.id ? "is-selected" : ""
+                        }`}
+                        type="button"
+                        key={list.id}
+                        aria-pressed={row.listId === list.id}
+                        disabled={!canEditTask}
+                        onClick={() => void applyListChange(list.id)}
+                      >
+                        <span
+                          className={`task-row-list-dot color-${list.colorToken}`}
+                          aria-hidden="true"
+                        />
+                        <span>{list.name}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : null}
             </div>
