@@ -81,6 +81,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [073 中央ペインのD&D移動とタイマー操作ちらつきを修正する](073-center-pane-dnd-timer-flicker.md) / GitHub #187
 - [074 タスク行三点メニューとタイムライン一時非表示を整理する](074-task-row-menu-hide-timeline.md) / GitHub #188
 - [075 左ペインのブランド表示と新規リスト編集UXを整理する](075-navigation-brand-list-create.md) / GitHub #186
+- [076 ポモドーロの画面遷移、設定、完了通知を改善する](076-pomodoro-navigation-settings-notification.md) / GitHub #185
 
 ## 運用
 

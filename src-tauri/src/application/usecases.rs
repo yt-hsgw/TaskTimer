@@ -761,11 +761,29 @@ pub fn resume_pomodoro(
     repository.resume_pomodoro(clock.now_utc_iso8601())
 }
 
+#[cfg(test)]
 pub fn complete_pomodoro_work_phase(
     repository: &impl PomodoroRepository,
     clock: &impl Clock,
 ) -> RepositoryResult<ActivePomodoro> {
     repository.complete_pomodoro_work_phase(clock.now_utc_iso8601())
+}
+
+pub fn complete_pomodoro_work_phase_and_notify(
+    repository: &(impl PomodoroRepository + NotificationPreferenceRepository),
+    notification_gateway: &impl LocalNotificationGateway,
+    clock: &impl Clock,
+) -> RepositoryResult<ActivePomodoro> {
+    let completed = repository.complete_pomodoro_work_phase(clock.now_utc_iso8601())?;
+    if repository.get_notifications_enabled().unwrap_or(false) {
+        let display_mode = repository
+            .get_notification_display_mode()
+            .unwrap_or(NotificationDisplayMode::Generic);
+        let message =
+            build_pomodoro_expiry_notification(&display_mode, "ポモドーロ", &completed.phase);
+        let _ = notification_gateway.send(&message);
+    }
+    Ok(completed)
 }
 
 pub fn start_pomodoro_break(

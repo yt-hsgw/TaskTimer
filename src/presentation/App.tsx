@@ -252,11 +252,21 @@ export function App() {
   const searchRequestIdRef = useRef(0);
   const selectedTaskOverrideRef = useRef(selectedTaskOverride);
   const activeViewRef = useRef(activeView);
+  const pomodoroReturnViewRef = useRef<AppView>({
+    kind: "list",
+    listId: DEFAULT_TASK_LIST_ID,
+  });
   const refreshReadModelsRef = useRef<
     (plan: ReadModelRefreshPlan) => Promise<void>
   >(async () => undefined);
   activeViewRef.current = activeView;
   selectedTaskOverrideRef.current = selectedTaskOverride;
+
+  useEffect(() => {
+    if (activeView.kind !== "pomodoro") {
+      pomodoroReturnViewRef.current = activeView;
+    }
+  }, [activeView]);
 
   const isNavigationMutating = mutationCounts.navigation > 0;
   const isDetailMutating = mutationCounts.detail > 0;
@@ -1870,7 +1880,7 @@ export function App() {
       runMutation(async () => {
         await tauriTaskTimerGateway.updatePomodoroSettings(input);
       }, {
-        scope: "settings",
+        scope: "pomodoro",
         refresh: { settings: true },
       }),
     [runMutation],
@@ -2024,6 +2034,15 @@ export function App() {
       workspaceScope,
     ],
   );
+
+  const handleTogglePomodoroView = useCallback(() => {
+    if (activeView.kind === "pomodoro") {
+      setActiveView(pomodoroReturnViewRef.current);
+      clearDetailSelection();
+      return;
+    }
+    handleSelectView({ kind: "pomodoro" });
+  }, [activeView.kind, clearDetailSelection, handleSelectView]);
 
   const handleSelectWorkspaceMode = useCallback(
     (mode: WorkspaceMode) => {
@@ -2326,7 +2345,7 @@ export function App() {
           onChange={setSearchQuery}
           onOpenChange={setIsSearchOpen}
           onSelect={(result) => void handleSelectSearchResult(result)}
-          onOpenPomodoro={() => handleSelectView({ kind: "pomodoro" })}
+          onOpenPomodoro={handleTogglePomodoroView}
         />
       </header>
 
@@ -2654,6 +2673,7 @@ export function App() {
               onCompleteBreak={handleCompletePomodoroBreak}
               onCompleteBreakAndStartNext={handleCompletePomodoroBreakAndStartNext}
               onCancel={handleCancelPomodoro}
+              onUpdateSettings={handleUpdatePomodoroSettings}
             />
           ) : null}
 
@@ -2662,13 +2682,11 @@ export function App() {
               displayMode={displayMode}
               notificationsEnabled={notificationsEnabled}
               taskTimerSettings={taskTimerSettings}
-              pomodoroSettings={pomodoroSettings}
               isMutating={isSettingsMutating}
               notificationSummary={notificationSummary}
               onUpdateDisplayMode={handleUpdateNotificationDisplayMode}
               onUpdateNotificationsEnabled={handleUpdateNotificationsEnabled}
               onUpdateTaskTimerSettings={handleUpdateTaskTimerSettings}
-              onUpdatePomodoroSettings={handleUpdatePomodoroSettings}
               onRetryNotifications={handleRetryNotifications}
               onCreateJsonExport={handleCreateJsonExport}
               onCreateCsvExport={handleCreateCsvExport}

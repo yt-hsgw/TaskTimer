@@ -10,6 +10,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import type {
   ActivePomodoro,
   PomodoroSettings,
+  PomodoroSettingsDraft,
 } from "../../application/usecases/contracts";
 import type { ActiveTimer } from "../../domain/timer/types";
 import { usePresentationRenderProbe } from "../renderProbe";
@@ -28,6 +29,7 @@ type PomodoroPanelProps = {
   onCompleteBreak(): Promise<boolean>;
   onCompleteBreakAndStartNext(): Promise<boolean>;
   onCancel(): Promise<boolean>;
+  onUpdateSettings(input: PomodoroSettingsDraft): Promise<boolean>;
 };
 
 export function PomodoroPanel({
@@ -44,9 +46,14 @@ export function PomodoroPanel({
   onCompleteBreak,
   onCompleteBreakAndStartNext,
   onCancel,
+  onUpdateSettings,
 }: PomodoroPanelProps) {
   usePresentationRenderProbe("PomodoroPanel");
   const [now, setNow] = useState(Date.now());
+  const [settingsDraft, setSettingsDraft] = useState(() =>
+    createPomodoroDraft(settings),
+  );
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setNow(Date.now());
@@ -56,6 +63,11 @@ export function PomodoroPanel({
     const timerId = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timerId);
   }, [activePomodoro]);
+
+  useEffect(() => {
+    setSettingsDraft(createPomodoroDraft(settings));
+    setSettingsMessage(null);
+  }, [settings]);
 
   const phase = activePomodoro?.phase ?? "work";
   const isPaused = activePomodoro?.status === "paused";
@@ -71,11 +83,47 @@ export function PomodoroPanel({
       ? "休憩を開始"
       : "次の作業";
   const primaryActionDisabled = isMutating || (!activePomodoro && Boolean(activeTimer));
+  const settingsValidationError = settings
+    ? validatePomodoroDraft(settingsDraft)
+    : null;
+  const hasSettingsChanges = settings
+    ? hasPomodoroDraftChanges(settingsDraft, settings)
+    : false;
 
   const runPrimaryAction = () => {
     if (!activePomodoro) return onStart();
     if (phase === "work") return onCompleteWorkAndStartBreak();
     return onCompleteBreakAndStartNext();
+  };
+
+  const updateSettingsDraft = (
+    field: keyof PomodoroDraftState,
+    value: string | boolean,
+  ) => {
+    setSettingsMessage(null);
+    setSettingsDraft((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleSettingsSubmit = async () => {
+    if (!settings) {
+      return;
+    }
+    if (settingsValidationError) {
+      setSettingsMessage(settingsValidationError);
+      return;
+    }
+
+    const updated = await onUpdateSettings({
+      workSeconds: Number(settingsDraft.workMinutes) * 60,
+      shortBreakSeconds: Number(settingsDraft.shortBreakMinutes) * 60,
+      longBreakSeconds: Number(settingsDraft.longBreakMinutes) * 60,
+      cyclesUntilLongBreak: Number(settingsDraft.cyclesUntilLongBreak),
+      autoStartBreak: settingsDraft.autoStartBreak,
+      autoStartNextWork: settingsDraft.autoStartNextWork,
+    });
+    setSettingsMessage(
+      updated ? "ポモドーロ設定を保存しました。" : "ポモドーロ設定を保存できませんでした。",
+    );
   };
 
   return (
@@ -243,12 +291,158 @@ export function PomodoroPanel({
         </div>
       </div>
 
-      <div className="pomodoro-settings-summary" aria-label="現在のポモドーロ設定">
-        <span>作業 <strong>{formatMinutes(settings?.workSeconds ?? 25 * 60)}分</strong></span>
-        <span>短い休憩 <strong>{formatMinutes(settings?.shortBreakSeconds ?? 5 * 60)}分</strong></span>
-        <span>長い休憩 <strong>{formatMinutes(settings?.longBreakSeconds ?? 15 * 60)}分</strong></span>
-        <span>長い休憩まで <strong>{settings?.cyclesUntilLongBreak ?? 4}セット</strong></span>
-      </div>
+      <form
+        className="pomodoro-settings-form pomodoro-panel-settings"
+        aria-labelledby="pomodoro-panel-settings-title"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleSettingsSubmit();
+        }}
+      >
+        <div className="pomodoro-panel-settings-heading">
+          <div>
+            <h3 id="pomodoro-panel-settings-title">設定</h3>
+            <span>作業と休憩の既定値</span>
+          </div>
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={
+              isMutating ||
+              !settings ||
+              !hasSettingsChanges ||
+              Boolean(settingsValidationError)
+            }
+          >
+            保存
+          </button>
+        </div>
+
+        <div className="pomodoro-settings-grid">
+          <label className="field-group" htmlFor="pomodoro-panel-work-minutes">
+            作業時間（分）
+            <input
+              id="pomodoro-panel-work-minutes"
+              type="number"
+              min="1"
+              max="1440"
+              step="1"
+              inputMode="numeric"
+              value={settingsDraft.workMinutes}
+              disabled={isMutating || !settings}
+              onChange={(event) =>
+                updateSettingsDraft("workMinutes", event.target.value)
+              }
+            />
+          </label>
+
+          <label
+            className="field-group"
+            htmlFor="pomodoro-panel-short-break-minutes"
+          >
+            短い休憩（分）
+            <input
+              id="pomodoro-panel-short-break-minutes"
+              type="number"
+              min="1"
+              max="1440"
+              step="1"
+              inputMode="numeric"
+              value={settingsDraft.shortBreakMinutes}
+              disabled={isMutating || !settings}
+              onChange={(event) =>
+                updateSettingsDraft("shortBreakMinutes", event.target.value)
+              }
+            />
+          </label>
+
+          <label
+            className="field-group"
+            htmlFor="pomodoro-panel-long-break-minutes"
+          >
+            長い休憩（分）
+            <input
+              id="pomodoro-panel-long-break-minutes"
+              type="number"
+              min="1"
+              max="1440"
+              step="1"
+              inputMode="numeric"
+              value={settingsDraft.longBreakMinutes}
+              disabled={isMutating || !settings}
+              onChange={(event) =>
+                updateSettingsDraft("longBreakMinutes", event.target.value)
+              }
+            />
+          </label>
+
+          <label className="field-group" htmlFor="pomodoro-panel-cycle-count">
+            長い休憩までの作業回数
+            <input
+              id="pomodoro-panel-cycle-count"
+              type="number"
+              min="1"
+              max="12"
+              step="1"
+              inputMode="numeric"
+              value={settingsDraft.cyclesUntilLongBreak}
+              disabled={isMutating || !settings}
+              onChange={(event) =>
+                updateSettingsDraft("cyclesUntilLongBreak", event.target.value)
+              }
+            />
+          </label>
+        </div>
+
+        <div className="pomodoro-settings-toggles">
+          <label>
+            <input
+              type="checkbox"
+              checked={settingsDraft.autoStartBreak}
+              disabled={isMutating || !settings}
+              onChange={(event) =>
+                updateSettingsDraft("autoStartBreak", event.target.checked)
+              }
+            />
+            作業後に休憩を自動開始
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={settingsDraft.autoStartNextWork}
+              disabled={isMutating || !settings}
+              onChange={(event) =>
+                updateSettingsDraft("autoStartNextWork", event.target.checked)
+              }
+            />
+            休憩後に次の作業を自動開始
+          </label>
+        </div>
+
+        {settingsValidationError ? (
+          <p className="settings-warning">{settingsValidationError}</p>
+        ) : null}
+
+        {settingsMessage ? (
+          <div
+            className={`settings-status ${
+              settingsMessage.includes("できません") ||
+              settingsMessage.includes("入力してください")
+                ? "is-failed"
+                : "is-success"
+            }`}
+            role={
+              settingsMessage.includes("できません") ||
+              settingsMessage.includes("入力してください")
+                ? "alert"
+                : "status"
+            }
+            aria-live="polite"
+          >
+            {settingsMessage}
+          </div>
+        ) : null}
+      </form>
     </section>
   );
 }
@@ -290,4 +484,71 @@ function formatDuration(totalSeconds: number) {
 
 function formatMinutes(totalSeconds: number) {
   return Math.round(totalSeconds / 60);
+}
+
+type PomodoroDraftState = {
+  workMinutes: string;
+  shortBreakMinutes: string;
+  longBreakMinutes: string;
+  cyclesUntilLongBreak: string;
+  autoStartBreak: boolean;
+  autoStartNextWork: boolean;
+};
+
+function createPomodoroDraft(
+  settings: PomodoroSettings | null,
+): PomodoroDraftState {
+  return {
+    workMinutes: settings ? String(formatMinutes(settings.workSeconds)) : "",
+    shortBreakMinutes: settings
+      ? String(formatMinutes(settings.shortBreakSeconds))
+      : "",
+    longBreakMinutes: settings
+      ? String(formatMinutes(settings.longBreakSeconds))
+      : "",
+    cyclesUntilLongBreak: settings
+      ? String(settings.cyclesUntilLongBreak)
+      : "",
+    autoStartBreak: settings?.autoStartBreak ?? false,
+    autoStartNextWork: settings?.autoStartNextWork ?? false,
+  };
+}
+
+function validatePomodoroDraft(draft: PomodoroDraftState) {
+  const durationFields = [
+    ["作業時間", draft.workMinutes],
+    ["短い休憩", draft.shortBreakMinutes],
+    ["長い休憩", draft.longBreakMinutes],
+  ] as const;
+  for (const [label, value] of durationFields) {
+    if (!isIntegerTextInRange(value, 1, 1440)) {
+      return `${label}は1分以上1440分以下で入力してください。`;
+    }
+  }
+  if (!isIntegerTextInRange(draft.cyclesUntilLongBreak, 1, 12)) {
+    return "長い休憩までの作業回数は1回以上12回以下で入力してください。";
+  }
+  return null;
+}
+
+function hasPomodoroDraftChanges(
+  draft: PomodoroDraftState,
+  settings: PomodoroSettings,
+) {
+  return (
+    Number(draft.workMinutes) * 60 !== settings.workSeconds ||
+    Number(draft.shortBreakMinutes) * 60 !== settings.shortBreakSeconds ||
+    Number(draft.longBreakMinutes) * 60 !== settings.longBreakSeconds ||
+    Number(draft.cyclesUntilLongBreak) !== settings.cyclesUntilLongBreak ||
+    draft.autoStartBreak !== settings.autoStartBreak ||
+    draft.autoStartNextWork !== settings.autoStartNextWork
+  );
+}
+
+function isIntegerTextInRange(value: string, min: number, max: number) {
+  if (!/^\d+$/.test(value)) {
+    return false;
+  }
+  const numberValue = Number(value);
+  return Number.isInteger(numberValue) && numberValue >= min && numberValue <= max;
 }

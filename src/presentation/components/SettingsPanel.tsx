@@ -1,9 +1,7 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useState } from "react";
 import type { NotificationDisplayMode } from "../../domain/notification/types";
 import type {
   NotificationDispatchSummary,
-  PomodoroSettings,
-  PomodoroSettingsDraft,
   TaskTimerSettings,
   TaskTimerSettingsDraft,
 } from "../../application/usecases/contracts";
@@ -20,13 +18,11 @@ type DataManagementOperation = "json-export" | "csv-export";
 type SettingsPanelProps = {
   displayMode: NotificationDisplayMode;
   notificationsEnabled: boolean;
-  pomodoroSettings: PomodoroSettings | null;
   taskTimerSettings: TaskTimerSettings | null;
   isMutating: boolean;
   notificationSummary: NotificationDispatchSummary | null;
   onUpdateDisplayMode(displayMode: NotificationDisplayMode): Promise<boolean>;
   onUpdateNotificationsEnabled(enabled: boolean): Promise<boolean>;
-  onUpdatePomodoroSettings(input: PomodoroSettingsDraft): Promise<boolean>;
   onUpdateTaskTimerSettings(input: TaskTimerSettingsDraft): Promise<boolean>;
   onRetryNotifications(): Promise<boolean>;
   onCreateJsonExport(): Promise<DataManagementActionResult>;
@@ -36,13 +32,11 @@ type SettingsPanelProps = {
 export function SettingsPanel({
   displayMode,
   notificationsEnabled,
-  pomodoroSettings,
   taskTimerSettings,
   isMutating,
   notificationSummary,
   onUpdateDisplayMode,
   onUpdateNotificationsEnabled,
-  onUpdatePomodoroSettings,
   onUpdateTaskTimerSettings,
   onRetryNotifications,
   onCreateJsonExport,
@@ -53,12 +47,6 @@ export function SettingsPanel({
     useState<DataManagementOperation | null>(null);
   const [dataManagementResult, setDataManagementResult] =
     useState<DataManagementActionResult | null>(null);
-  const [pomodoroDraft, setPomodoroDraft] = useState(() =>
-    createPomodoroDraft(pomodoroSettings),
-  );
-  const [pomodoroSaveMessage, setPomodoroSaveMessage] = useState<string | null>(
-    null,
-  );
   const [taskTimerMinutes, setTaskTimerMinutes] = useState(() =>
     secondsToMinutesText(taskTimerSettings?.defaultTargetSeconds),
   );
@@ -66,17 +54,6 @@ export function SettingsPanel({
     null,
   );
   const isDataManagementBusy = isMutating || activeDataOperation !== null;
-  const pomodoroValidationError = pomodoroSettings
-    ? validatePomodoroDraft(pomodoroDraft)
-    : null;
-  const hasPomodoroChanges = pomodoroSettings
-    ? hasPomodoroDraftChanges(pomodoroDraft, pomodoroSettings)
-    : false;
-
-  useEffect(() => {
-    setPomodoroDraft(createPomodoroDraft(pomodoroSettings));
-    setPomodoroSaveMessage(null);
-  }, [pomodoroSettings]);
 
   useEffect(() => {
     setTaskTimerMinutes(
@@ -102,28 +79,6 @@ export function SettingsPanel({
     } finally {
       setActiveDataOperation(null);
     }
-  };
-
-  const handlePomodoroSubmit = async () => {
-    if (!pomodoroSettings) {
-      return;
-    }
-    if (pomodoroValidationError) {
-      setPomodoroSaveMessage(pomodoroValidationError);
-      return;
-    }
-
-    const updated = await onUpdatePomodoroSettings({
-      workSeconds: Number(pomodoroDraft.workMinutes) * 60,
-      shortBreakSeconds: Number(pomodoroDraft.shortBreakMinutes) * 60,
-      longBreakSeconds: Number(pomodoroDraft.longBreakMinutes) * 60,
-      cyclesUntilLongBreak: Number(pomodoroDraft.cyclesUntilLongBreak),
-      autoStartBreak: pomodoroSettings.autoStartBreak,
-      autoStartNextWork: pomodoroSettings.autoStartNextWork,
-    });
-    setPomodoroSaveMessage(
-      updated ? "ポモドーロ設定を保存しました。" : "ポモドーロ設定を保存できませんでした。",
-    );
   };
 
   const handleTaskTimerSubmit = async () => {
@@ -308,155 +263,6 @@ export function SettingsPanel({
         </section>
 
         <section
-          className="settings-section"
-          aria-labelledby="pomodoro-settings-title"
-        >
-          <div className="settings-section-heading">
-            <div>
-              <h3 id="pomodoro-settings-title">ポモドーロ</h3>
-              <span>作業と休憩の既定値</span>
-            </div>
-          </div>
-
-          <form
-            className="pomodoro-settings-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void handlePomodoroSubmit();
-            }}
-          >
-            <div className="pomodoro-settings-grid">
-              <label className="field-group" htmlFor="pomodoro-work-minutes">
-                作業時間（分）
-                <input
-                  id="pomodoro-work-minutes"
-                  type="number"
-                  min="1"
-                  max="1440"
-                  step="1"
-                  inputMode="numeric"
-                  value={pomodoroDraft.workMinutes}
-                  disabled={isMutating || !pomodoroSettings}
-                  onChange={(event) =>
-                    updatePomodoroDraftField(
-                      setPomodoroDraft,
-                      "workMinutes",
-                      event.target.value,
-                      setPomodoroSaveMessage,
-                    )
-                  }
-                />
-              </label>
-
-              <label
-                className="field-group"
-                htmlFor="pomodoro-short-break-minutes"
-              >
-                短い休憩（分）
-                <input
-                  id="pomodoro-short-break-minutes"
-                  type="number"
-                  min="1"
-                  max="1440"
-                  step="1"
-                  inputMode="numeric"
-                  value={pomodoroDraft.shortBreakMinutes}
-                  disabled={isMutating || !pomodoroSettings}
-                  onChange={(event) =>
-                    updatePomodoroDraftField(
-                      setPomodoroDraft,
-                      "shortBreakMinutes",
-                      event.target.value,
-                      setPomodoroSaveMessage,
-                    )
-                  }
-                />
-              </label>
-
-              <label
-                className="field-group"
-                htmlFor="pomodoro-long-break-minutes"
-              >
-                長い休憩（分）
-                <input
-                  id="pomodoro-long-break-minutes"
-                  type="number"
-                  min="1"
-                  max="1440"
-                  step="1"
-                  inputMode="numeric"
-                  value={pomodoroDraft.longBreakMinutes}
-                  disabled={isMutating || !pomodoroSettings}
-                  onChange={(event) =>
-                    updatePomodoroDraftField(
-                      setPomodoroDraft,
-                      "longBreakMinutes",
-                      event.target.value,
-                      setPomodoroSaveMessage,
-                    )
-                  }
-                />
-              </label>
-
-              <label className="field-group" htmlFor="pomodoro-cycle-count">
-                長い休憩までの作業回数
-                <input
-                  id="pomodoro-cycle-count"
-                  type="number"
-                  min="1"
-                  max="12"
-                  step="1"
-                  inputMode="numeric"
-                  value={pomodoroDraft.cyclesUntilLongBreak}
-                  disabled={isMutating || !pomodoroSettings}
-                  onChange={(event) =>
-                    updatePomodoroDraftField(
-                      setPomodoroDraft,
-                      "cyclesUntilLongBreak",
-                      event.target.value,
-                      setPomodoroSaveMessage,
-                    )
-                  }
-                />
-              </label>
-            </div>
-
-            {pomodoroValidationError ? (
-              <p className="settings-warning">{pomodoroValidationError}</p>
-            ) : null}
-
-            {pomodoroSaveMessage ? (
-              <div
-                className={`settings-status ${
-                  pomodoroSaveMessage.includes("できません")
-                    ? "is-failed"
-                    : "is-success"
-                }`}
-                role={pomodoroSaveMessage.includes("できません") ? "alert" : "status"}
-                aria-live="polite"
-              >
-                {pomodoroSaveMessage}
-              </div>
-            ) : null}
-
-            <div className="settings-form-actions">
-              <button
-                className="primary-button"
-                type="submit"
-                disabled={
-                  isMutating ||
-                  !pomodoroSettings ||
-                  !hasPomodoroChanges ||
-                  Boolean(pomodoroValidationError)
-                }
-              >
-                保存
-              </button>
-            </div>
-          </form>
-        </section>
-
-        <section
           className="settings-section data-management-section"
           aria-labelledby="export-title"
           aria-busy={isDataManagementBusy}
@@ -514,70 +320,6 @@ export function SettingsPanel({
         </section>
       </div>
     </section>
-  );
-}
-
-type PomodoroDraftState = {
-  workMinutes: string;
-  shortBreakMinutes: string;
-  longBreakMinutes: string;
-  cyclesUntilLongBreak: string;
-};
-
-type PomodoroDraftField = keyof PomodoroDraftState;
-
-function createPomodoroDraft(
-  settings: PomodoroSettings | null,
-): PomodoroDraftState {
-  return {
-    workMinutes: settings ? secondsToMinutes(settings.workSeconds) : "",
-    shortBreakMinutes: settings ? secondsToMinutes(settings.shortBreakSeconds) : "",
-    longBreakMinutes: settings ? secondsToMinutes(settings.longBreakSeconds) : "",
-    cyclesUntilLongBreak: settings
-      ? String(settings.cyclesUntilLongBreak)
-      : "",
-  };
-}
-
-function updatePomodoroDraftField(
-  setDraft: Dispatch<SetStateAction<PomodoroDraftState>>,
-  field: PomodoroDraftField,
-  value: string,
-  setMessage: Dispatch<SetStateAction<string | null>>,
-) {
-  setMessage(null);
-  setDraft((current) => ({
-    ...current,
-    [field]: value,
-  }));
-}
-
-function validatePomodoroDraft(draft: PomodoroDraftState) {
-  const durationFields = [
-    ["作業時間", draft.workMinutes],
-    ["短い休憩", draft.shortBreakMinutes],
-    ["長い休憩", draft.longBreakMinutes],
-  ] as const;
-  for (const [label, value] of durationFields) {
-    if (!isIntegerTextInRange(value, 1, 1440)) {
-      return `${label}は1分以上1440分以下で入力してください。`;
-    }
-  }
-  if (!isIntegerTextInRange(draft.cyclesUntilLongBreak, 1, 12)) {
-    return "長い休憩までの作業回数は1回以上12回以下で入力してください。";
-  }
-  return null;
-}
-
-function hasPomodoroDraftChanges(
-  draft: PomodoroDraftState,
-  settings: PomodoroSettings,
-) {
-  return (
-    Number(draft.workMinutes) * 60 !== settings.workSeconds ||
-    Number(draft.shortBreakMinutes) * 60 !== settings.shortBreakSeconds ||
-    Number(draft.longBreakMinutes) * 60 !== settings.longBreakSeconds ||
-    Number(draft.cyclesUntilLongBreak) !== settings.cyclesUntilLongBreak
   );
 }
 
