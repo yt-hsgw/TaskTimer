@@ -316,6 +316,7 @@ function TaskRowItem({
   const dueTimeTriggerRef = useRef<HTMLButtonElement | null>(null);
   const isDueCommitPendingRef = useRef(false);
   const shouldKeepDueDialogOpenAfterDatePickRef = useRef(false);
+  const shouldKeepDueDialogOpenAfterInternalPointerRef = useRef(false);
   const progressPercent = hasProgress
     ? Math.round((row.completedSubtaskCount / row.subtaskTotalCount) * 100)
     : 0;
@@ -648,12 +649,21 @@ function TaskRowItem({
               {menuMode === "due" ? (
                 <div
                   className="task-row-menu-form"
+                  onPointerDownCapture={() => {
+                    shouldKeepDueDialogOpenAfterInternalPointerRef.current = true;
+                    window.setTimeout(() => {
+                      shouldKeepDueDialogOpenAfterInternalPointerRef.current = false;
+                    }, 0);
+                  }}
                   onBlur={(event) => {
                     if (shouldKeepDueDialogOpenAfterDatePickRef.current) {
                       shouldKeepDueDialogOpenAfterDatePickRef.current = false;
                       window.requestAnimationFrame(() => {
                         dueTimeTriggerRef.current?.focus();
                       });
+                      return;
+                    }
+                    if (shouldKeepDueDialogOpenAfterInternalPointerRef.current) {
                       return;
                     }
                     const nextTarget = event.relatedTarget;
@@ -663,7 +673,16 @@ function TaskRowItem({
                     ) {
                       return;
                     }
-                    void commitDueDraft(null);
+                    window.requestAnimationFrame(() => {
+                      const activeElement = document.activeElement;
+                      if (
+                        activeElement instanceof Node &&
+                        menuAnchorRef.current?.contains(activeElement)
+                      ) {
+                        return;
+                      }
+                      void commitDueDraft(null);
+                    });
                   }}
                 >
                   <div className="task-row-menu-dialog-heading">
