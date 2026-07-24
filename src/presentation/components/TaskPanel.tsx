@@ -52,6 +52,7 @@ const statusLabels: Record<Task["status"], string> = {
   done: "完了",
   archived: "アーカイブ",
 };
+const dueTimeOptions = createTimeOptions(15);
 
 export function TaskPanel({
   tasks,
@@ -310,6 +311,7 @@ function TaskRowItem({
     dueDate: row.dueDate ?? "",
     dueTime: row.dueTime ?? "",
   });
+  const [isDueTimePickerOpen, setIsDueTimePickerOpen] = useState(false);
   const menuAnchorRef = useRef<HTMLSpanElement | null>(null);
   const progressPercent = hasProgress
     ? Math.round((row.completedSubtaskCount / row.subtaskTotalCount) * 100)
@@ -323,6 +325,12 @@ function TaskRowItem({
       setMenuMode(null);
     }
   }, [isMutating, menuMode]);
+
+  useEffect(() => {
+    if (menuMode !== "due" || !dueDraft.dueDate) {
+      setIsDueTimePickerOpen(false);
+    }
+  }, [dueDraft.dueDate, menuMode]);
 
   useEffect(() => {
     if (!menuMode) {
@@ -505,6 +513,7 @@ function TaskRowItem({
                   dueDate: row.dueDate ?? "",
                   dueTime: row.dueTime ?? "",
                 });
+                setIsDueTimePickerOpen(false);
                 return "actions";
               });
             }}
@@ -632,24 +641,71 @@ function TaskRowItem({
                         setDueDraft((current) => ({
                           ...current,
                           dueDate: event.target.value,
+                          dueTime: event.target.value ? current.dueTime : "",
                         }))
                       }
                     />
                   </label>
-                  <label>
+                  <div className="task-row-time-picker-field">
                     <span>期限時刻</span>
-                    <input
-                      type="time"
-                      value={dueDraft.dueTime}
+                    <button
+                      className="task-row-time-picker-trigger"
+                      type="button"
+                      aria-haspopup="listbox"
+                      aria-expanded={isDueTimePickerOpen}
                       disabled={!dueDraft.dueDate}
-                      onChange={(event) =>
-                        setDueDraft((current) => ({
-                          ...current,
-                          dueTime: event.target.value,
-                        }))
+                      onClick={() =>
+                        setIsDueTimePickerOpen((current) => !current)
                       }
-                    />
-                  </label>
+                    >
+                      {dueDraft.dueTime || "時刻なし"}
+                    </button>
+                    {isDueTimePickerOpen ? (
+                      <div
+                        className="task-row-time-picker"
+                        role="listbox"
+                        aria-label="期限時刻"
+                      >
+                        <button
+                          className={`task-row-time-option ${
+                            dueDraft.dueTime ? "" : "is-selected"
+                          }`}
+                          type="button"
+                          role="option"
+                          aria-selected={!dueDraft.dueTime}
+                          onClick={() => {
+                            setDueDraft((current) => ({
+                              ...current,
+                              dueTime: "",
+                            }));
+                            setIsDueTimePickerOpen(false);
+                          }}
+                        >
+                          時刻なし
+                        </button>
+                        {dueTimeOptions.map((time) => (
+                          <button
+                            className={`task-row-time-option ${
+                              dueDraft.dueTime === time ? "is-selected" : ""
+                            }`}
+                            type="button"
+                            key={time}
+                            role="option"
+                            aria-selected={dueDraft.dueTime === time}
+                            onClick={() => {
+                              setDueDraft((current) => ({
+                                ...current,
+                                dueTime: time,
+                              }));
+                              setIsDueTimePickerOpen(false);
+                            }}
+                          >
+                            {time}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                   <div className="task-row-menu-actions">
                     <button type="submit" disabled={!canEditTask}>
                       保存
@@ -940,6 +996,18 @@ function formatMemoPreview(value: string) {
     return "";
   }
   return normalized.length > 48 ? `${normalized.slice(0, 48)}...` : normalized;
+}
+
+function createTimeOptions(stepMinutes: number) {
+  const options: string[] = [];
+  for (let totalMinutes = 0; totalMinutes < 24 * 60; totalMinutes += stepMinutes) {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    options.push(
+      `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`,
+    );
+  }
+  return options;
 }
 
 function toTaskUpdateDraft(
