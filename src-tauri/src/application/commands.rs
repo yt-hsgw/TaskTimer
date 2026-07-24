@@ -498,6 +498,21 @@ pub fn update_subtask(
 }
 
 #[tauri::command]
+pub fn reorder_task_within_list(
+    database: DatabaseState<'_>,
+    clock: ClockState<'_>,
+    request: super::dto::ReorderTaskWithinListRequestDto,
+) -> Result<super::dto::TaskDto, String> {
+    super::usecases::reorder_task_within_list(
+        database.inner(),
+        clock.inner(),
+        request.task_id,
+        request.direction,
+    )
+    .map(Into::into)
+}
+
+#[tauri::command]
 pub fn resize_scheduled_work_item(
     database: DatabaseState<'_>,
     clock: ClockState<'_>,

@@ -37,11 +37,12 @@ use super::{
         SqliteBackupCreate, SqliteBackupRecord, SqliteBackupRepository, SqliteBackupRestore,
         SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord, TagRepository, TagUpdate,
         TaskListCommandRepository, TaskListCreate, TaskListRecord, TaskListUpdate, TaskPageCursor,
-        TaskPageQuery, TaskPageRecord, TaskPageScope, TaskReadRepository, TaskRecord,
-        TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, TaskTimerSettingsRecord,
-        TaskTimerSettingsUpdate, TimerRepository, UiPreferenceRepository, UiPreferencesRecord,
-        UiPreferencesUpdate, WorkItemCreate, WorkItemSearchQuery, WorkItemSearchResultRecord,
-        WorkItemUpdate, WorkScheduleMove, WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        TaskPageQuery, TaskPageRecord, TaskPageScope, TaskReadRepository, TaskRecord, TaskReorder,
+        TaskReorderDirection, TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository,
+        TaskTimerSettingsRecord, TaskTimerSettingsUpdate, TimerRepository, UiPreferenceRepository,
+        UiPreferencesRecord, UiPreferencesUpdate, WorkItemCreate, WorkItemSearchQuery,
+        WorkItemSearchResultRecord, WorkItemUpdate, WorkScheduleMove, WorkScheduleUpdate,
+        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
 };
 
@@ -68,6 +69,8 @@ const UI_VIEW_SETTINGS: &str = "settings";
 const CALENDAR_VIEW_WEEK: &str = "week";
 const CALENDAR_VIEW_DAY: &str = "day";
 const CALENDAR_VIEW_MONTH: &str = "month";
+const TASK_REORDER_UP: &str = "up";
+const TASK_REORDER_DOWN: &str = "down";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkItemDraft {
@@ -556,6 +559,27 @@ pub fn update_subtask(
     repository.update_subtask(
         subtask_id,
         validate_work_item_update_draft(draft, clock.now_utc_iso8601())?,
+    )
+}
+
+pub fn reorder_task_within_list(
+    repository: &impl TaskTimerCommandRepository,
+    clock: &impl Clock,
+    task_id: String,
+    direction: String,
+) -> RepositoryResult<TaskRecord> {
+    let task_id = validate_identifier(&task_id, "タスクID")?;
+    let direction = match direction.trim() {
+        TASK_REORDER_UP => TaskReorderDirection::Up,
+        TASK_REORDER_DOWN => TaskReorderDirection::Down,
+        _ => return Err("タスクの移動方向が不正です".to_string()),
+    };
+    repository.reorder_task_within_list(
+        task_id,
+        TaskReorder {
+            direction,
+            now: clock.now_utc_iso8601(),
+        },
     )
 }
 

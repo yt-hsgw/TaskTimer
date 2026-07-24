@@ -33,12 +33,13 @@ use crate::{
         SqliteBackupRestore, SqliteRestoreRecord, SubtaskRecord, TagCreate, TagRecord,
         TagRepository, TagUpdate, TaskCountdownExpiry, TaskListCommandRepository, TaskListCreate,
         TaskListRecord, TaskListUpdate, TaskNavigationCountsRecord, TaskPageCursor, TaskPageQuery,
-        TaskPageRecord, TaskPageScope, TaskReadRepository, TaskRecord, TaskRowRecord,
-        TaskStatusUpdate, TaskTagRecord, TaskTimerCommandRepository, TaskTimerSettingsRecord,
-        TaskTimerSettingsUpdate, TaskWithSubtasksRecord, TimerRepository, UiPreferenceRepository,
-        UiPreferencesRecord, UiPreferencesUpdate, WeekCalendarItem, WorkItemCreate,
-        WorkItemSearchQuery, WorkItemSearchResultRecord, WorkItemUpdate, WorkScheduleMove,
-        WorkScheduleUpdate, CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
+        TaskPageRecord, TaskPageScope, TaskReadRepository, TaskRecord, TaskReorder,
+        TaskReorderDirection, TaskRowRecord, TaskStatusUpdate, TaskTagRecord,
+        TaskTimerCommandRepository, TaskTimerSettingsRecord, TaskTimerSettingsUpdate,
+        TaskWithSubtasksRecord, TimerRepository, UiPreferenceRepository, UiPreferencesRecord,
+        UiPreferencesUpdate, WeekCalendarItem, WorkItemCreate, WorkItemSearchQuery,
+        WorkItemSearchResultRecord, WorkItemUpdate, WorkScheduleMove, WorkScheduleUpdate,
+        CURRENT_SQLITE_BACKUP_SCHEMA_VERSION,
     },
     domain::{
         notification::{
@@ -87,6 +88,7 @@ const UI_VIEW_LIST: &str = "list";
 const UI_VIEW_TODAY: &str = "today";
 const UI_VIEW_FAVORITES: &str = "favorites";
 const UI_VIEW_BOARD: &str = "board";
+const ACTIVE_TASK_LIST_LIMIT: i64 = 10;
 const UI_VIEW_CALENDAR: &str = "calendar";
 const UI_VIEW_TIMELINE: &str = "timeline";
 const UI_VIEW_POMODORO: &str = "pomodoro";
@@ -1706,6 +1708,16 @@ impl TaskTimerCommandRepository for SqliteDatabase {
         self.with_transaction(|transaction| update_subtask_detail(transaction, &subtask_id, input))
     }
 
+    fn reorder_task_within_list(
+        &self,
+        task_id: String,
+        input: TaskReorder,
+    ) -> RepositoryResult<TaskRecord> {
+        self.with_transaction(|transaction| {
+            reorder_task_within_list_row(transaction, &task_id, input)
+        })
+    }
+
     fn resize_scheduled_work_item(
         &self,
         target: WorkTargetRef,
@@ -2678,6 +2690,7 @@ fn insert_task_list(
     input: TaskListCreate,
 ) -> RepositoryResult<TaskListRecord> {
     ensure_default_task_list(transaction, &input.now)?;
+    ensure_task_list_capacity(transaction)?;
     ensure_unique_task_list_name(transaction, &input.name, None)?;
 
     let id = Uuid::new_v4().to_string();
@@ -2836,6 +2849,129 @@ fn update_task_detail(
         recurrence_rule,
         &now,
     )?;
+
+    select_existing_task_by_id(transaction, task_id)
+}
+
+fn reorder_task_within_list_row(
+    transaction: &Transaction<'_>,
+    task_id: &str,
+    input: TaskReorder,
+) -> RepositoryResult<TaskRecord> {
+    let current = transaction
+        .query_row(
+            "
+            SELECT id, list_id, status, sort_order, created_at
+            FROM tasks
+            WHERE id = ?1
+              AND deleted_at IS NULL
+              AND lifecycle_status <> 'archived'
+              AND status <> 'archived'
+            ",
+            params![task_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|error| format!("並び替え対象のタスクを取得できません: {error}"))?
+        .ok_or_else(|| "並び替え対象のタスクが存在しません".to_string())?;
+    let is_done = current.2 == "done";
+
+    let neighbor = match input.direction {
+        TaskReorderDirection::Up => transaction
+            .query_row(
+                "
+                SELECT id, sort_order
+                FROM tasks
+                WHERE list_id = ?1
+                  AND id <> ?2
+                  AND deleted_at IS NULL
+                  AND lifecycle_status <> 'archived'
+                  AND status <> 'archived'
+                  AND CASE WHEN status = 'done' THEN 1 ELSE 0 END = ?3
+                  AND (
+                    sort_order < ?4
+                    OR (sort_order = ?4 AND created_at < ?5)
+                    OR (sort_order = ?4 AND created_at = ?5 AND id < ?2)
+                  )
+                ORDER BY sort_order DESC, created_at DESC, id DESC
+                LIMIT 1
+                ",
+                params![
+                    current.1,
+                    current.0,
+                    if is_done { 1 } else { 0 },
+                    current.3,
+                    current.4
+                ],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional(),
+        TaskReorderDirection::Down => transaction
+            .query_row(
+                "
+                SELECT id, sort_order
+                FROM tasks
+                WHERE list_id = ?1
+                  AND id <> ?2
+                  AND deleted_at IS NULL
+                  AND lifecycle_status <> 'archived'
+                  AND status <> 'archived'
+                  AND CASE WHEN status = 'done' THEN 1 ELSE 0 END = ?3
+                  AND (
+                    sort_order > ?4
+                    OR (sort_order = ?4 AND created_at > ?5)
+                    OR (sort_order = ?4 AND created_at = ?5 AND id > ?2)
+                  )
+                ORDER BY sort_order ASC, created_at ASC, id ASC
+                LIMIT 1
+                ",
+                params![
+                    current.1,
+                    current.0,
+                    if is_done { 1 } else { 0 },
+                    current.3,
+                    current.4
+                ],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional(),
+    }
+    .map_err(|error| format!("移動先のタスクを取得できません: {error}"))?;
+
+    let Some((neighbor_id, neighbor_sort_order)) = neighbor else {
+        return select_existing_task_by_id(transaction, task_id);
+    };
+
+    transaction
+        .execute(
+            "
+            UPDATE tasks
+            SET sort_order = CASE
+                  WHEN id = ?1 THEN ?4
+                  WHEN id = ?2 THEN ?3
+                  ELSE sort_order
+                END,
+                updated_at = ?5
+            WHERE id IN (?1, ?2)
+              AND deleted_at IS NULL
+            ",
+            params![
+                current.0,
+                neighbor_id,
+                current.3,
+                neighbor_sort_order,
+                input.now
+            ],
+        )
+        .map_err(|error| format!("タスクの並び順を更新できません: {error}"))?;
 
     select_existing_task_by_id(transaction, task_id)
 }
@@ -5810,6 +5946,28 @@ fn ensure_unique_task_list_name(
     }
 
     Ok(())
+}
+
+fn ensure_task_list_capacity(connection: &Connection) -> RepositoryResult<()> {
+    let active_count: i64 = connection
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM task_lists
+            WHERE deleted_at IS NULL
+            ",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|error| format!("タスクリスト数を確認できません: {error}"))?;
+
+    if active_count >= ACTIVE_TASK_LIST_LIMIT {
+        Err(format!(
+            "タスクリストは最大{ACTIVE_TASK_LIST_LIMIT}件まで作成できます"
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 fn select_tag_by_id(connection: &Connection, tag_id: &str) -> RepositoryResult<TagRecord> {
@@ -13389,6 +13547,66 @@ mod tests {
     }
 
     #[test]
+    fn reorder_task_within_list_swaps_neighbor_in_same_completion_bucket() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-18T00:00:00Z",
+        };
+        let first = usecases::create_task(&database, &clock, draft("A")).expect("create first");
+        let second = usecases::create_task(&database, &clock, draft("B")).expect("create second");
+        let third = usecases::create_task(&database, &clock, draft("C")).expect("create third");
+        let done_one =
+            usecases::create_task(&database, &clock, draft("D")).expect("create done one");
+        let done_two =
+            usecases::create_task(&database, &clock, draft("E")).expect("create done two");
+        usecases::complete_task(&database, &clock, done_one.id.clone(), true)
+            .expect("complete one");
+        usecases::complete_task(&database, &clock, done_two.id.clone(), true)
+            .expect("complete two");
+
+        usecases::reorder_task_within_list(&database, &clock, second.id.clone(), "up".to_string())
+            .expect("move second up");
+        usecases::reorder_task_within_list(&database, &clock, second.id.clone(), "up".to_string())
+            .expect("top active no-op");
+        usecases::reorder_task_within_list(
+            &database,
+            &clock,
+            done_two.id.clone(),
+            "up".to_string(),
+        )
+        .expect("move done up");
+
+        let page = usecases::list_task_page(
+            &database,
+            usecases::TaskPageDraft {
+                scope: usecases::TaskPageScopeDraft::List {
+                    list_id: DEFAULT_TASK_LIST_ID.to_string(),
+                },
+                today_date: "2026-07-18".to_string(),
+                cursor: None,
+                limit: 20,
+            },
+        )
+        .expect("list reordered page");
+        let ordered_ids = page
+            .rows
+            .iter()
+            .map(|row| row.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ordered_ids,
+            vec![
+                second.id.as_str(),
+                first.id.as_str(),
+                third.id.as_str(),
+                done_two.id.as_str(),
+                done_one.id.as_str(),
+            ]
+        );
+    }
+
+    #[test]
     fn task_page_filters_scopes_and_validates_application_input() {
         let database = in_memory_database();
         let clock = FixedClock {
@@ -13755,6 +13973,39 @@ mod tests {
         assert_eq!(default_color_update.color_token, "gray");
         assert_eq!(renamed.name, "重複確認 2");
         assert_eq!(renamed.color_token, "violet");
+    }
+
+    #[test]
+    fn task_list_creation_is_limited_to_ten_active_lists() {
+        let database = in_memory_database();
+        let clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+
+        for index in 1..ACTIVE_TASK_LIST_LIMIT {
+            usecases::create_task_list(
+                &database,
+                &clock,
+                usecases::TaskListDraft {
+                    name: format!("リスト {index}"),
+                    color_token: None,
+                },
+            )
+            .expect("create task list within limit");
+        }
+
+        let overflow = usecases::create_task_list(
+            &database,
+            &clock,
+            usecases::TaskListDraft {
+                name: "上限超過".to_string(),
+                color_token: None,
+            },
+        );
+        let lists = database.list_task_lists().expect("task lists");
+
+        assert!(overflow.expect_err("list limit").contains("最大10件"));
+        assert_eq!(lists.len(), ACTIVE_TASK_LIST_LIMIT as usize);
     }
 
     #[test]

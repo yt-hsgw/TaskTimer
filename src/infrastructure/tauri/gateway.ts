@@ -202,6 +202,10 @@ export const tauriTaskTimerGateway: TaskTimerGateway = {
     invoke<void>("delete_task", { request: { taskId } }),
   deleteSubtask: (subtaskId: string) =>
     invoke<void>("delete_subtask", { request: { subtaskId } }),
+  reorderTaskWithinList: (taskId: string, direction: "up" | "down") =>
+    invoke<Task>("reorder_task_within_list", {
+      request: { taskId, direction },
+    }),
   updateNotificationDisplayMode: (displayMode: NotificationDisplayMode) =>
     invoke<NotificationDisplayMode>("update_notification_display_mode", {
       request: { displayMode },

@@ -59,6 +59,9 @@ export function TaskCreateDialog({
   const openerRef = useRef<HTMLElement | null>(null);
   const shouldRestoreTaskCreateTriggerRef = useRef(false);
   const isDirty = !isSameTaskCreateDraft(draft, initialDraft);
+  const isSubtask = preset.kind === "subtask";
+  const dialogTitle = isSubtask ? "サブタスクを追加" : "タスクを追加";
+  const titleLabel = isSubtask ? "サブタスク名" : "タスク名";
 
   useEffect(() => {
     setDraft(initialDraft);
@@ -144,35 +147,50 @@ export function TaskCreateDialog({
       return;
     }
 
-    const submission: TaskCreateSubmission =
-      preset.kind === "scheduled"
-        ? {
-            kind: "scheduled",
-            input: {
-              title: draft.title,
-              listId: draft.listId,
-              memo: draft.memo,
-              schedule: {
-                startDate: draft.startDate,
-                startTime: draft.isAllDay ? null : draft.startTime,
-                endDate: draft.endDate,
-                endTime: draft.isAllDay ? null : draft.endTime,
-                isAllDay: draft.isAllDay,
-              },
-            },
-          }
-        : {
-            kind: "standard",
-            input: {
-              title: draft.title,
-              listId: draft.listId,
-              plannedStartDate: preset.plannedStartDate,
-              dueDate: draft.dueDate || null,
-              dueTime: draft.dueDate && draft.dueTime ? draft.dueTime : null,
-              memo: draft.memo,
-            },
-            boardColumnId: preset.boardColumnId,
-          };
+    let submission: TaskCreateSubmission;
+    if (preset.kind === "subtask") {
+      submission = {
+        kind: "subtask",
+        taskId: preset.taskId,
+        input: {
+          title: draft.title,
+          listId: draft.listId,
+          plannedStartDate: null,
+          dueDate: draft.dueDate || null,
+          dueTime: draft.dueDate && draft.dueTime ? draft.dueTime : null,
+          memo: draft.memo,
+        },
+      };
+    } else if (preset.kind === "scheduled") {
+      submission = {
+        kind: "scheduled",
+        input: {
+          title: draft.title,
+          listId: draft.listId,
+          memo: draft.memo,
+          schedule: {
+            startDate: draft.startDate,
+            startTime: draft.isAllDay ? null : draft.startTime,
+            endDate: draft.endDate,
+            endTime: draft.isAllDay ? null : draft.endTime,
+            isAllDay: draft.isAllDay,
+          },
+        },
+      };
+    } else {
+      submission = {
+        kind: "standard",
+        input: {
+          title: draft.title,
+          listId: draft.listId,
+          plannedStartDate: preset.plannedStartDate,
+          dueDate: draft.dueDate || null,
+          dueTime: draft.dueDate && draft.dueTime ? draft.dueTime : null,
+          memo: draft.memo,
+        },
+        boardColumnId: preset.boardColumnId,
+      };
+    }
 
     if (await onSubmit(submission)) {
       onClose();
@@ -181,8 +199,12 @@ export function TaskCreateDialog({
 
   const listOptions =
     taskLists.length > 0
-      ? taskLists.map((list) => ({ id: list.id, name: list.name }))
-      : [{ id: preset.listId, name: "タスク" }];
+      ? taskLists.map((list) => ({
+          id: list.id,
+          name: list.name,
+          colorToken: list.colorToken,
+        }))
+      : [{ id: preset.listId, name: "タスク", colorToken: "green" as const }];
 
   return (
     <div
@@ -201,12 +223,12 @@ export function TaskCreateDialog({
         <header className="task-create-dialog-heading">
           <div>
             <p id="task-create-dialog-source">{preset.sourceLabel}</p>
-            <h2 id="task-create-dialog-title">タスクを追加</h2>
+            <h2 id="task-create-dialog-title">{dialogTitle}</h2>
           </div>
           <button
             className="inline-icon-button"
             type="button"
-            aria-label="タスク作成を閉じる"
+            aria-label={`${dialogTitle}を閉じる`}
             title="閉じる"
             disabled={isSubmitting}
             onClick={onClose}
@@ -225,7 +247,7 @@ export function TaskCreateDialog({
             </p>
           ) : null}
           <label>
-            <span>タスク名</span>
+            <span>{titleLabel}</span>
             <input
               ref={titleInputRef}
               value={draft.title}
@@ -239,22 +261,37 @@ export function TaskCreateDialog({
             />
           </label>
 
-          <label>
-            <span>リスト</span>
-            <select
-              value={draft.listId}
-              disabled={isSubmitting}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, listId: event.target.value }))
-              }
-            >
-              {listOptions.map((list) => (
-                <option key={list.id} value={list.id}>
-                  {list.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {isSubtask ? (
+            <p className="task-create-parent-label">
+              親タスク: <strong>{preset.parentTitle}</strong>
+            </p>
+          ) : (
+            <fieldset className="task-create-list-picker">
+              <legend>リスト</legend>
+              <div className="task-create-list-options">
+                {listOptions.map((list) => (
+                  <button
+                    className={`task-create-list-option ${
+                      draft.listId === list.id ? "is-selected" : ""
+                    }`}
+                    type="button"
+                    key={list.id}
+                    aria-pressed={draft.listId === list.id}
+                    disabled={isSubmitting}
+                    onClick={() =>
+                      setDraft((current) => ({ ...current, listId: list.id }))
+                    }
+                  >
+                    <span
+                      className={`task-create-list-dot color-${list.colorToken}`}
+                      aria-hidden="true"
+                    />
+                    <span>{list.name}</span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          )}
 
           {preset.kind === "standard" && preset.plannedStartDate ? (
             <p className="task-create-planned-start">
@@ -437,6 +474,20 @@ function createDraftFromPreset(preset: TaskCreatePreset): TaskCreateDraft {
       endDate: preset.schedule.endDate,
       endTime: preset.schedule.endTime ?? "",
       isAllDay: preset.schedule.isAllDay,
+    };
+  }
+  if (preset.kind === "subtask") {
+    return {
+      title: "",
+      listId: preset.listId,
+      memo: "",
+      dueDate: preset.dueDate ?? "",
+      dueTime: preset.dueDate ? (preset.dueTime ?? "") : "",
+      startDate: "",
+      startTime: "",
+      endDate: "",
+      endTime: "",
+      isAllDay: false,
     };
   }
   return {

@@ -330,6 +330,13 @@ pub struct DeleteTaskRequestDto {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ReorderTaskWithinListRequestDto {
+    pub task_id: String,
+    pub direction: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeleteCompletedTasksInBoardColumnRequestDto {
     pub board_column_id: String,
 }
