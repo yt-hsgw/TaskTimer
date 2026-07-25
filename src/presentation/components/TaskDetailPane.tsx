@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { Repeat2, X } from "lucide-react";
 import type {
   ActivePomodoro,
   TagItem,
@@ -146,6 +146,7 @@ export function TaskDetailPane({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(detailItem.title);
   const [isScheduleEditOpen, setIsScheduleEditOpen] = useState(false);
+  const [isRecurrencePopoverOpen, setIsRecurrencePopoverOpen] = useState(false);
   const [editingMemo, setEditingMemo] = useState(false);
   const [memoDraft, setMemoDraft] = useState(detailItem.memo);
   const [isListPickerOpen, setIsListPickerOpen] = useState(false);
@@ -166,7 +167,9 @@ export function TaskDetailPane({
   const [tagDraft, setTagDraft] = useState("");
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
   const [tagNameDraft, setTagNameDraft] = useState("");
-  const isSchedulePointerInsideRef = useRef(false);
+  const scheduleSectionRef = useRef<HTMLElement | null>(null);
+  const recurrenceFieldRef = useRef<HTMLDivElement | null>(null);
+  const isScheduleCommitPendingRef = useRef(false);
   const completedSubtaskCount = useMemo(
     () => task.subtasks.filter((subtask) => subtask.status === "done").length,
     [task.subtasks],
@@ -206,6 +209,7 @@ export function TaskDetailPane({
   useEffect(() => {
     setEditingTitle(false);
     setIsScheduleEditOpen(false);
+    setIsRecurrencePopoverOpen(false);
     setEditingMemo(false);
     setIsListPickerOpen(false);
     setIsDuePopoverOpen(false);
@@ -237,6 +241,10 @@ export function TaskDetailPane({
           setIsDuePopoverOpen(false);
           return;
         }
+        if (isRecurrencePopoverOpen) {
+          setIsRecurrencePopoverOpen(false);
+          return;
+        }
         if (isScheduleEditOpen) {
           resetScheduleDraft();
           return;
@@ -247,7 +255,45 @@ export function TaskDetailPane({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isDuePopoverOpen, isListPickerOpen, isScheduleEditOpen, onClose]);
+  }, [
+    isDuePopoverOpen,
+    isListPickerOpen,
+    isRecurrencePopoverOpen,
+    isScheduleEditOpen,
+    onClose,
+  ]);
+
+  useEffect(() => {
+    if (!isScheduleEditOpen) {
+      return;
+    }
+
+    function handleSchedulePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (
+        isRecurrencePopoverOpen &&
+        target instanceof Node &&
+        !recurrenceFieldRef.current?.contains(target)
+      ) {
+        setIsRecurrencePopoverOpen(false);
+      }
+      if (
+        target instanceof Node &&
+        scheduleSectionRef.current?.contains(target)
+      ) {
+        return;
+      }
+      void commitScheduleDraft();
+    }
+
+    document.addEventListener("pointerdown", handleSchedulePointerDown, true);
+    return () =>
+      document.removeEventListener(
+        "pointerdown",
+        handleSchedulePointerDown,
+        true,
+      );
+  }, [draft, isMutating, isRecurrencePopoverOpen, isScheduleEditOpen]);
 
   async function updateCurrentItem(nextDraft: DetailFormDraft) {
     const input = toWorkItemUpdateDraft(nextDraft);
@@ -258,12 +304,18 @@ export function TaskDetailPane({
   }
 
   async function commitScheduleDraft() {
-    if (isMutating) {
+    if (isMutating || isScheduleCommitPendingRef.current) {
       return;
     }
-    const updated = await updateCurrentItem(draft);
-    if (updated) {
-      setIsScheduleEditOpen(false);
+    isScheduleCommitPendingRef.current = true;
+    try {
+      const updated = await updateCurrentItem(draft);
+      if (updated) {
+        setIsScheduleEditOpen(false);
+        setIsRecurrencePopoverOpen(false);
+      }
+    } finally {
+      isScheduleCommitPendingRef.current = false;
     }
   }
 
@@ -276,6 +328,7 @@ export function TaskDetailPane({
       ),
     );
     setIsScheduleEditOpen(false);
+    setIsRecurrencePopoverOpen(false);
   }
 
   async function handleTitleBlur() {
@@ -440,6 +493,29 @@ export function TaskDetailPane({
       return {
         ...current,
         recurrenceEnabled: enabled,
+      };
+    });
+  }
+
+  function handleRecurrenceFrequencyChange(value: string) {
+    if (value === "") {
+      handleToggleRecurrence(false);
+      return;
+    }
+    setDraft((current) => {
+      const nextFrequency = value as RecurrenceFrequency;
+      if (!current.recurrenceEnabled && !current.dueDate) {
+        return {
+          ...current,
+          dueDate: getTodayDateInputValue(),
+          recurrenceEnabled: true,
+          recurrenceFrequency: nextFrequency,
+        };
+      }
+      return {
+        ...current,
+        recurrenceEnabled: true,
+        recurrenceFrequency: nextFrequency,
       };
     });
   }
@@ -865,36 +941,9 @@ export function TaskDetailPane({
       </div>
 
       <section
+        ref={scheduleSectionRef}
         className="detail-section detail-schedule-section"
         aria-label="目標時間と繰り返し"
-        onBlur={(event) => {
-          if (!isScheduleEditOpen) {
-            return;
-          }
-          if (isSchedulePointerInsideRef.current) {
-            return;
-          }
-          const nextTarget = event.relatedTarget;
-          if (
-            nextTarget instanceof Node &&
-            event.currentTarget.contains(nextTarget)
-          ) {
-            return;
-          }
-          window.requestAnimationFrame(() => {
-            if (isSchedulePointerInsideRef.current) {
-              return;
-            }
-            const activeElement = document.activeElement;
-            if (
-              activeElement instanceof Node &&
-              event.currentTarget.contains(activeElement)
-            ) {
-              return;
-            }
-            void commitScheduleDraft();
-          });
-        }}
       >
         <button
           className="detail-inline-summary"
@@ -921,103 +970,108 @@ export function TaskDetailPane({
         {isScheduleEditOpen ? (
           <div className="detail-schedule-popover">
             <form
-              className="detail-form"
-              onPointerDownCapture={() => {
-                isSchedulePointerInsideRef.current = true;
-                window.setTimeout(() => {
-                  isSchedulePointerInsideRef.current = false;
-                }, 0);
-              }}
+              className="detail-form detail-schedule-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 void commitScheduleDraft();
               }}
             >
-              <label>
-                <span>目標時間（分）</span>
-                <select
-                  value={draft.timerTargetMinutes}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      timerTargetMinutes: event.target.value,
-                    }))
-                  }
-                  disabled={isMutating}
-                  autoFocus
-                >
-                  <option value="">未設定</option>
-                  {timerTargetPresets.map((minutes) => (
-                    <option key={minutes} value={minutes}>
-                      {minutes}分
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="detail-schedule-control-row">
+                <label className="detail-schedule-target-field">
+                  <span>目標時間（分）</span>
+                  <select
+                    value={draft.timerTargetMinutes}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        timerTargetMinutes: event.target.value,
+                      }))
+                    }
+                    disabled={isMutating}
+                    autoFocus
+                  >
+                    <option value="">未設定</option>
+                    {timerTargetPresets.map((minutes) => (
+                      <option key={minutes} value={minutes}>
+                        {minutes}分
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-              <label className="settings-toggle-row detail-toggle-row">
-                <input
-                  type="checkbox"
-                  checked={draft.recurrenceEnabled}
-                  disabled={isMutating}
-                  onChange={(event) =>
-                    handleToggleRecurrence(event.currentTarget.checked)
-                  }
-                />
-                <span>
-                  <strong>繰り返しを有効にする</strong>
-                  <small>
-                    有効時だけ頻度と間隔を設定します。期限未設定の場合は今日を基準にします。
-                  </small>
-                </span>
-              </label>
+                <div className="detail-recurrence-field" ref={recurrenceFieldRef}>
+                  <span>繰り返し</span>
+                  <button
+                    className={`detail-recurrence-icon-button${
+                      draft.recurrenceEnabled ? " is-active" : ""
+                    }`}
+                    type="button"
+                    aria-label="繰り返しを設定"
+                    aria-expanded={isRecurrencePopoverOpen}
+                    aria-haspopup="dialog"
+                    disabled={isMutating}
+                    onClick={() =>
+                      setIsRecurrencePopoverOpen((current) => !current)
+                    }
+                  >
+                    <Repeat2 aria-hidden="true" size={17} />
+                  </button>
 
-              {draft.recurrenceEnabled ? (
-                <div className="recurrence-fields">
-                  <label>
-                    <span>頻度</span>
-                    <select
-                      value={draft.recurrenceFrequency}
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          recurrenceFrequency: event.target
-                            .value as RecurrenceFrequency,
-                        }))
-                      }
-                      disabled={isMutating}
+                  {isRecurrencePopoverOpen ? (
+                    <div
+                      className="detail-recurrence-popover"
+                      role="dialog"
+                      aria-label="繰り返し設定"
                     >
-                      <option value="daily">毎日</option>
-                      <option value="weekly">毎週</option>
-                      <option value="monthly">毎月</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>間隔</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="365"
-                      step="1"
-                      value={draft.recurrenceInterval}
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          recurrenceInterval: event.target.value,
-                        }))
-                      }
-                      disabled={isMutating}
-                      inputMode="numeric"
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          event.currentTarget.blur();
-                        }
-                      }}
-                    />
-                  </label>
+                      <div className="recurrence-fields">
+                        <label>
+                          <span>頻度</span>
+                          <select
+                            value={
+                              draft.recurrenceEnabled
+                                ? draft.recurrenceFrequency
+                                : ""
+                            }
+                            onChange={(event) =>
+                              handleRecurrenceFrequencyChange(event.target.value)
+                            }
+                            disabled={isMutating}
+                          >
+                            <option value="">なし</option>
+                            <option value="daily">毎日</option>
+                            <option value="weekly">毎週</option>
+                            <option value="monthly">毎月</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span>間隔</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="365"
+                            step="1"
+                            value={draft.recurrenceInterval}
+                            onChange={(event) =>
+                              setDraft((current) => ({
+                                ...current,
+                                recurrenceInterval: event.target.value,
+                              }))
+                            }
+                            disabled={isMutating || !draft.recurrenceEnabled}
+                            inputMode="numeric"
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void commitScheduleDraft();
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
+              </div>
             </form>
           </div>
         ) : null}
