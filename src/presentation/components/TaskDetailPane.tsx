@@ -1,4 +1,4 @@
-import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import type {
   ActivePomodoro,
@@ -71,8 +71,6 @@ type SubtaskCreateDraft = {
   memo: string;
 };
 
-type DetailSectionKey = "subtasks";
-
 const statusLabels: Record<WorkStatus, string> = {
   todo: "未着手",
   in_progress: "進行中",
@@ -135,7 +133,6 @@ export function TaskDetailPane({
   );
   const detailItem = selectedSubtask ?? task;
   const isTaskDetail = !selectedSubtask;
-  const hasSubtasks = task.subtasks.length > 0;
   const detailKey = `${selectedSubtask ? "subtask" : "task"}:${detailItem.id}`;
   const detailMemo = detailItem.memo.trim();
   const taskList = taskLists.find((list) => list.id === task.listId) ?? null;
@@ -147,7 +144,11 @@ export function TaskDetailPane({
       isTaskDetail ? task.colorToken : null,
     ),
   );
-  const [isCoreEditOpen, setIsCoreEditOpen] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(detailItem.title);
+  const [isScheduleEditOpen, setIsScheduleEditOpen] = useState(false);
+  const [editingMemo, setEditingMemo] = useState(false);
+  const [memoDraft, setMemoDraft] = useState(detailItem.memo);
   const [isDuePopoverOpen, setIsDuePopoverOpen] = useState(false);
   const [isSubtaskCreateOpen, setIsSubtaskCreateOpen] = useState(false);
   const [isDeleteConfirming, setIsDeleteConfirming] = useState(false);
@@ -165,11 +166,6 @@ export function TaskDetailPane({
   const [newTagName, setNewTagName] = useState("");
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
   const [editingTagName, setEditingTagName] = useState("");
-  const [openSections, setOpenSections] = useState<
-    Record<DetailSectionKey, boolean>
-  >({
-    subtasks: isTaskDetail && hasSubtasks,
-  });
   const completedSubtaskCount = useMemo(
     () => task.subtasks.filter((subtask) => subtask.status === "done").length,
     [task.subtasks],
@@ -192,17 +188,18 @@ export function TaskDetailPane({
       dueDate: detailItem.dueDate ?? getTodayDateInputValue(),
       dueTime: detailItem.dueTime ?? "",
     });
+    setTitleDraft(detailItem.title);
+    setMemoDraft(detailItem.memo);
   }, [detailItem, isTaskDetail, task.colorToken, task.listId]);
 
   useEffect(() => {
-    setIsCoreEditOpen(false);
+    setEditingTitle(false);
+    setIsScheduleEditOpen(false);
+    setEditingMemo(false);
     setIsDuePopoverOpen(false);
     setIsSubtaskCreateOpen(false);
     setIsDeleteConfirming(false);
-    setOpenSections({
-      subtasks: isTaskDetail && hasSubtasks,
-    });
-  }, [detailKey, hasSubtasks, isTaskDetail]);
+  }, [detailKey]);
 
   useEffect(() => {
     setSubtaskDraft({
@@ -250,8 +247,39 @@ export function TaskDetailPane({
     event.preventDefault();
     const updated = await updateCurrentItem(draft);
     if (updated) {
-      setIsCoreEditOpen(false);
+      setIsScheduleEditOpen(false);
     }
+  }
+
+  async function handleTitleBlur() {
+    const nextTitle = titleDraft.trim();
+    if (!nextTitle || nextTitle === detailItem.title || isMutating) {
+      setTitleDraft(detailItem.title);
+      setEditingTitle(false);
+      return;
+    }
+    const nextDraft = { ...draft, title: nextTitle };
+    setDraft(nextDraft);
+    const updated = await updateCurrentItem(nextDraft);
+    if (!updated) {
+      setTitleDraft(detailItem.title);
+    }
+    setEditingTitle(false);
+  }
+
+  async function handleMemoBlur() {
+    if (memoDraft === detailItem.memo || isMutating) {
+      setMemoDraft(detailItem.memo);
+      setEditingMemo(false);
+      return;
+    }
+    const nextDraft = { ...draft, memo: memoDraft };
+    setDraft(nextDraft);
+    const updated = await updateCurrentItem(nextDraft);
+    if (!updated) {
+      setMemoDraft(detailItem.memo);
+    }
+    setEditingMemo(false);
   }
 
   async function handleCreateSubtask(event: FormEvent<HTMLFormElement>) {
@@ -354,13 +382,6 @@ export function TaskDetailPane({
     }
   }
 
-  function toggleSection(section: DetailSectionKey) {
-    setOpenSections((current) => ({
-      ...current,
-      [section]: !current[section],
-    }));
-  }
-
   function handleToggleRecurrence(enabled: boolean) {
     setDraft((current) => {
       if (enabled && !current.dueDate) {
@@ -430,7 +451,39 @@ export function TaskDetailPane({
             <p className="eyebrow">
               {selectedSubtask ? "サブタスク詳細" : "タスク詳細"}
             </p>
-            <h2 id="task-detail-title">{detailItem.title}</h2>
+            {editingTitle ? (
+              <input
+                className="detail-title-input"
+                value={titleDraft}
+                disabled={isMutating}
+                maxLength={120}
+                autoFocus
+                aria-label={selectedSubtask ? "サブタスク名" : "タスク名"}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onBlur={() => void handleTitleBlur()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setTitleDraft(detailItem.title);
+                    setEditingTitle(false);
+                  }
+                }}
+              />
+            ) : (
+              <button
+                className="detail-title-display"
+                type="button"
+                disabled={isMutating}
+                onClick={() => setEditingTitle(true)}
+              >
+                <h2 id="task-detail-title">{detailItem.title}</h2>
+              </button>
+            )}
           </div>
         </div>
         <button
@@ -453,31 +506,6 @@ export function TaskDetailPane({
           ← 親タスク: {task.title}
         </button>
       ) : null}
-
-      <section className="detail-reference-card" aria-label="現在情報">
-        <div>
-          <span>状態</span>
-          <strong>{statusLabels[detailItem.status]}</strong>
-        </div>
-        {isTaskDetail ? (
-          <div>
-            <span>リスト</span>
-            <strong>{taskListName}</strong>
-          </div>
-        ) : null}
-        <div>
-          <span>期限</span>
-          <strong>{formatDue(detailItem.dueDate, detailItem.dueTime)}</strong>
-        </div>
-        <div>
-          <span>目標時間</span>
-          <strong>{formatTimerTarget(detailItem.timerTargetSeconds)}</strong>
-        </div>
-        <div>
-          <span>繰り返し</span>
-          <strong>{formatRecurrenceFromItem(detailItem)}</strong>
-        </div>
-      </section>
 
       {isTaskDetail ? (
         <section
@@ -505,10 +533,10 @@ export function TaskDetailPane({
                 className="detail-task-color-inherit"
                 type="button"
                 aria-pressed={draft.colorToken === null}
-                disabled={isMutating || isCoreEditOpen}
+                disabled={isMutating || isScheduleEditOpen}
                 onClick={() => void handleTaskColorChange(null)}
               >
-                リスト色を継承
+                未設定
                 <span
                   className={`detail-task-color-swatch color-${taskList?.colorToken ?? "green"}`}
                   aria-hidden="true"
@@ -522,7 +550,7 @@ export function TaskDetailPane({
                   aria-label={`${label}をタスクの表示色に設定`}
                   title={label}
                   aria-pressed={draft.colorToken === token}
-                  disabled={isMutating || isCoreEditOpen}
+                  disabled={isMutating || isScheduleEditOpen}
                   onClick={() => void handleTaskColorChange(token)}
                 >
                   <span aria-hidden="true" />
@@ -530,7 +558,7 @@ export function TaskDetailPane({
               ))}
             </div>
             <small>
-              未設定時は「{taskListName}」の色を使用します。
+              タスク色が未設定の場合は「{taskListName}」の色を使用します。
             </small>
           </fieldset>
         </section>
@@ -691,13 +719,6 @@ export function TaskDetailPane({
         ) : null}
       </section>
 
-      {detailMemo ? (
-        <section className="detail-memo-card" aria-label="メモ">
-          <span>メモ</span>
-          <p>{detailMemo}</p>
-        </section>
-      ) : null}
-
       <div className="detail-due-area" aria-label="期限クイック設定">
         <div className="detail-quick-actions">
           {detailItem.dueDate ? (
@@ -800,32 +821,31 @@ export function TaskDetailPane({
         ) : null}
       </div>
 
-      <DetailDisclosure
-        title={selectedSubtask ? "サブタスクを編集" : "タスクを編集"}
-        badge={isCoreEditOpen ? "編集中" : "参照"}
-        isOpen={isCoreEditOpen}
-        onToggle={() => setIsCoreEditOpen((current) => !current)}
+      <section
+        className="detail-section detail-schedule-section"
+        aria-label="目標時間と繰り返し"
       >
-        <form
-          className="detail-form"
-          onSubmit={(event) => void handleUpdateCore(event)}
+        <button
+          className="detail-inline-summary"
+          type="button"
+          aria-expanded={isScheduleEditOpen}
+          disabled={isMutating}
+          onClick={() => setIsScheduleEditOpen((current) => !current)}
         >
-          <label>
-            <span>{selectedSubtask ? "サブタスク名" : "タスク名"}</span>
-            <input
-              value={draft.title}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  title: event.target.value,
-                }))
-              }
-              disabled={isMutating}
-              maxLength={120}
-              required
-            />
-          </label>
-
+          <span>
+            <strong>目標時間</strong>
+            {formatTimerTarget(detailItem.timerTargetSeconds)}
+          </span>
+          <span>
+            <strong>繰り返し</strong>
+            {formatRecurrenceFromItem(detailItem)}
+          </span>
+        </button>
+        {isScheduleEditOpen ? (
+          <form
+            className="detail-form"
+            onSubmit={(event) => void handleUpdateCore(event)}
+          >
           <label>
             <span>目標時間（分）</span>
             <input
@@ -908,36 +928,21 @@ export function TaskDetailPane({
             </div>
           ) : null}
 
-          <label>
-            <span>メモ</span>
-            <textarea
-              value={draft.memo}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  memo: event.target.value,
-                }))
-              }
-              disabled={isMutating}
-              rows={4}
-            />
-          </label>
-
           <div className="detail-actions">
             <button className="primary-button" type="submit" disabled={isMutating}>
               保存
             </button>
           </div>
-        </form>
-      </DetailDisclosure>
+          </form>
+        ) : null}
+      </section>
 
       {isTaskDetail ? (
-        <DetailDisclosure
-          title="サブタスク"
-          badge={`${completedSubtaskCount}/${task.subtasks.length}`}
-          isOpen={openSections.subtasks}
-          onToggle={() => toggleSection("subtasks")}
-        >
+        <section className="detail-section" aria-label="サブタスク">
+          <div className="detail-static-heading">
+            <h3>サブタスク</h3>
+            <strong>{completedSubtaskCount}/{task.subtasks.length}</strong>
+          </div>
           <p className="detail-section-description">
             親タスク「{task.title}」に紐づく作業です。既存サブタスクの編集は選択して開きます。
           </p>
@@ -1038,8 +1043,40 @@ export function TaskDetailPane({
               />
             ))}
           </div>
-        </DetailDisclosure>
+        </section>
       ) : null}
+
+      <section className="detail-memo-card" aria-label="メモ">
+        <span>メモ</span>
+        {editingMemo ? (
+          <textarea
+            value={memoDraft}
+            disabled={isMutating}
+            autoFocus
+            rows={5}
+            aria-label="メモ"
+            onChange={(event) => setMemoDraft(event.target.value)}
+            onBlur={() => void handleMemoBlur()}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                setMemoDraft(detailItem.memo);
+                setEditingMemo(false);
+              }
+            }}
+          />
+        ) : (
+          <button
+            className={`detail-memo-display ${detailMemo ? "" : "is-empty"}`}
+            type="button"
+            disabled={isMutating}
+            onClick={() => setEditingMemo(true)}
+          >
+            {detailMemo || "メモを追加"}
+          </button>
+        )}
+      </section>
 
       <div className="detail-danger-zone">
         <button
@@ -1062,38 +1099,6 @@ export function TaskDetailPane({
         ) : null}
       </div>
     </aside>
-  );
-}
-
-type DetailDisclosureProps = {
-  title: string;
-  badge: string;
-  isOpen: boolean;
-  children: ReactNode;
-  onToggle(): void;
-};
-
-function DetailDisclosure({
-  title,
-  badge,
-  isOpen,
-  children,
-  onToggle,
-}: DetailDisclosureProps) {
-  return (
-    <section className="detail-section" aria-label={title}>
-      <button
-        className="completed-toggle detail-section-toggle"
-        type="button"
-        aria-expanded={isOpen}
-        onClick={onToggle}
-      >
-        <span>{isOpen ? "⌄" : "›"}</span>
-        {title}
-        <strong>{badge}</strong>
-      </button>
-      {isOpen ? <div className="detail-section-body">{children}</div> : null}
-    </section>
   );
 }
 
