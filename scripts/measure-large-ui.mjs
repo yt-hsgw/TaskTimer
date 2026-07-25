@@ -905,12 +905,15 @@ try {
         document.querySelector('.detail-list-card[aria-label="所属リストとタスク表示色"]') &&
         document.querySelector(".detail-task-color-picker") &&
         document.querySelector(".detail-title-display") &&
+        document.querySelector(".detail-tags-card") &&
+        document.querySelector(".detail-tag-add-chip") &&
         document.querySelector(".detail-memo-display") &&
         document.querySelector('.detail-section[aria-label="目標時間と繰り返し"]') &&
         document.querySelector('.detail-section[aria-label="サブタスク"]') &&
         !document.querySelector('.detail-section[aria-label="タイマー"]') &&
         !document.querySelector('.detail-section[aria-label="通知"]') &&
         !document.querySelector('.detail-section[aria-label="タスクを編集"]') &&
+        !document.querySelector(".detail-tag-management") &&
         !document.querySelector(".detail-section-toggle") &&
         !document.querySelector(".detail-reference-card") &&
         !document.querySelector(".detail-color-button") &&
