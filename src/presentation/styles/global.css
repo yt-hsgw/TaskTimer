@@ -1299,7 +1299,7 @@ button {
   gap: 24px;
   justify-content: center;
   min-height: 390px;
-  padding: 8px 24px 20px;
+  padding: 8px 24px 34px;
   width: min(100%, 620px);
 }
 
@@ -1486,6 +1486,10 @@ button {
   width: 100%;
 }
 
+.pomodoro-focus-actions button:disabled {
+  opacity: 1;
+}
+
 .pomodoro-control-placeholder,
 .pomodoro-secondary-placeholder {
   display: block;
@@ -1498,6 +1502,7 @@ button {
   border-top: 1px solid var(--line);
   display: grid;
   gap: 12px;
+  margin-top: 8px;
   max-width: 760px;
   padding-top: 22px;
   width: 100%;
