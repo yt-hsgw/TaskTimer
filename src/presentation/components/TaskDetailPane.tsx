@@ -146,6 +146,7 @@ export function TaskDetailPane({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(detailItem.title);
   const [isScheduleEditOpen, setIsScheduleEditOpen] = useState(false);
+  const [isTimerTargetMenuOpen, setIsTimerTargetMenuOpen] = useState(false);
   const [isRecurrencePopoverOpen, setIsRecurrencePopoverOpen] = useState(false);
   const [editingMemo, setEditingMemo] = useState(false);
   const [memoDraft, setMemoDraft] = useState(detailItem.memo);
@@ -168,6 +169,7 @@ export function TaskDetailPane({
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
   const [tagNameDraft, setTagNameDraft] = useState("");
   const scheduleSectionRef = useRef<HTMLElement | null>(null);
+  const timerTargetFieldRef = useRef<HTMLDivElement | null>(null);
   const recurrenceFieldRef = useRef<HTMLDivElement | null>(null);
   const isScheduleCommitPendingRef = useRef(false);
   const completedSubtaskCount = useMemo(
@@ -175,6 +177,9 @@ export function TaskDetailPane({
     [task.subtasks],
   );
   const dueChipLabel = formatDueChipLabel(detailItem.dueDate, detailItem.dueTime);
+  const timerTargetMenuLabel = draft.timerTargetMinutes
+    ? `${draft.timerTargetMinutes}分`
+    : "未設定";
   const assignableTaskLists = useMemo(
     () => taskLists.filter((list) => list.id !== DEFAULT_TASK_LIST_ID),
     [taskLists],
@@ -189,6 +194,43 @@ export function TaskDetailPane({
       .filter((tag) => !query || tag.name.toLocaleLowerCase().includes(query))
       .slice(0, 6);
   }, [availableTags, tagDraft]);
+
+  function closeDetailEditors(
+    except?:
+      | "list"
+      | "tag"
+      | "due"
+      | "schedule"
+      | "timerTarget"
+      | "recurrence"
+      | "subtask",
+  ) {
+    if (except !== "list") {
+      setIsListPickerOpen(false);
+    }
+    if (except !== "tag") {
+      setIsTagEditorOpen(false);
+    }
+    if (except !== "due") {
+      setIsDuePopoverOpen(false);
+    }
+    if (
+      except !== "schedule" &&
+      except !== "timerTarget" &&
+      except !== "recurrence"
+    ) {
+      setIsScheduleEditOpen(false);
+    }
+    if (except !== "timerTarget") {
+      setIsTimerTargetMenuOpen(false);
+    }
+    if (except !== "recurrence") {
+      setIsRecurrencePopoverOpen(false);
+    }
+    if (except !== "subtask") {
+      setIsSubtaskCreateOpen(false);
+    }
+  }
 
   useEffect(() => {
     setDraft(
@@ -209,6 +251,7 @@ export function TaskDetailPane({
   useEffect(() => {
     setEditingTitle(false);
     setIsScheduleEditOpen(false);
+    setIsTimerTargetMenuOpen(false);
     setIsRecurrencePopoverOpen(false);
     setEditingMemo(false);
     setIsListPickerOpen(false);
@@ -241,6 +284,10 @@ export function TaskDetailPane({
           setIsDuePopoverOpen(false);
           return;
         }
+        if (isTimerTargetMenuOpen) {
+          setIsTimerTargetMenuOpen(false);
+          return;
+        }
         if (isRecurrencePopoverOpen) {
           setIsRecurrencePopoverOpen(false);
           return;
@@ -260,6 +307,7 @@ export function TaskDetailPane({
     isListPickerOpen,
     isRecurrencePopoverOpen,
     isScheduleEditOpen,
+    isTimerTargetMenuOpen,
     onClose,
   ]);
 
@@ -270,6 +318,13 @@ export function TaskDetailPane({
 
     function handleSchedulePointerDown(event: PointerEvent) {
       const target = event.target;
+      if (
+        isTimerTargetMenuOpen &&
+        target instanceof Node &&
+        !timerTargetFieldRef.current?.contains(target)
+      ) {
+        setIsTimerTargetMenuOpen(false);
+      }
       if (
         isRecurrencePopoverOpen &&
         target instanceof Node &&
@@ -293,7 +348,13 @@ export function TaskDetailPane({
         handleSchedulePointerDown,
         true,
       );
-  }, [draft, isMutating, isRecurrencePopoverOpen, isScheduleEditOpen]);
+  }, [
+    draft,
+    isMutating,
+    isRecurrencePopoverOpen,
+    isScheduleEditOpen,
+    isTimerTargetMenuOpen,
+  ]);
 
   async function updateCurrentItem(nextDraft: DetailFormDraft) {
     const input = toWorkItemUpdateDraft(nextDraft);
@@ -312,6 +373,7 @@ export function TaskDetailPane({
       const updated = await updateCurrentItem(draft);
       if (updated) {
         setIsScheduleEditOpen(false);
+        setIsTimerTargetMenuOpen(false);
         setIsRecurrencePopoverOpen(false);
       }
     } finally {
@@ -328,6 +390,7 @@ export function TaskDetailPane({
       ),
     );
     setIsScheduleEditOpen(false);
+    setIsTimerTargetMenuOpen(false);
     setIsRecurrencePopoverOpen(false);
   }
 
@@ -642,7 +705,14 @@ export function TaskDetailPane({
               aria-haspopup="listbox"
               aria-expanded={isListPickerOpen}
               disabled={isMutating || assignableTaskLists.length === 0}
-              onClick={() => setIsListPickerOpen((current) => !current)}
+              onClick={() => {
+                if (isListPickerOpen) {
+                  setIsListPickerOpen(false);
+                  return;
+                }
+                closeDetailEditors("list");
+                setIsListPickerOpen(true);
+              }}
             >
               <span
                 className={`detail-list-picker-dot color-${taskList?.colorToken ?? "green"}`}
@@ -679,8 +749,11 @@ export function TaskDetailPane({
                 className="detail-task-color-inherit"
                 type="button"
                 aria-pressed={draft.colorToken === null}
-                disabled={isMutating || isScheduleEditOpen}
-                onClick={() => void handleTaskColorChange(null)}
+                disabled={isMutating}
+                onClick={() => {
+                  closeDetailEditors();
+                  void handleTaskColorChange(null);
+                }}
               >
                 未設定
                 <span
@@ -696,8 +769,11 @@ export function TaskDetailPane({
                   aria-label={`${label}をタスクの表示色に設定`}
                   title={label}
                   aria-pressed={draft.colorToken === token}
-                  disabled={isMutating || isScheduleEditOpen}
-                  onClick={() => void handleTaskColorChange(token)}
+                  disabled={isMutating}
+                  onClick={() => {
+                    closeDetailEditors();
+                    void handleTaskColorChange(token);
+                  }}
                 >
                   <span aria-hidden="true" />
                 </button>
@@ -752,6 +828,7 @@ export function TaskDetailPane({
                       type="button"
                       disabled={isMutating}
                       onClick={() => {
+                        closeDetailEditors();
                         setEditingTagId(tag.id);
                         setTagNameDraft(tag.name);
                       }}
@@ -829,7 +906,10 @@ export function TaskDetailPane({
                 className="detail-tag-add-chip"
                 type="button"
                 disabled={isMutating}
-                onClick={() => setIsTagEditorOpen(true)}
+                onClick={() => {
+                  closeDetailEditors("tag");
+                  setIsTagEditorOpen(true);
+                }}
               >
                 ＋ タグを追加
               </button>
@@ -848,7 +928,10 @@ export function TaskDetailPane({
                 aria-label="期限を削除"
                 title="期限を削除"
                 disabled={isMutating}
-                onClick={() => void applyDue(null, null)}
+                onClick={() => {
+                  closeDetailEditors();
+                  void applyDue(null, null);
+                }}
               >
                 ×
               </button>
@@ -859,7 +942,10 @@ export function TaskDetailPane({
                 className="due-chip-button"
                 type="button"
                 disabled={isMutating}
-                onClick={() => void applyDue(getTodayDateInputValue(), null)}
+                onClick={() => {
+                  closeDetailEditors();
+                  void applyDue(getTodayDateInputValue(), null);
+                }}
               >
                 今日
               </button>
@@ -867,7 +953,10 @@ export function TaskDetailPane({
                 className="due-chip-button"
                 type="button"
                 disabled={isMutating}
-                onClick={() => void applyDue(getTomorrowDateInputValue(), null)}
+                onClick={() => {
+                  closeDetailEditors();
+                  void applyDue(getTomorrowDateInputValue(), null);
+                }}
               >
                 明日
               </button>
@@ -876,7 +965,14 @@ export function TaskDetailPane({
                 type="button"
                 disabled={isMutating}
                 aria-expanded={isDuePopoverOpen}
-                onClick={() => setIsDuePopoverOpen((current) => !current)}
+                onClick={() => {
+                  if (isDuePopoverOpen) {
+                    setIsDuePopoverOpen(false);
+                    return;
+                  }
+                  closeDetailEditors("due");
+                  setIsDuePopoverOpen(true);
+                }}
               >
                 ◷ 時間設定
               </button>
@@ -955,6 +1051,7 @@ export function TaskDetailPane({
               void commitScheduleDraft();
               return;
             }
+            closeDetailEditors("schedule");
             setIsScheduleEditOpen(true);
           }}
         >
@@ -977,27 +1074,69 @@ export function TaskDetailPane({
               }}
             >
               <div className="detail-schedule-control-row">
-                <label className="detail-schedule-target-field">
+                <div
+                  className="detail-schedule-target-field"
+                  ref={timerTargetFieldRef}
+                >
                   <span>目標時間（分）</span>
-                  <select
-                    value={draft.timerTargetMinutes}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        timerTargetMinutes: event.target.value,
-                      }))
-                    }
+                  <button
+                    className="detail-timer-target-trigger"
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded={isTimerTargetMenuOpen}
                     disabled={isMutating}
                     autoFocus
+                    onClick={() => {
+                      if (isTimerTargetMenuOpen) {
+                        setIsTimerTargetMenuOpen(false);
+                        return;
+                      }
+                      setIsRecurrencePopoverOpen(false);
+                      setIsTimerTargetMenuOpen(true);
+                    }}
                   >
-                    <option value="">未設定</option>
-                    {timerTargetPresets.map((minutes) => (
-                      <option key={minutes} value={minutes}>
-                        {minutes}分
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    <span>{timerTargetMenuLabel}</span>
+                  </button>
+                  {isTimerTargetMenuOpen ? (
+                    <div className="detail-timer-target-menu" role="listbox">
+                      <button
+                        className="detail-timer-target-option"
+                        type="button"
+                        role="option"
+                        aria-selected={draft.timerTargetMinutes === ""}
+                        disabled={isMutating}
+                        onClick={() => {
+                          setDraft((current) => ({
+                            ...current,
+                            timerTargetMinutes: "",
+                          }));
+                          setIsTimerTargetMenuOpen(false);
+                        }}
+                      >
+                        未設定
+                      </button>
+                      {timerTargetPresets.map((minutes) => (
+                        <button
+                          className="detail-timer-target-option"
+                          type="button"
+                          role="option"
+                          aria-selected={draft.timerTargetMinutes === minutes}
+                          key={minutes}
+                          disabled={isMutating}
+                          onClick={() => {
+                            setDraft((current) => ({
+                              ...current,
+                              timerTargetMinutes: minutes,
+                            }));
+                            setIsTimerTargetMenuOpen(false);
+                          }}
+                        >
+                          {minutes}分
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
 
                 <div className="detail-recurrence-field" ref={recurrenceFieldRef}>
                   <span>繰り返し</span>
@@ -1010,9 +1149,14 @@ export function TaskDetailPane({
                     aria-expanded={isRecurrencePopoverOpen}
                     aria-haspopup="dialog"
                     disabled={isMutating}
-                    onClick={() =>
-                      setIsRecurrencePopoverOpen((current) => !current)
-                    }
+                    onClick={() => {
+                      if (isRecurrencePopoverOpen) {
+                        setIsRecurrencePopoverOpen(false);
+                        return;
+                      }
+                      setIsTimerTargetMenuOpen(false);
+                      setIsRecurrencePopoverOpen(true);
+                    }}
                   >
                     <Repeat2 aria-hidden="true" size={17} />
                   </button>
@@ -1157,7 +1301,10 @@ export function TaskDetailPane({
               className="subtask-add-button"
               type="button"
               disabled={isMutating}
-              onClick={() => setIsSubtaskCreateOpen(true)}
+              onClick={() => {
+                closeDetailEditors("subtask");
+                setIsSubtaskCreateOpen(true);
+              }}
             >
               ＋ サブタスクの追加
             </button>
