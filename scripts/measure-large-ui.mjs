@@ -4225,6 +4225,109 @@ async function verifyCalendarMultiDayHeader(
   await waitForPaintedExpression(
     client,
     sessionId,
+    `document.querySelector('.calendar-view-switch .is-active')?.textContent === "週" &&
+      Boolean(document.querySelector('.calendar-time-grid:not(.is-day-mode)'))`,
+  );
+
+  if (!areDatesInSameMondayWeek(destinationDate, destinationEndDate)) {
+    await waitForPaintedExpression(
+      client,
+      sessionId,
+      `Boolean(document.querySelector(
+        '.calendar-all-day-cell[data-calendar-date=${JSON.stringify(destinationDate)}] ' +
+        '.calendar-item.marker-scheduled.is-scheduled-range'
+      ))`,
+    );
+    const startWeekLayout = await evaluateValue(
+      client,
+      sessionId,
+      `(() => {
+        const start = document.querySelector(
+          '.calendar-all-day-cell[data-calendar-date=${JSON.stringify(destinationDate)}] ' +
+          '.calendar-item.marker-scheduled.is-scheduled-range:not(.is-calendar-preview)'
+        );
+        return {
+          continuesAfter: start?.classList.contains('connects-after') ?? false,
+          startContent: start?.textContent?.trim() ?? null,
+          hasStartHandle: Boolean(start?.querySelector(
+            '.calendar-resize-handle.is-start.is-horizontal'
+          )),
+          timedDuplicateCount: document.querySelectorAll(
+            '.calendar-time-cell .calendar-item.marker-scheduled'
+          ).length,
+          detailOpen: Boolean(document.querySelector('.task-detail-pane'))
+        };
+      })()`,
+    );
+    if (
+      !startWeekLayout?.continuesAfter ||
+      !startWeekLayout.startContent?.includes("14:15") ||
+      !startWeekLayout.hasStartHandle ||
+      startWeekLayout.timedDuplicateCount !== 0 ||
+      startWeekLayout.detailOpen
+    ) {
+      throw new Error(
+        `週表示の週またぎ開始予定行が不正です: ${JSON.stringify(startWeekLayout)}`,
+      );
+    }
+
+    const previousFirstDate = await evaluateValue(
+      client,
+      sessionId,
+      `document.querySelector('.calendar-all-day-cell')?.dataset.calendarDate ?? null`,
+    );
+    await evaluate(
+      client,
+      sessionId,
+      `document.querySelector('button[aria-label="次の週"]')?.click()`,
+    );
+    await waitForPaintedExpression(
+      client,
+      sessionId,
+      `document.querySelector('.calendar-all-day-cell')?.dataset.calendarDate !== ${JSON.stringify(previousFirstDate)} &&
+        Boolean(document.querySelector(
+          '.calendar-all-day-cell[data-calendar-date=${JSON.stringify(destinationEndDate)}] ' +
+          '.calendar-item.marker-scheduled.is-scheduled-range'
+        ))`,
+    );
+    const endWeekLayout = await evaluateValue(
+      client,
+      sessionId,
+      `(() => {
+        const end = document.querySelector(
+          '.calendar-all-day-cell[data-calendar-date=${JSON.stringify(destinationEndDate)}] ' +
+          '.calendar-item.marker-scheduled.is-scheduled-range:not(.is-calendar-preview)'
+        );
+        return {
+          continuesBefore: end?.classList.contains('connects-before') ?? false,
+          endContent: end?.textContent?.trim() ?? null,
+          hasEndHandle: Boolean(end?.querySelector(
+            '.calendar-resize-handle.is-end.is-horizontal'
+          )),
+          timedDuplicateCount: document.querySelectorAll(
+            '.calendar-time-cell .calendar-item.marker-scheduled'
+          ).length,
+          detailOpen: Boolean(document.querySelector('.task-detail-pane'))
+        };
+      })()`,
+    );
+    if (
+      !endWeekLayout?.continuesBefore ||
+      endWeekLayout.endContent !== "" ||
+      !endWeekLayout.hasEndHandle ||
+      endWeekLayout.timedDuplicateCount !== 0 ||
+      endWeekLayout.detailOpen
+    ) {
+      throw new Error(
+        `週表示の週またぎ終了予定行が不正です: ${JSON.stringify(endWeekLayout)}`,
+      );
+    }
+    return { commands: await takeInvokeLog(client, sessionId) };
+  }
+
+  await waitForPaintedExpression(
+    client,
+    sessionId,
     `Boolean(
       document.querySelector(
         '.calendar-all-day-cell[data-calendar-date=${JSON.stringify(destinationDate)}] ' +
@@ -4392,6 +4495,29 @@ function clickWorkspaceMode(label) {
 function clickCalendarMode(label) {
   return `[...document.querySelectorAll(".calendar-view-switch button")]
     .find((button) => button.textContent === ${JSON.stringify(label)})?.click()`;
+}
+
+function areDatesInSameMondayWeek(firstDateText, secondDateText) {
+  return getMondayWeekStart(firstDateText) === getMondayWeekStart(secondDateText);
+}
+
+function getMondayWeekStart(dateText) {
+  const date = parseLocalDateText(dateText);
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  return formatLocalDateText(date);
+}
+
+function parseLocalDateText(dateText) {
+  const [year, month, day] = dateText.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatLocalDateText(date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
 }
 
 function printResults(profileName, profile, measurements) {
