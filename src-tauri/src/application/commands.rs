@@ -591,9 +591,15 @@ pub fn resume_pomodoro(
 #[tauri::command]
 pub fn complete_pomodoro_work_phase(
     database: DatabaseState<'_>,
+    notification_gateway: NotificationGatewayState<'_>,
     clock: ClockState<'_>,
 ) -> Result<super::dto::ActivePomodoroDto, String> {
-    super::usecases::complete_pomodoro_work_phase(database.inner(), clock.inner()).map(Into::into)
+    super::usecases::complete_pomodoro_work_phase_and_notify(
+        database.inner(),
+        notification_gateway.inner(),
+        clock.inner(),
+    )
+    .map(Into::into)
 }
 
 #[tauri::command]

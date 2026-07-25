@@ -11646,6 +11646,58 @@ mod tests {
     }
 
     #[test]
+    fn completing_pomodoro_work_phase_sends_local_notification_after_commit() {
+        let database = in_memory_database();
+        let notification_gateway = RecordingNotificationGateway::ok();
+        let start_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+
+        usecases::start_standalone_pomodoro(&database, &start_clock)
+            .expect("start standalone pomodoro");
+        let completed = usecases::complete_pomodoro_work_phase_and_notify(
+            &database,
+            &notification_gateway,
+            &FixedClock {
+                now: "2026-07-06T00:25:00Z",
+            },
+        )
+        .expect("complete standalone work");
+        let messages = notification_gateway.messages();
+
+        assert_eq!(completed.phase, PomodoroPhase::Work);
+        assert_eq!(completed.status, PomodoroStatus::Completed);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].title, "ポモドーロ");
+        assert_eq!(messages[0].body, "ポモドーロの作業時間が終了しました。");
+    }
+
+    #[test]
+    fn completing_pomodoro_work_phase_respects_notifications_disabled() {
+        let database = in_memory_database();
+        let notification_gateway = RecordingNotificationGateway::ok();
+        let start_clock = FixedClock {
+            now: "2026-07-06T00:00:00Z",
+        };
+
+        usecases::update_notifications_enabled(&database, &start_clock, false)
+            .expect("disable notifications");
+        usecases::start_standalone_pomodoro(&database, &start_clock)
+            .expect("start standalone pomodoro");
+        let completed = usecases::complete_pomodoro_work_phase_and_notify(
+            &database,
+            &notification_gateway,
+            &FixedClock {
+                now: "2026-07-06T00:25:00Z",
+            },
+        )
+        .expect("complete standalone work");
+
+        assert_eq!(completed.status, PomodoroStatus::Completed);
+        assert!(notification_gateway.messages().is_empty());
+    }
+
+    #[test]
     fn standalone_pomodoro_auto_transitions_without_task_timer() {
         let database = in_memory_database();
         let notification_gateway = RecordingNotificationGateway::ok();

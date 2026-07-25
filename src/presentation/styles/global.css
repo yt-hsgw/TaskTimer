@@ -1296,10 +1296,10 @@ button {
   align-self: center;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
   justify-content: center;
   min-height: 390px;
-  padding: 8px 24px 20px;
+  padding: 8px 24px 34px;
   width: min(100%, 620px);
 }
 
@@ -1436,7 +1436,7 @@ button {
   align-items: center;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   justify-content: center;
   min-height: 84px;
   width: min(100%, 340px);
@@ -1486,6 +1486,10 @@ button {
   width: 100%;
 }
 
+.pomodoro-focus-actions button:disabled {
+  opacity: 1;
+}
+
 .pomodoro-control-placeholder,
 .pomodoro-secondary-placeholder {
   display: block;
@@ -1493,28 +1497,63 @@ button {
   visibility: hidden;
 }
 
-.pomodoro-settings-summary {
+.pomodoro-panel-settings {
   align-self: center;
   border-top: 1px solid var(--line);
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 8px;
   max-width: 760px;
-  padding-top: 16px;
+  padding-top: 22px;
   width: 100%;
 }
 
-.pomodoro-settings-summary span {
-  color: var(--muted);
-  display: grid;
-  font-size: 12px;
-  gap: 3px;
-  text-align: center;
+.pomodoro-panel-settings-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
 }
 
-.pomodoro-settings-summary strong {
+.pomodoro-panel-settings-heading div {
+  display: grid;
+  gap: 2px;
+}
+
+.pomodoro-panel-settings-heading h3 {
   color: var(--ink);
-  font-size: 14px;
+  font-size: 16px;
+  margin: 0;
+}
+
+.pomodoro-panel-settings-heading span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pomodoro-settings-toggles {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pomodoro-settings-toggles label {
+  align-items: center;
+  background: #f8fafb;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  display: flex;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 10px;
+}
+
+.pomodoro-settings-toggles input {
+  accent-color: var(--green);
 }
 
 .settings-content {
@@ -5807,6 +5846,7 @@ button {
   .data-action-grid,
   .notification-mode-cards,
   .pomodoro-settings-grid,
+  .pomodoro-settings-toggles,
   .notification-plan-grid {
     grid-template-columns: 1fr;
   }

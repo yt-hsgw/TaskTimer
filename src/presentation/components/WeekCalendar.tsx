@@ -2407,8 +2407,8 @@ function getCalendarRangeSegment(
   }
   const boundaryStart = rangeBoundaryStart ?? item.date;
   const boundaryEnd = rangeBoundaryEnd ?? item.endDate;
-  const connectsBefore = displayDate > item.date && displayDate > boundaryStart;
-  const connectsAfter = displayDate < item.endDate && displayDate < boundaryEnd;
+  const connectsBefore = displayDate > item.date && displayDate >= boundaryStart;
+  const connectsAfter = displayDate < item.endDate && displayDate <= boundaryEnd;
   return {
     connectsBefore,
     connectsAfter,
