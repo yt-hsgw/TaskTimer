@@ -10,12 +10,13 @@ import type {
 } from "../../application/usecases/contracts";
 import type { RecurrenceFrequency } from "../../domain/recurrence/types";
 import type { ActiveTimer } from "../../domain/timer/types";
-import type {
-  Subtask,
-  Task,
-  TaskColorToken,
-  WorkStatus,
-  WorkTargetRef,
+import {
+  DEFAULT_TASK_LIST_ID,
+  type Subtask,
+  type Task,
+  type TaskColorToken,
+  type WorkStatus,
+  type WorkTargetRef,
 } from "../../domain/task/types";
 import { usePresentationRenderProbe } from "../renderProbe";
 
@@ -170,6 +171,10 @@ export function TaskDetailPane({
     [task.subtasks],
   );
   const dueChipLabel = formatDueChipLabel(detailItem.dueDate, detailItem.dueTime);
+  const assignableTaskLists = useMemo(
+    () => taskLists.filter((list) => list.id !== DEFAULT_TASK_LIST_ID),
+    [taskLists],
+  );
   const availableTags = useMemo(
     () => tags.filter((tag) => !task.tags.some((taskTag) => taskTag.id === tag.id)),
     [tags, task.tags],
@@ -358,7 +363,12 @@ export function TaskDetailPane({
   }
 
   async function handleTaskListChange(listId: string) {
+    if (listId === DEFAULT_TASK_LIST_ID) {
+      setIsListPickerOpen(false);
+      return;
+    }
     if (listId === task.listId) {
+      setIsListPickerOpen(false);
       return;
     }
     const nextDraft = toDetailFormDraft(task, listId, task.colorToken);
@@ -537,7 +547,7 @@ export function TaskDetailPane({
               type="button"
               aria-haspopup="listbox"
               aria-expanded={isListPickerOpen}
-              disabled={isMutating}
+              disabled={isMutating || assignableTaskLists.length === 0}
               onClick={() => setIsListPickerOpen((current) => !current)}
             >
               <span
@@ -548,7 +558,7 @@ export function TaskDetailPane({
             </button>
             {isListPickerOpen ? (
               <div className="detail-list-picker-menu" role="listbox">
-                {taskLists.map((list) => (
+                {assignableTaskLists.map((list) => (
                   <button
                     className="detail-list-picker-option"
                     type="button"
