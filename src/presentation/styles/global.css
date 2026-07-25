@@ -2895,15 +2895,14 @@ button {
   width: 100%;
 }
 
-.detail-memo-display.is-empty {
-  color: var(--muted);
-}
-
-.detail-memo-display:hover,
 .detail-memo-display:focus-visible {
   border-color: #c9d9d2;
   padding-left: 6px;
   padding-right: 6px;
+}
+
+.detail-memo-display.is-empty {
+  color: var(--muted);
 }
 
 .detail-memo-card textarea {
@@ -3150,7 +3149,6 @@ button {
   width: 100%;
 }
 
-.detail-inline-summary:hover,
 .detail-inline-summary:focus-visible {
   border-color: #9bc4b4;
 }
