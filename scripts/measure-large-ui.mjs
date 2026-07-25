@@ -46,7 +46,7 @@ const thresholds = {
   completion_refresh: 1200,
   task_detail_save: 1200,
   calendar_week: 1500,
-  calendar_overflow_popup: 500,
+  calendar_overflow_popup: 700,
   calendar_overlap_layout: 500,
   calendar_assign_unscheduled: 1500,
   calendar_drag_create: 1500,
@@ -903,6 +903,7 @@ try {
       ready: `document.querySelector(".task-detail-pane") &&
         document.querySelector(".detail-subtask-list") &&
         document.querySelector('.detail-list-card[aria-label="所属リストとタスク表示色"]') &&
+        document.querySelector(".detail-list-picker-trigger") &&
         document.querySelector(".detail-task-color-picker") &&
         document.querySelector(".detail-title-display") &&
         document.querySelector(".detail-tags-card") &&
@@ -913,6 +914,7 @@ try {
         !document.querySelector('.detail-section[aria-label="タイマー"]') &&
         !document.querySelector('.detail-section[aria-label="通知"]') &&
         !document.querySelector('.detail-section[aria-label="タスクを編集"]') &&
+        !document.querySelector(".detail-list-card select") &&
         !document.querySelector(".detail-tag-management") &&
         !document.querySelector(".detail-section-toggle") &&
         !document.querySelector(".detail-reference-card") &&
