@@ -236,13 +236,17 @@ export function TaskDetailPane({
           setIsDuePopoverOpen(false);
           return;
         }
+        if (isScheduleEditOpen) {
+          resetScheduleDraft();
+          return;
+        }
         onClose();
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isDuePopoverOpen, isListPickerOpen, onClose]);
+  }, [isDuePopoverOpen, isListPickerOpen, isScheduleEditOpen, onClose]);
 
   async function updateCurrentItem(nextDraft: DetailFormDraft) {
     const input = toWorkItemUpdateDraft(nextDraft);
@@ -252,12 +256,25 @@ export function TaskDetailPane({
     return onUpdateTask(task.id, input);
   }
 
-  async function handleUpdateCore(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function commitScheduleDraft() {
+    if (isMutating) {
+      return;
+    }
     const updated = await updateCurrentItem(draft);
     if (updated) {
       setIsScheduleEditOpen(false);
     }
+  }
+
+  function resetScheduleDraft() {
+    setDraft(
+      toDetailFormDraft(
+        detailItem,
+        task.listId,
+        isTaskDetail ? task.colorToken : null,
+      ),
+    );
+    setIsScheduleEditOpen(false);
   }
 
   async function handleTitleBlur() {
@@ -849,13 +866,32 @@ export function TaskDetailPane({
       <section
         className="detail-section detail-schedule-section"
         aria-label="目標時間と繰り返し"
+        onBlur={(event) => {
+          if (!isScheduleEditOpen) {
+            return;
+          }
+          const nextTarget = event.relatedTarget;
+          if (
+            nextTarget instanceof Node &&
+            event.currentTarget.contains(nextTarget)
+          ) {
+            return;
+          }
+          void commitScheduleDraft();
+        }}
       >
         <button
           className="detail-inline-summary"
           type="button"
           aria-expanded={isScheduleEditOpen}
           disabled={isMutating}
-          onClick={() => setIsScheduleEditOpen((current) => !current)}
+          onClick={() => {
+            if (isScheduleEditOpen) {
+              void commitScheduleDraft();
+              return;
+            }
+            setIsScheduleEditOpen(true);
+          }}
         >
           <span>
             <strong>目標時間</strong>
@@ -867,98 +903,111 @@ export function TaskDetailPane({
           </span>
         </button>
         {isScheduleEditOpen ? (
-          <form
-            className="detail-form"
-            onSubmit={(event) => void handleUpdateCore(event)}
-          >
-          <label>
-            <span>目標時間（分）</span>
-            <input
-              list="timer-target-presets"
-              type="number"
-              min="1"
-              max="1440"
-              step="1"
-              value={draft.timerTargetMinutes}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  timerTargetMinutes: event.target.value,
-                }))
-              }
-              disabled={isMutating}
-              inputMode="numeric"
-            />
-            <datalist id="timer-target-presets">
-              {timerTargetPresets.map((minutes) => (
-                <option key={minutes} value={minutes} />
-              ))}
-            </datalist>
-          </label>
-
-          <label className="settings-toggle-row detail-toggle-row">
-            <input
-              type="checkbox"
-              checked={draft.recurrenceEnabled}
-              disabled={isMutating}
-              onChange={(event) =>
-                handleToggleRecurrence(event.currentTarget.checked)
-              }
-            />
-            <span>
-              <strong>繰り返しを有効にする</strong>
-              <small>
-                有効時だけ頻度と間隔を設定します。期限未設定の場合は今日を基準にします。
-              </small>
-            </span>
-          </label>
-
-          {draft.recurrenceEnabled ? (
-            <div className="recurrence-fields">
+          <div className="detail-schedule-popover">
+            <form
+              className="detail-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void commitScheduleDraft();
+              }}
+            >
               <label>
-                <span>頻度</span>
-                <select
-                  value={draft.recurrenceFrequency}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      recurrenceFrequency: event.target.value as RecurrenceFrequency,
-                    }))
-                  }
-                  disabled={isMutating}
-                >
-                  <option value="daily">毎日</option>
-                  <option value="weekly">毎週</option>
-                  <option value="monthly">毎月</option>
-                </select>
-              </label>
-              <label>
-                <span>間隔</span>
+                <span>目標時間（分）</span>
                 <input
+                  list="timer-target-presets"
                   type="number"
                   min="1"
-                  max="365"
+                  max="1440"
                   step="1"
-                  value={draft.recurrenceInterval}
+                  value={draft.timerTargetMinutes}
                   onChange={(event) =>
                     setDraft((current) => ({
                       ...current,
-                      recurrenceInterval: event.target.value,
+                      timerTargetMinutes: event.target.value,
                     }))
                   }
                   disabled={isMutating}
                   inputMode="numeric"
+                  autoFocus
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
+                  }}
                 />
+                <datalist id="timer-target-presets">
+                  {timerTargetPresets.map((minutes) => (
+                    <option key={minutes} value={minutes} />
+                  ))}
+                </datalist>
               </label>
-            </div>
-          ) : null}
 
-          <div className="detail-actions">
-            <button className="primary-button" type="submit" disabled={isMutating}>
-              保存
-            </button>
+              <label className="settings-toggle-row detail-toggle-row">
+                <input
+                  type="checkbox"
+                  checked={draft.recurrenceEnabled}
+                  disabled={isMutating}
+                  onChange={(event) =>
+                    handleToggleRecurrence(event.currentTarget.checked)
+                  }
+                />
+                <span>
+                  <strong>繰り返しを有効にする</strong>
+                  <small>
+                    有効時だけ頻度と間隔を設定します。期限未設定の場合は今日を基準にします。
+                  </small>
+                </span>
+              </label>
+
+              {draft.recurrenceEnabled ? (
+                <div className="recurrence-fields">
+                  <label>
+                    <span>頻度</span>
+                    <select
+                      value={draft.recurrenceFrequency}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          recurrenceFrequency: event.target
+                            .value as RecurrenceFrequency,
+                        }))
+                      }
+                      disabled={isMutating}
+                    >
+                      <option value="daily">毎日</option>
+                      <option value="weekly">毎週</option>
+                      <option value="monthly">毎月</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>間隔</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="365"
+                      step="1"
+                      value={draft.recurrenceInterval}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          recurrenceInterval: event.target.value,
+                        }))
+                      }
+                      disabled={isMutating}
+                      inputMode="numeric"
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          event.currentTarget.blur();
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+              ) : null}
+            </form>
           </div>
-          </form>
         ) : null}
       </section>
 
