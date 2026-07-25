@@ -1338,13 +1338,27 @@ export function App() {
     [clearDetailSelection, runMutation, workspaceMode, workspaceScope],
   );
 
-  const handleCreateTag = useCallback(
-    (name: string) =>
+  const handleAttachTagToTask = useCallback(
+    (taskId: string, tagId: string) =>
       runMutation(async () => {
-        await tauriTaskTimerGateway.createTag({ name });
+        await tauriTaskTimerGateway.attachTagToTask(taskId, tagId);
+        return taskId;
       }, {
         scope: "detail",
-        refresh: { tags: true },
+        refresh: { taskPage: true, tags: true },
+      }),
+    [runMutation],
+  );
+
+  const handleCreateAndAttachTagToTask = useCallback(
+    (taskId: string, name: string) =>
+      runMutation(async () => {
+        const tag = await tauriTaskTimerGateway.createTag({ name });
+        await tauriTaskTimerGateway.attachTagToTask(taskId, tag.id);
+        return taskId;
+      }, {
+        scope: "detail",
+        refresh: { taskPage: true, tags: true },
       }),
     [runMutation],
   );
@@ -1353,33 +1367,6 @@ export function App() {
     (tagId: string, name: string) =>
       runMutation(async () => {
         await tauriTaskTimerGateway.updateTag(tagId, { name });
-      }, {
-        scope: "detail",
-        refresh: { taskPage: true, tags: true },
-      }),
-    [runMutation],
-  );
-
-  const handleDeleteTag = useCallback(
-    (tagId: string) =>
-      runMutation(async () => {
-        await tauriTaskTimerGateway.deleteTag(tagId);
-        if (activeView.kind === "tag" && activeView.tagId === tagId) {
-          setActiveView({ kind: "list", listId: DEFAULT_TASK_LIST_ID });
-          clearDetailSelection();
-        }
-      }, {
-        scope: "detail",
-        refresh: { taskPage: true, tags: true },
-      }),
-    [activeView, clearDetailSelection, runMutation],
-  );
-
-  const handleAttachTagToTask = useCallback(
-    (taskId: string, tagId: string) =>
-      runMutation(async () => {
-        await tauriTaskTimerGateway.attachTagToTask(taskId, tagId);
-        return taskId;
       }, {
         scope: "detail",
         refresh: { taskPage: true, tags: true },
@@ -2467,10 +2454,9 @@ export function App() {
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
-                  onCreateTag={handleCreateTag}
-                  onRenameTag={handleRenameTag}
-                  onDeleteTag={handleDeleteTag}
                   onAttachTagToTask={handleAttachTagToTask}
+                  onCreateAndAttachTagToTask={handleCreateAndAttachTagToTask}
+                  onRenameTag={handleRenameTag}
                   onDetachTagFromTask={handleDetachTagFromTask}
                 />
               ) : null}
@@ -2532,10 +2518,9 @@ export function App() {
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
-                  onCreateTag={handleCreateTag}
-                  onRenameTag={handleRenameTag}
-                  onDeleteTag={handleDeleteTag}
                   onAttachTagToTask={handleAttachTagToTask}
+                  onCreateAndAttachTagToTask={handleCreateAndAttachTagToTask}
+                  onRenameTag={handleRenameTag}
                   onDetachTagFromTask={handleDetachTagFromTask}
                 />
               ) : null}
@@ -2595,10 +2580,9 @@ export function App() {
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
-                  onCreateTag={handleCreateTag}
-                  onRenameTag={handleRenameTag}
-                  onDeleteTag={handleDeleteTag}
                   onAttachTagToTask={handleAttachTagToTask}
+                  onCreateAndAttachTagToTask={handleCreateAndAttachTagToTask}
+                  onRenameTag={handleRenameTag}
                   onDetachTagFromTask={handleDetachTagFromTask}
                 />
               ) : null}
@@ -2648,10 +2632,9 @@ export function App() {
                   onToggleSubtaskCompletion={handleToggleSubtaskCompletion}
                   onDeleteTask={handleDeleteTask}
                   onDeleteSubtask={handleDeleteSubtask}
-                  onCreateTag={handleCreateTag}
-                  onRenameTag={handleRenameTag}
-                  onDeleteTag={handleDeleteTag}
                   onAttachTagToTask={handleAttachTagToTask}
+                  onCreateAndAttachTagToTask={handleCreateAndAttachTagToTask}
+                  onRenameTag={handleRenameTag}
                   onDetachTagFromTask={handleDetachTagFromTask}
                 />
               ) : null}

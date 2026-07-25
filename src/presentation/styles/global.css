@@ -2741,6 +2741,8 @@ button {
 }
 
 .detail-tag-chip,
+.detail-tag-add-chip,
+.detail-tag-empty,
 .task-tag-chip {
   align-items: center;
   background: #eef4fb;
@@ -2758,6 +2760,19 @@ button {
   padding: 3px 8px;
 }
 
+.detail-tag-add-chip {
+  background: #ffffff;
+  border-style: dashed;
+  color: var(--green);
+}
+
+.detail-tag-empty {
+  background: #f8fafb;
+  border-color: var(--line);
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .detail-tag-chip button {
   align-items: center;
   background: transparent;
@@ -2771,88 +2786,79 @@ button {
   width: 16px;
 }
 
-.detail-tag-form {
-  display: grid;
-  gap: 6px;
-  grid-template-columns: minmax(0, 1fr) auto;
+.detail-tag-chip .detail-tag-name-button {
+  font: inherit;
+  height: auto;
+  min-width: 0;
+  width: auto;
 }
 
-.detail-tag-form select {
+.detail-tag-rename-input {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid var(--green);
+  border-radius: 0;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  min-height: 20px;
+  min-width: 92px;
+  outline: 0;
+  padding: 1px 2px 2px;
+}
+
+.detail-tag-entry {
+  display: inline-flex;
+  min-width: min(100%, 190px);
+  position: relative;
+}
+
+.detail-tag-entry input {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid var(--green);
+  border-radius: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+  min-height: 26px;
+  min-width: 0;
+  outline: 0;
+  padding: 2px 2px 3px;
+  width: 100%;
+}
+
+.detail-tag-suggestions {
   background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 6px;
+  box-shadow: 0 12px 28px rgb(23 32 38 / 14%);
+  display: grid;
+  gap: 2px;
+  left: 0;
+  min-width: 190px;
+  padding: 5px;
+  position: absolute;
+  top: calc(100% + 5px);
+  z-index: 70;
+}
+
+.detail-tag-suggestions button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
   color: var(--ink);
-  min-height: 36px;
-  min-width: 0;
-  padding: 0 10px;
-}
-
-.detail-tag-management {
-  border-top: 1px solid var(--line);
-  padding-top: 8px;
-}
-
-.detail-tag-management summary {
-  color: var(--green);
-  cursor: pointer;
   font-size: 12px;
   font-weight: 800;
+  min-height: 28px;
+  padding: 5px 8px;
+  text-align: left;
 }
 
-.detail-tag-management[open] summary {
-  margin-bottom: 8px;
-}
-
-.detail-tag-create-form,
-.detail-tag-edit-row {
-  display: grid;
-  gap: 6px;
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.detail-tag-create-form input,
-.detail-tag-edit-row input {
-  background: #ffffff;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  color: var(--ink);
-  min-height: 34px;
-  min-width: 0;
-  padding: 6px 9px;
-}
-
-.detail-tag-management-list {
-  display: grid;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.detail-tag-management-row {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  min-width: 0;
-}
-
-.detail-tag-management-row > span {
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.detail-tag-management-row > div {
-  display: flex;
-  gap: 4px;
-}
-
-.detail-tag-edit-row {
-  grid-template-columns: minmax(0, 1fr) auto auto;
-}
-
-.detail-tag-edit-row .secondary-button {
-  min-height: 34px;
+.detail-tag-suggestions button:hover,
+.detail-tag-suggestions button:focus-visible {
+  background: #f1f8f5;
+  border-color: #c9d9d2;
 }
 
 .detail-memo-card {
