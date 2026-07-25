@@ -2880,6 +2880,44 @@ button {
   white-space: pre-wrap;
 }
 
+.detail-memo-display {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+  min-height: 54px;
+  overflow-wrap: anywhere;
+  padding: 6px 0;
+  text-align: left;
+  white-space: pre-wrap;
+  width: 100%;
+}
+
+.detail-memo-display.is-empty {
+  color: var(--muted);
+}
+
+.detail-memo-display:hover,
+.detail-memo-display:focus-visible {
+  border-color: #c9d9d2;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.detail-memo-card textarea {
+  border: 1px solid #9bc4b4;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+  min-height: 96px;
+  padding: 8px 10px;
+  resize: vertical;
+  width: 100%;
+}
+
 .detail-due-area {
   display: grid;
   gap: 8px;
@@ -2987,6 +3025,35 @@ button {
   line-height: 1.25;
 }
 
+.detail-title-display {
+  background: transparent;
+  border: 0;
+  display: block;
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+  width: 100%;
+}
+
+.detail-title-display:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid rgb(45 133 99 / 24%);
+  outline-offset: 3px;
+}
+
+.detail-title-input {
+  border: 1px solid #9bc4b4;
+  border-radius: 6px;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.25;
+  min-height: 36px;
+  min-width: 0;
+  padding: 5px 8px;
+  width: 100%;
+}
+
 .detail-section h3 {
   font-size: 15px;
   line-height: 1.25;
@@ -3052,8 +3119,52 @@ button {
   padding-top: 14px;
 }
 
-.detail-section-toggle {
+.detail-static-heading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.detail-static-heading h3 {
+  margin: 0;
+}
+
+.detail-static-heading strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.detail-inline-summary {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+  padding: 10px;
+  text-align: left;
   width: 100%;
+}
+
+.detail-inline-summary:hover,
+.detail-inline-summary:focus-visible {
+  border-color: #9bc4b4;
+}
+
+.detail-inline-summary span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.detail-inline-summary strong {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .detail-section-body {

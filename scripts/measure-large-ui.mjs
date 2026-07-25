@@ -904,8 +904,15 @@ try {
         document.querySelector(".detail-subtask-list") &&
         document.querySelector('.detail-list-card[aria-label="所属リストとタスク表示色"]') &&
         document.querySelector(".detail-task-color-picker") &&
+        document.querySelector(".detail-title-display") &&
+        document.querySelector(".detail-memo-display") &&
+        document.querySelector('.detail-section[aria-label="目標時間と繰り返し"]') &&
+        document.querySelector('.detail-section[aria-label="サブタスク"]') &&
         !document.querySelector('.detail-section[aria-label="タイマー"]') &&
         !document.querySelector('.detail-section[aria-label="通知"]') &&
+        !document.querySelector('.detail-section[aria-label="タスクを編集"]') &&
+        !document.querySelector(".detail-section-toggle") &&
+        !document.querySelector(".detail-reference-card") &&
         !document.querySelector(".detail-color-button") &&
         !document.querySelector(".app-alert")`,
     }),
@@ -1463,31 +1470,17 @@ function assertComponentsDidNotRender(label, renderCounts, componentNames) {
 async function verifyTaskDetailSave(client, sessionId) {
   await resetInvokeLog(client, sessionId);
   const startedAt = performance.now();
-  await evaluate(
+  await evaluate(client, sessionId, `document.querySelector(".detail-title-display")?.click()`);
+  await waitForPaintedExpression(
     client,
     sessionId,
-    `(() => {
-      const section = document.querySelector('.detail-section[aria-label="タスクを編集"]');
-      const toggle = section?.querySelector(".detail-section-toggle");
-      if (toggle?.getAttribute("aria-expanded") !== "true") {
-        toggle.click();
-      }
-    })()`,
-  );
-  await waitForExpression(
-    client,
-    sessionId,
-    `Boolean(document.querySelector(
-      '.detail-section[aria-label="タスクを編集"] .detail-form input[required]'
-    ))`,
-    5000,
+    `Boolean(document.querySelector(".detail-title-input"))`,
   );
   const nextTitle = await evaluateValue(
     client,
     sessionId,
     `(() => {
-      const section = document.querySelector('.detail-section[aria-label="タスクを編集"]');
-      const input = section.querySelector('.detail-form input[required]');
+      const input = document.querySelector('.detail-title-input');
       if (!input) {
         return null;
       }
@@ -1498,7 +1491,7 @@ async function verifyTaskDetailSave(client, sessionId) {
       )?.set;
       setter?.call(input, nextValue);
       input.dispatchEvent(new Event("input", { bubbles: true }));
-      section.querySelector('.detail-form button[type="submit"]')?.click();
+      input.blur();
       return nextValue;
     })()`,
   );
@@ -1511,7 +1504,7 @@ async function verifyTaskDetailSave(client, sessionId) {
     `document.querySelector("#task-detail-title")?.textContent === ${JSON.stringify(
       nextTitle,
     )} &&
-      !document.querySelector('.detail-section[aria-label="タスクを編集"] .detail-form button[type="submit"]')?.disabled &&
+      !document.querySelector(".detail-title-input") &&
       !document.querySelector(".app-alert")`,
   );
   return {
