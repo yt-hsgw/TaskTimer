@@ -10,12 +10,13 @@ import type {
 } from "../../application/usecases/contracts";
 import type { RecurrenceFrequency } from "../../domain/recurrence/types";
 import type { ActiveTimer } from "../../domain/timer/types";
-import type {
-  Subtask,
-  Task,
-  TaskColorToken,
-  WorkStatus,
-  WorkTargetRef,
+import {
+  DEFAULT_TASK_LIST_ID,
+  type Subtask,
+  type Task,
+  type TaskColorToken,
+  type WorkStatus,
+  type WorkTargetRef,
 } from "../../domain/task/types";
 import { usePresentationRenderProbe } from "../renderProbe";
 
@@ -147,6 +148,7 @@ export function TaskDetailPane({
   const [isScheduleEditOpen, setIsScheduleEditOpen] = useState(false);
   const [editingMemo, setEditingMemo] = useState(false);
   const [memoDraft, setMemoDraft] = useState(detailItem.memo);
+  const [isListPickerOpen, setIsListPickerOpen] = useState(false);
   const [isDuePopoverOpen, setIsDuePopoverOpen] = useState(false);
   const [isSubtaskCreateOpen, setIsSubtaskCreateOpen] = useState(false);
   const [isDeleteConfirming, setIsDeleteConfirming] = useState(false);
@@ -169,6 +171,10 @@ export function TaskDetailPane({
     [task.subtasks],
   );
   const dueChipLabel = formatDueChipLabel(detailItem.dueDate, detailItem.dueTime);
+  const assignableTaskLists = useMemo(
+    () => taskLists.filter((list) => list.id !== DEFAULT_TASK_LIST_ID),
+    [taskLists],
+  );
   const availableTags = useMemo(
     () => tags.filter((tag) => !task.tags.some((taskTag) => taskTag.id === tag.id)),
     [tags, task.tags],
@@ -200,6 +206,7 @@ export function TaskDetailPane({
     setEditingTitle(false);
     setIsScheduleEditOpen(false);
     setEditingMemo(false);
+    setIsListPickerOpen(false);
     setIsDuePopoverOpen(false);
     setIsSubtaskCreateOpen(false);
     setIsDeleteConfirming(false);
@@ -221,6 +228,10 @@ export function TaskDetailPane({
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        if (isListPickerOpen) {
+          setIsListPickerOpen(false);
+          return;
+        }
         if (isDuePopoverOpen) {
           setIsDuePopoverOpen(false);
           return;
@@ -231,7 +242,7 @@ export function TaskDetailPane({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isDuePopoverOpen, onClose]);
+  }, [isDuePopoverOpen, isListPickerOpen, onClose]);
 
   async function updateCurrentItem(nextDraft: DetailFormDraft) {
     const input = toWorkItemUpdateDraft(nextDraft);
@@ -352,12 +363,20 @@ export function TaskDetailPane({
   }
 
   async function handleTaskListChange(listId: string) {
+    if (listId === DEFAULT_TASK_LIST_ID) {
+      setIsListPickerOpen(false);
+      return;
+    }
     if (listId === task.listId) {
+      setIsListPickerOpen(false);
       return;
     }
     const nextDraft = toDetailFormDraft(task, listId, task.colorToken);
     setDraft(nextDraft);
-    await onUpdateTask(task.id, toWorkItemUpdateDraft(nextDraft));
+    const updated = await onUpdateTask(task.id, toWorkItemUpdateDraft(nextDraft));
+    if (updated) {
+      setIsListPickerOpen(false);
+    }
   }
 
   async function handleTaskColorChange(colorToken: TaskColorToken | null) {
@@ -509,20 +528,56 @@ export function TaskDetailPane({
           className="detail-list-card"
           aria-label="所属リストとタスク表示色"
         >
-          <label>
+          <div
+            className="detail-list-picker"
+            onBlur={(event) => {
+              const nextTarget = event.relatedTarget;
+              if (
+                nextTarget instanceof Node &&
+                event.currentTarget.contains(nextTarget)
+              ) {
+                return;
+              }
+              setIsListPickerOpen(false);
+            }}
+          >
             <span>所属リスト</span>
-            <select
-              value={task.listId}
-              disabled={isMutating}
-              onChange={(event) => void handleTaskListChange(event.target.value)}
+            <button
+              className="detail-list-picker-trigger"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={isListPickerOpen}
+              disabled={isMutating || assignableTaskLists.length === 0}
+              onClick={() => setIsListPickerOpen((current) => !current)}
             >
-              {taskLists.map((list) => (
-                <option key={list.id} value={list.id}>
-                  {list.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              <span
+                className={`detail-list-picker-dot color-${taskList?.colorToken ?? "green"}`}
+                aria-hidden="true"
+              />
+              <strong>{taskListName}</strong>
+            </button>
+            {isListPickerOpen ? (
+              <div className="detail-list-picker-menu" role="listbox">
+                {assignableTaskLists.map((list) => (
+                  <button
+                    className="detail-list-picker-option"
+                    type="button"
+                    role="option"
+                    aria-selected={task.listId === list.id}
+                    key={list.id}
+                    disabled={isMutating}
+                    onClick={() => void handleTaskListChange(list.id)}
+                  >
+                    <span
+                      className={`detail-list-picker-dot color-${list.colorToken}`}
+                      aria-hidden="true"
+                    />
+                    <span>{list.name}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <fieldset className="detail-task-color-field">
             <legend>タスクの表示色</legend>
             <div className="detail-task-color-picker">

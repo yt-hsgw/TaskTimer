@@ -155,7 +155,9 @@ try {
         workspace &&
         panel &&
         document.querySelector(".detail-list-card") &&
+        document.querySelector(".detail-list-picker-trigger") &&
         document.querySelector(".detail-tag-add-chip") &&
+        !document.querySelector(".detail-list-card select") &&
         !document.querySelector(".detail-tag-management") &&
         Math.abs(workspace.getBoundingClientRect().width - panel.getBoundingClientRect().width) < 2
       );
