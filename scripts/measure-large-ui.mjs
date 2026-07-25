@@ -122,12 +122,10 @@ try {
     { url: `http://127.0.0.1:${vitePort}/` },
     sessionId,
   );
-  await waitForPaintedExpression(
+  await waitForInitialTaskList(
     client,
     sessionId,
-    `document.querySelectorAll(".task-row").length === ${initialTaskPageCount} &&
-      document.querySelector('#task-panel-title')?.textContent === "タスク" &&
-      !document.querySelector(".app-alert")`,
+    initialTaskPageCount,
   );
   measurements.push(
     createMeasurement(
@@ -4468,7 +4466,7 @@ async function inspectPage(client, sessionId) {
   return result.result?.value ?? "ページ状態を取得できません";
 }
 
-function waitForPaintedExpression(client, sessionId, ready) {
+function waitForPaintedExpression(client, sessionId, ready, timeoutMs = 15000) {
   return waitForExpression(
     client,
     sessionId,
@@ -4479,8 +4477,41 @@ function waitForPaintedExpression(client, sessionId, ready) {
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       return Boolean(${ready});
     })()`,
-    15000,
+    timeoutMs,
   );
+}
+
+async function waitForInitialTaskList(client, sessionId, expectedRowCount) {
+  try {
+    await waitForPaintedExpression(
+      client,
+      sessionId,
+      `document.querySelector('#task-panel-title')?.textContent === "タスク" &&
+        document.querySelector('.workspace-mode-switcher [role="tab"][aria-selected="true"]')?.textContent === "リスト" &&
+        document.querySelectorAll(".task-row").length > 0 &&
+        document.querySelectorAll(".task-row").length <= ${expectedRowCount} &&
+        !document.querySelector(".app-alert")`,
+      30000,
+    );
+  } catch (error) {
+    throw new Error(
+      `初期タスクリストの描画待機に失敗しました: ${await inspectPage(
+        client,
+        sessionId,
+      )} ${error}`,
+    );
+  }
+
+  const actualRowCount = await evaluateValue(
+    client,
+    sessionId,
+    `document.querySelectorAll(".task-row").length`,
+  );
+  if (actualRowCount !== expectedRowCount) {
+    throw new Error(
+      `初期タスクリストの件数が不正です: expected=${expectedRowCount}, actual=${actualRowCount}, state=${await inspectPage(client, sessionId)}`,
+    );
+  }
 }
 
 function clickNavigation(label) {
