@@ -1363,6 +1363,17 @@ export function App() {
     [runMutation],
   );
 
+  const handleRenameTag = useCallback(
+    (tagId: string, name: string) =>
+      runMutation(async () => {
+        await tauriTaskTimerGateway.updateTag(tagId, { name });
+      }, {
+        scope: "detail",
+        refresh: { taskPage: true, tags: true },
+      }),
+    [runMutation],
+  );
+
   const handleDetachTagFromTask = useCallback(
     (taskId: string, tagId: string) =>
       runMutation(async () => {
@@ -2445,6 +2456,7 @@ export function App() {
                   onDeleteSubtask={handleDeleteSubtask}
                   onAttachTagToTask={handleAttachTagToTask}
                   onCreateAndAttachTagToTask={handleCreateAndAttachTagToTask}
+                  onRenameTag={handleRenameTag}
                   onDetachTagFromTask={handleDetachTagFromTask}
                 />
               ) : null}
@@ -2508,6 +2520,7 @@ export function App() {
                   onDeleteSubtask={handleDeleteSubtask}
                   onAttachTagToTask={handleAttachTagToTask}
                   onCreateAndAttachTagToTask={handleCreateAndAttachTagToTask}
+                  onRenameTag={handleRenameTag}
                   onDetachTagFromTask={handleDetachTagFromTask}
                 />
               ) : null}
@@ -2569,6 +2582,7 @@ export function App() {
                   onDeleteSubtask={handleDeleteSubtask}
                   onAttachTagToTask={handleAttachTagToTask}
                   onCreateAndAttachTagToTask={handleCreateAndAttachTagToTask}
+                  onRenameTag={handleRenameTag}
                   onDetachTagFromTask={handleDetachTagFromTask}
                 />
               ) : null}
@@ -2620,6 +2634,7 @@ export function App() {
                   onDeleteSubtask={handleDeleteSubtask}
                   onAttachTagToTask={handleAttachTagToTask}
                   onCreateAndAttachTagToTask={handleCreateAndAttachTagToTask}
+                  onRenameTag={handleRenameTag}
                   onDetachTagFromTask={handleDetachTagFromTask}
                 />
               ) : null}

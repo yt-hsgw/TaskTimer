@@ -46,6 +46,7 @@ type TaskDetailPaneProps = {
   onDeleteSubtask(subtask: Subtask): Promise<boolean>;
   onAttachTagToTask(taskId: string, tagId: string): Promise<boolean>;
   onCreateAndAttachTagToTask(taskId: string, name: string): Promise<boolean>;
+  onRenameTag(tagId: string, name: string): Promise<boolean>;
   onDetachTagFromTask(taskId: string, tagId: string): Promise<boolean>;
 };
 
@@ -116,6 +117,7 @@ export function TaskDetailPane({
   onDeleteSubtask,
   onAttachTagToTask,
   onCreateAndAttachTagToTask,
+  onRenameTag,
   onDetachTagFromTask,
 }: TaskDetailPaneProps) {
   usePresentationRenderProbe("TaskDetailPane");
@@ -160,6 +162,8 @@ export function TaskDetailPane({
   });
   const [isTagEditorOpen, setIsTagEditorOpen] = useState(false);
   const [tagDraft, setTagDraft] = useState("");
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [tagNameDraft, setTagNameDraft] = useState("");
   const completedSubtaskCount = useMemo(
     () => task.subtasks.filter((subtask) => subtask.status === "done").length,
     [task.subtasks],
@@ -169,6 +173,12 @@ export function TaskDetailPane({
     () => tags.filter((tag) => !task.tags.some((taskTag) => taskTag.id === tag.id)),
     [tags, task.tags],
   );
+  const tagSuggestions = useMemo(() => {
+    const query = tagDraft.trim().toLocaleLowerCase();
+    return availableTags
+      .filter((tag) => !query || tag.name.toLocaleLowerCase().includes(query))
+      .slice(0, 6);
+  }, [availableTags, tagDraft]);
 
   useEffect(() => {
     setDraft(
@@ -204,19 +214,9 @@ export function TaskDetailPane({
     });
     setIsTagEditorOpen(false);
     setTagDraft("");
+    setEditingTagId(null);
+    setTagNameDraft("");
   }, [task.id]);
-
-  useEffect(() => {
-    const exactTag = availableTags.find((tag) => tag.name === tagDraft.trim());
-    if (exactTag || !tagDraft.trim()) {
-      return;
-    }
-    const stillAvailable = tags.some((tag) => tag.name === tagDraft.trim());
-    if (!stillAvailable) {
-      return;
-    }
-    setTagDraft("");
-  }, [availableTags, tagDraft, tags]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -307,19 +307,47 @@ export function TaskDetailPane({
     }
   }
 
-  async function handleSubmitTagEntry(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const name = tagDraft.trim();
+  async function commitTagDraft(nameSource = tagDraft) {
+    const name = nameSource.trim();
     if (!name || selectedSubtask) {
+      setTagDraft("");
+      setIsTagEditorOpen(false);
       return;
     }
-    const existingTag = availableTags.find((tag) => tag.name === name);
+    const alreadyAttached = task.tags.some((tag) => tag.name === name);
+    if (alreadyAttached) {
+      setTagDraft("");
+      setIsTagEditorOpen(false);
+      return;
+    }
+    const existingTag = tags.find((tag) => tag.name === name);
     const attached = existingTag
       ? await onAttachTagToTask(task.id, existingTag.id)
       : await onCreateAndAttachTagToTask(task.id, name);
     if (attached) {
       setTagDraft("");
       setIsTagEditorOpen(false);
+    }
+  }
+
+  async function handleSubmitTagEntry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await commitTagDraft();
+  }
+
+  async function commitTagRename(tag: { id: string; name: string }) {
+    const name = tagNameDraft.trim();
+    if (!name || name === tag.name || isMutating) {
+      setEditingTagId(null);
+      setTagNameDraft("");
+      return;
+    }
+    const renamed = await onRenameTag(tag.id, name);
+    if (renamed) {
+      setEditingTagId(null);
+      setTagNameDraft("");
+    } else {
+      setTagNameDraft(tag.name);
     }
   }
 
@@ -541,18 +569,62 @@ export function TaskDetailPane({
         <div className="detail-tag-list">
           {task.tags.map((tag) => (
             <span className="detail-tag-chip" key={tag.id}>
-              {tag.name}
-              {!selectedSubtask ? (
-                <button
-                  type="button"
-                  aria-label={`${tag.name}タグを外す`}
-                  title="タグを外す"
+              {!selectedSubtask && editingTagId === tag.id ? (
+                <input
+                  className="detail-tag-rename-input"
+                  value={tagNameDraft}
                   disabled={isMutating}
-                  onClick={() => void onDetachTagFromTask(task.id, tag.id)}
-                >
-                  ×
-                </button>
-              ) : null}
+                  maxLength={40}
+                  autoFocus
+                  aria-label={`${tag.name}タグ名`}
+                  onChange={(event) => setTagNameDraft(event.target.value)}
+                  onBlur={() => void commitTagRename(tag)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      if (event.nativeEvent.isComposing) {
+                        return;
+                      }
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setEditingTagId(null);
+                      setTagNameDraft("");
+                    }
+                  }}
+                />
+              ) : (
+                <>
+                  {!selectedSubtask ? (
+                    <button
+                      className="detail-tag-name-button"
+                      type="button"
+                      disabled={isMutating}
+                      onClick={() => {
+                        setEditingTagId(tag.id);
+                        setTagNameDraft(tag.name);
+                      }}
+                    >
+                      {tag.name}
+                    </button>
+                  ) : (
+                    <span>{tag.name}</span>
+                  )}
+                  {!selectedSubtask ? (
+                    <button
+                      type="button"
+                      aria-label={`${tag.name}タグを外す`}
+                      title="タグを外す"
+                      disabled={isMutating}
+                      onClick={() => void onDetachTagFromTask(task.id, tag.id)}
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </>
+              )}
             </span>
           ))}
           {task.tags.length === 0 ? (
@@ -565,7 +637,6 @@ export function TaskDetailPane({
               <form className="detail-tag-entry" onSubmit={handleSubmitTagEntry}>
                 <input
                   value={tagDraft}
-                  list="detail-available-tags"
                   onChange={(event) => setTagDraft(event.target.value)}
                   placeholder={
                     availableTags.length > 0
@@ -575,12 +646,11 @@ export function TaskDetailPane({
                   maxLength={40}
                   disabled={isMutating}
                   autoFocus
-                  onBlur={() => {
-                    if (!tagDraft.trim()) {
-                      setIsTagEditorOpen(false);
-                    }
-                  }}
+                  onBlur={() => void commitTagDraft()}
                   onKeyDown={(event) => {
+                    if (event.key === "Enter" && event.nativeEvent.isComposing) {
+                      return;
+                    }
                     if (event.key === "Escape") {
                       event.preventDefault();
                       event.stopPropagation();
@@ -589,11 +659,21 @@ export function TaskDetailPane({
                     }
                   }}
                 />
-                <datalist id="detail-available-tags">
-                  {availableTags.map((tag) => (
-                    <option value={tag.name} key={tag.id} />
-                  ))}
-                </datalist>
+                {tagSuggestions.length > 0 ? (
+                  <div className="detail-tag-suggestions" role="listbox">
+                    {tagSuggestions.map((tag) => (
+                      <button
+                        type="button"
+                        role="option"
+                        key={tag.id}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => void commitTagDraft(tag.name)}
+                      >
+                        {tag.name}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </form>
             ) : (
               <button

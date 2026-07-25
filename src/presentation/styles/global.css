@@ -2786,9 +2786,29 @@ button {
   width: 16px;
 }
 
+.detail-tag-chip .detail-tag-name-button {
+  font: inherit;
+  height: auto;
+  min-width: 0;
+  width: auto;
+}
+
+.detail-tag-rename-input {
+  background: #ffffff;
+  border: 1px solid #9bc4b4;
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 800;
+  min-height: 20px;
+  min-width: 92px;
+  padding: 2px 7px;
+}
+
 .detail-tag-entry {
   display: inline-flex;
   min-width: min(100%, 190px);
+  position: relative;
 }
 
 .detail-tag-entry input {
@@ -2802,6 +2822,39 @@ button {
   min-width: 0;
   padding: 3px 10px;
   width: 100%;
+}
+
+.detail-tag-suggestions {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 12px 28px rgb(23 32 38 / 14%);
+  display: grid;
+  gap: 2px;
+  left: 0;
+  min-width: 190px;
+  padding: 5px;
+  position: absolute;
+  top: calc(100% + 5px);
+  z-index: 70;
+}
+
+.detail-tag-suggestions button {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 28px;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.detail-tag-suggestions button:hover,
+.detail-tag-suggestions button:focus-visible {
+  background: #f1f8f5;
+  border-color: #c9d9d2;
 }
 
 .detail-memo-card {
