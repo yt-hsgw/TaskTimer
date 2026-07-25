@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type {
   ActivePomodoro,
@@ -166,6 +166,7 @@ export function TaskDetailPane({
   const [tagDraft, setTagDraft] = useState("");
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
   const [tagNameDraft, setTagNameDraft] = useState("");
+  const isSchedulePointerInsideRef = useRef(false);
   const completedSubtaskCount = useMemo(
     () => task.subtasks.filter((subtask) => subtask.status === "done").length,
     [task.subtasks],
@@ -870,6 +871,9 @@ export function TaskDetailPane({
           if (!isScheduleEditOpen) {
             return;
           }
+          if (isSchedulePointerInsideRef.current) {
+            return;
+          }
           const nextTarget = event.relatedTarget;
           if (
             nextTarget instanceof Node &&
@@ -877,7 +881,19 @@ export function TaskDetailPane({
           ) {
             return;
           }
-          void commitScheduleDraft();
+          window.requestAnimationFrame(() => {
+            if (isSchedulePointerInsideRef.current) {
+              return;
+            }
+            const activeElement = document.activeElement;
+            if (
+              activeElement instanceof Node &&
+              event.currentTarget.contains(activeElement)
+            ) {
+              return;
+            }
+            void commitScheduleDraft();
+          });
         }}
       >
         <button
@@ -906,6 +922,12 @@ export function TaskDetailPane({
           <div className="detail-schedule-popover">
             <form
               className="detail-form"
+              onPointerDownCapture={() => {
+                isSchedulePointerInsideRef.current = true;
+                window.setTimeout(() => {
+                  isSchedulePointerInsideRef.current = false;
+                }, 0);
+              }}
               onSubmit={(event) => {
                 event.preventDefault();
                 void commitScheduleDraft();
@@ -913,12 +935,7 @@ export function TaskDetailPane({
             >
               <label>
                 <span>目標時間（分）</span>
-                <input
-                  list="timer-target-presets"
-                  type="number"
-                  min="1"
-                  max="1440"
-                  step="1"
+                <select
                   value={draft.timerTargetMinutes}
                   onChange={(event) =>
                     setDraft((current) => ({
@@ -927,20 +944,15 @@ export function TaskDetailPane({
                     }))
                   }
                   disabled={isMutating}
-                  inputMode="numeric"
                   autoFocus
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      event.currentTarget.blur();
-                    }
-                  }}
-                />
-                <datalist id="timer-target-presets">
+                >
+                  <option value="">未設定</option>
                   {timerTargetPresets.map((minutes) => (
-                    <option key={minutes} value={minutes} />
+                    <option key={minutes} value={minutes}>
+                      {minutes}分
+                    </option>
                   ))}
-                </datalist>
+                </select>
               </label>
 
               <label className="settings-toggle-row detail-toggle-row">
