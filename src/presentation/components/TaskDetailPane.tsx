@@ -632,7 +632,7 @@ export function TaskDetailPane({
               {selectedSubtask ? "親タスクにタグはありません" : "タグなし"}
             </span>
           ) : null}
-          {!selectedSubtask ? (
+          {!selectedSubtask && editingTagId === null ? (
             isTagEditorOpen ? (
               <form className="detail-tag-entry" onSubmit={handleSubmitTagEntry}>
                 <input
