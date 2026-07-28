@@ -910,12 +910,14 @@ try {
         document.querySelector(".detail-tag-add-chip") &&
         document.querySelector(".detail-memo-display") &&
         document.querySelector('.detail-section[aria-label="目標時間と繰り返し"]') &&
+        document.querySelector(".detail-inline-summary") &&
         document.querySelector('.detail-section[aria-label="サブタスク"]') &&
         !document.querySelector('.detail-section[aria-label="タイマー"]') &&
         !document.querySelector('.detail-section[aria-label="通知"]') &&
         !document.querySelector('.detail-section[aria-label="タスクを編集"]') &&
         !document.querySelector(".detail-list-card select") &&
         !document.querySelector(".detail-tag-management") &&
+        !document.querySelector(".detail-schedule-section .detail-actions") &&
         !document.querySelector(".detail-section-toggle") &&
         !document.querySelector(".detail-reference-card") &&
         !document.querySelector(".detail-color-button") &&

@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Repeat2, X } from "lucide-react";
 import type {
   ActivePomodoro,
   TagItem,
@@ -146,6 +146,8 @@ export function TaskDetailPane({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(detailItem.title);
   const [isScheduleEditOpen, setIsScheduleEditOpen] = useState(false);
+  const [isTimerTargetMenuOpen, setIsTimerTargetMenuOpen] = useState(false);
+  const [isRecurrencePopoverOpen, setIsRecurrencePopoverOpen] = useState(false);
   const [editingMemo, setEditingMemo] = useState(false);
   const [memoDraft, setMemoDraft] = useState(detailItem.memo);
   const [isListPickerOpen, setIsListPickerOpen] = useState(false);
@@ -166,11 +168,18 @@ export function TaskDetailPane({
   const [tagDraft, setTagDraft] = useState("");
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
   const [tagNameDraft, setTagNameDraft] = useState("");
+  const scheduleSectionRef = useRef<HTMLElement | null>(null);
+  const timerTargetFieldRef = useRef<HTMLDivElement | null>(null);
+  const recurrenceFieldRef = useRef<HTMLDivElement | null>(null);
+  const isScheduleCommitPendingRef = useRef(false);
   const completedSubtaskCount = useMemo(
     () => task.subtasks.filter((subtask) => subtask.status === "done").length,
     [task.subtasks],
   );
   const dueChipLabel = formatDueChipLabel(detailItem.dueDate, detailItem.dueTime);
+  const timerTargetMenuLabel = draft.timerTargetMinutes
+    ? `${draft.timerTargetMinutes}分`
+    : "未設定";
   const assignableTaskLists = useMemo(
     () => taskLists.filter((list) => list.id !== DEFAULT_TASK_LIST_ID),
     [taskLists],
@@ -185,6 +194,43 @@ export function TaskDetailPane({
       .filter((tag) => !query || tag.name.toLocaleLowerCase().includes(query))
       .slice(0, 6);
   }, [availableTags, tagDraft]);
+
+  function closeDetailEditors(
+    except?:
+      | "list"
+      | "tag"
+      | "due"
+      | "schedule"
+      | "timerTarget"
+      | "recurrence"
+      | "subtask",
+  ) {
+    if (except !== "list") {
+      setIsListPickerOpen(false);
+    }
+    if (except !== "tag") {
+      setIsTagEditorOpen(false);
+    }
+    if (except !== "due") {
+      setIsDuePopoverOpen(false);
+    }
+    if (
+      except !== "schedule" &&
+      except !== "timerTarget" &&
+      except !== "recurrence"
+    ) {
+      setIsScheduleEditOpen(false);
+    }
+    if (except !== "timerTarget") {
+      setIsTimerTargetMenuOpen(false);
+    }
+    if (except !== "recurrence") {
+      setIsRecurrencePopoverOpen(false);
+    }
+    if (except !== "subtask") {
+      setIsSubtaskCreateOpen(false);
+    }
+  }
 
   useEffect(() => {
     setDraft(
@@ -205,6 +251,8 @@ export function TaskDetailPane({
   useEffect(() => {
     setEditingTitle(false);
     setIsScheduleEditOpen(false);
+    setIsTimerTargetMenuOpen(false);
+    setIsRecurrencePopoverOpen(false);
     setEditingMemo(false);
     setIsListPickerOpen(false);
     setIsDuePopoverOpen(false);
@@ -236,13 +284,77 @@ export function TaskDetailPane({
           setIsDuePopoverOpen(false);
           return;
         }
+        if (isTimerTargetMenuOpen) {
+          setIsTimerTargetMenuOpen(false);
+          return;
+        }
+        if (isRecurrencePopoverOpen) {
+          setIsRecurrencePopoverOpen(false);
+          return;
+        }
+        if (isScheduleEditOpen) {
+          resetScheduleDraft();
+          return;
+        }
         onClose();
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isDuePopoverOpen, isListPickerOpen, onClose]);
+  }, [
+    isDuePopoverOpen,
+    isListPickerOpen,
+    isRecurrencePopoverOpen,
+    isScheduleEditOpen,
+    isTimerTargetMenuOpen,
+    onClose,
+  ]);
+
+  useEffect(() => {
+    if (!isScheduleEditOpen) {
+      return;
+    }
+
+    function handleSchedulePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (
+        isTimerTargetMenuOpen &&
+        target instanceof Node &&
+        !timerTargetFieldRef.current?.contains(target)
+      ) {
+        setIsTimerTargetMenuOpen(false);
+      }
+      if (
+        isRecurrencePopoverOpen &&
+        target instanceof Node &&
+        !recurrenceFieldRef.current?.contains(target)
+      ) {
+        setIsRecurrencePopoverOpen(false);
+      }
+      if (
+        target instanceof Node &&
+        scheduleSectionRef.current?.contains(target)
+      ) {
+        return;
+      }
+      void commitScheduleDraft();
+    }
+
+    document.addEventListener("pointerdown", handleSchedulePointerDown, true);
+    return () =>
+      document.removeEventListener(
+        "pointerdown",
+        handleSchedulePointerDown,
+        true,
+      );
+  }, [
+    draft,
+    isMutating,
+    isRecurrencePopoverOpen,
+    isScheduleEditOpen,
+    isTimerTargetMenuOpen,
+  ]);
 
   async function updateCurrentItem(nextDraft: DetailFormDraft) {
     const input = toWorkItemUpdateDraft(nextDraft);
@@ -252,12 +364,34 @@ export function TaskDetailPane({
     return onUpdateTask(task.id, input);
   }
 
-  async function handleUpdateCore(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const updated = await updateCurrentItem(draft);
-    if (updated) {
-      setIsScheduleEditOpen(false);
+  async function commitScheduleDraft() {
+    if (isMutating || isScheduleCommitPendingRef.current) {
+      return;
     }
+    isScheduleCommitPendingRef.current = true;
+    try {
+      const updated = await updateCurrentItem(draft);
+      if (updated) {
+        setIsScheduleEditOpen(false);
+        setIsTimerTargetMenuOpen(false);
+        setIsRecurrencePopoverOpen(false);
+      }
+    } finally {
+      isScheduleCommitPendingRef.current = false;
+    }
+  }
+
+  function resetScheduleDraft() {
+    setDraft(
+      toDetailFormDraft(
+        detailItem,
+        task.listId,
+        isTaskDetail ? task.colorToken : null,
+      ),
+    );
+    setIsScheduleEditOpen(false);
+    setIsTimerTargetMenuOpen(false);
+    setIsRecurrencePopoverOpen(false);
   }
 
   async function handleTitleBlur() {
@@ -426,6 +560,29 @@ export function TaskDetailPane({
     });
   }
 
+  function handleRecurrenceFrequencyChange(value: string) {
+    if (value === "") {
+      handleToggleRecurrence(false);
+      return;
+    }
+    setDraft((current) => {
+      const nextFrequency = value as RecurrenceFrequency;
+      if (!current.recurrenceEnabled && !current.dueDate) {
+        return {
+          ...current,
+          dueDate: getTodayDateInputValue(),
+          recurrenceEnabled: true,
+          recurrenceFrequency: nextFrequency,
+        };
+      }
+      return {
+        ...current,
+        recurrenceEnabled: true,
+        recurrenceFrequency: nextFrequency,
+      };
+    });
+  }
+
   function handleDeleteClick() {
     if (!isDeleteConfirming) {
       setIsDeleteConfirming(true);
@@ -548,7 +705,14 @@ export function TaskDetailPane({
               aria-haspopup="listbox"
               aria-expanded={isListPickerOpen}
               disabled={isMutating || assignableTaskLists.length === 0}
-              onClick={() => setIsListPickerOpen((current) => !current)}
+              onClick={() => {
+                if (isListPickerOpen) {
+                  setIsListPickerOpen(false);
+                  return;
+                }
+                closeDetailEditors("list");
+                setIsListPickerOpen(true);
+              }}
             >
               <span
                 className={`detail-list-picker-dot color-${taskList?.colorToken ?? "green"}`}
@@ -585,8 +749,11 @@ export function TaskDetailPane({
                 className="detail-task-color-inherit"
                 type="button"
                 aria-pressed={draft.colorToken === null}
-                disabled={isMutating || isScheduleEditOpen}
-                onClick={() => void handleTaskColorChange(null)}
+                disabled={isMutating}
+                onClick={() => {
+                  closeDetailEditors();
+                  void handleTaskColorChange(null);
+                }}
               >
                 未設定
                 <span
@@ -602,8 +769,11 @@ export function TaskDetailPane({
                   aria-label={`${label}をタスクの表示色に設定`}
                   title={label}
                   aria-pressed={draft.colorToken === token}
-                  disabled={isMutating || isScheduleEditOpen}
-                  onClick={() => void handleTaskColorChange(token)}
+                  disabled={isMutating}
+                  onClick={() => {
+                    closeDetailEditors();
+                    void handleTaskColorChange(token);
+                  }}
                 >
                   <span aria-hidden="true" />
                 </button>
@@ -658,6 +828,7 @@ export function TaskDetailPane({
                       type="button"
                       disabled={isMutating}
                       onClick={() => {
+                        closeDetailEditors();
                         setEditingTagId(tag.id);
                         setTagNameDraft(tag.name);
                       }}
@@ -735,7 +906,10 @@ export function TaskDetailPane({
                 className="detail-tag-add-chip"
                 type="button"
                 disabled={isMutating}
-                onClick={() => setIsTagEditorOpen(true)}
+                onClick={() => {
+                  closeDetailEditors("tag");
+                  setIsTagEditorOpen(true);
+                }}
               >
                 ＋ タグを追加
               </button>
@@ -754,7 +928,10 @@ export function TaskDetailPane({
                 aria-label="期限を削除"
                 title="期限を削除"
                 disabled={isMutating}
-                onClick={() => void applyDue(null, null)}
+                onClick={() => {
+                  closeDetailEditors();
+                  void applyDue(null, null);
+                }}
               >
                 ×
               </button>
@@ -765,7 +942,10 @@ export function TaskDetailPane({
                 className="due-chip-button"
                 type="button"
                 disabled={isMutating}
-                onClick={() => void applyDue(getTodayDateInputValue(), null)}
+                onClick={() => {
+                  closeDetailEditors();
+                  void applyDue(getTodayDateInputValue(), null);
+                }}
               >
                 今日
               </button>
@@ -773,7 +953,10 @@ export function TaskDetailPane({
                 className="due-chip-button"
                 type="button"
                 disabled={isMutating}
-                onClick={() => void applyDue(getTomorrowDateInputValue(), null)}
+                onClick={() => {
+                  closeDetailEditors();
+                  void applyDue(getTomorrowDateInputValue(), null);
+                }}
               >
                 明日
               </button>
@@ -782,7 +965,14 @@ export function TaskDetailPane({
                 type="button"
                 disabled={isMutating}
                 aria-expanded={isDuePopoverOpen}
-                onClick={() => setIsDuePopoverOpen((current) => !current)}
+                onClick={() => {
+                  if (isDuePopoverOpen) {
+                    setIsDuePopoverOpen(false);
+                    return;
+                  }
+                  closeDetailEditors("due");
+                  setIsDuePopoverOpen(true);
+                }}
               >
                 ◷ 時間設定
               </button>
@@ -847,6 +1037,7 @@ export function TaskDetailPane({
       </div>
 
       <section
+        ref={scheduleSectionRef}
         className="detail-section detail-schedule-section"
         aria-label="目標時間と繰り返し"
       >
@@ -855,7 +1046,14 @@ export function TaskDetailPane({
           type="button"
           aria-expanded={isScheduleEditOpen}
           disabled={isMutating}
-          onClick={() => setIsScheduleEditOpen((current) => !current)}
+          onClick={() => {
+            if (isScheduleEditOpen) {
+              void commitScheduleDraft();
+              return;
+            }
+            closeDetailEditors("schedule");
+            setIsScheduleEditOpen(true);
+          }}
         >
           <span>
             <strong>目標時間</strong>
@@ -867,98 +1065,159 @@ export function TaskDetailPane({
           </span>
         </button>
         {isScheduleEditOpen ? (
-          <form
-            className="detail-form"
-            onSubmit={(event) => void handleUpdateCore(event)}
-          >
-          <label>
-            <span>目標時間（分）</span>
-            <input
-              list="timer-target-presets"
-              type="number"
-              min="1"
-              max="1440"
-              step="1"
-              value={draft.timerTargetMinutes}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  timerTargetMinutes: event.target.value,
-                }))
-              }
-              disabled={isMutating}
-              inputMode="numeric"
-            />
-            <datalist id="timer-target-presets">
-              {timerTargetPresets.map((minutes) => (
-                <option key={minutes} value={minutes} />
-              ))}
-            </datalist>
-          </label>
-
-          <label className="settings-toggle-row detail-toggle-row">
-            <input
-              type="checkbox"
-              checked={draft.recurrenceEnabled}
-              disabled={isMutating}
-              onChange={(event) =>
-                handleToggleRecurrence(event.currentTarget.checked)
-              }
-            />
-            <span>
-              <strong>繰り返しを有効にする</strong>
-              <small>
-                有効時だけ頻度と間隔を設定します。期限未設定の場合は今日を基準にします。
-              </small>
-            </span>
-          </label>
-
-          {draft.recurrenceEnabled ? (
-            <div className="recurrence-fields">
-              <label>
-                <span>頻度</span>
-                <select
-                  value={draft.recurrenceFrequency}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      recurrenceFrequency: event.target.value as RecurrenceFrequency,
-                    }))
-                  }
-                  disabled={isMutating}
+          <div className="detail-schedule-popover">
+            <form
+              className="detail-form detail-schedule-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void commitScheduleDraft();
+              }}
+            >
+              <div className="detail-schedule-control-row">
+                <div
+                  className="detail-schedule-target-field"
+                  ref={timerTargetFieldRef}
                 >
-                  <option value="daily">毎日</option>
-                  <option value="weekly">毎週</option>
-                  <option value="monthly">毎月</option>
-                </select>
-              </label>
-              <label>
-                <span>間隔</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="365"
-                  step="1"
-                  value={draft.recurrenceInterval}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      recurrenceInterval: event.target.value,
-                    }))
-                  }
-                  disabled={isMutating}
-                  inputMode="numeric"
-                />
-              </label>
-            </div>
-          ) : null}
+                  <span>目標時間（分）</span>
+                  <button
+                    className="detail-timer-target-trigger"
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded={isTimerTargetMenuOpen}
+                    disabled={isMutating}
+                    autoFocus
+                    onClick={() => {
+                      if (isTimerTargetMenuOpen) {
+                        setIsTimerTargetMenuOpen(false);
+                        return;
+                      }
+                      setIsRecurrencePopoverOpen(false);
+                      setIsTimerTargetMenuOpen(true);
+                    }}
+                  >
+                    <span>{timerTargetMenuLabel}</span>
+                  </button>
+                  {isTimerTargetMenuOpen ? (
+                    <div className="detail-timer-target-menu" role="listbox">
+                      <button
+                        className="detail-timer-target-option"
+                        type="button"
+                        role="option"
+                        aria-selected={draft.timerTargetMinutes === ""}
+                        disabled={isMutating}
+                        onClick={() => {
+                          setDraft((current) => ({
+                            ...current,
+                            timerTargetMinutes: "",
+                          }));
+                          setIsTimerTargetMenuOpen(false);
+                        }}
+                      >
+                        未設定
+                      </button>
+                      {timerTargetPresets.map((minutes) => (
+                        <button
+                          className="detail-timer-target-option"
+                          type="button"
+                          role="option"
+                          aria-selected={draft.timerTargetMinutes === minutes}
+                          key={minutes}
+                          disabled={isMutating}
+                          onClick={() => {
+                            setDraft((current) => ({
+                              ...current,
+                              timerTargetMinutes: minutes,
+                            }));
+                            setIsTimerTargetMenuOpen(false);
+                          }}
+                        >
+                          {minutes}分
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
 
-          <div className="detail-actions">
-            <button className="primary-button" type="submit" disabled={isMutating}>
-              保存
-            </button>
+                <div className="detail-recurrence-field" ref={recurrenceFieldRef}>
+                  <span>繰り返し</span>
+                  <button
+                    className={`detail-recurrence-icon-button${
+                      draft.recurrenceEnabled ? " is-active" : ""
+                    }`}
+                    type="button"
+                    aria-label="繰り返しを設定"
+                    aria-expanded={isRecurrencePopoverOpen}
+                    aria-haspopup="dialog"
+                    disabled={isMutating}
+                    onClick={() => {
+                      if (isRecurrencePopoverOpen) {
+                        setIsRecurrencePopoverOpen(false);
+                        return;
+                      }
+                      setIsTimerTargetMenuOpen(false);
+                      setIsRecurrencePopoverOpen(true);
+                    }}
+                  >
+                    <Repeat2 aria-hidden="true" size={17} />
+                  </button>
+
+                  {isRecurrencePopoverOpen ? (
+                    <div
+                      className="detail-recurrence-popover"
+                      role="dialog"
+                      aria-label="繰り返し設定"
+                    >
+                      <div className="recurrence-fields">
+                        <label>
+                          <span>頻度</span>
+                          <select
+                            value={
+                              draft.recurrenceEnabled
+                                ? draft.recurrenceFrequency
+                                : ""
+                            }
+                            onChange={(event) =>
+                              handleRecurrenceFrequencyChange(event.target.value)
+                            }
+                            disabled={isMutating}
+                          >
+                            <option value="">なし</option>
+                            <option value="daily">毎日</option>
+                            <option value="weekly">毎週</option>
+                            <option value="monthly">毎月</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span>間隔</span>
+                          <input
+                            type="number"
+                            min="1"
+                            max="365"
+                            step="1"
+                            value={draft.recurrenceInterval}
+                            onChange={(event) =>
+                              setDraft((current) => ({
+                                ...current,
+                                recurrenceInterval: event.target.value,
+                              }))
+                            }
+                            disabled={isMutating || !draft.recurrenceEnabled}
+                            inputMode="numeric"
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void commitScheduleDraft();
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </form>
           </div>
-          </form>
         ) : null}
       </section>
 
@@ -1042,7 +1301,10 @@ export function TaskDetailPane({
               className="subtask-add-button"
               type="button"
               disabled={isMutating}
-              onClick={() => setIsSubtaskCreateOpen(true)}
+              onClick={() => {
+                closeDetailEditors("subtask");
+                setIsSubtaskCreateOpen(true);
+              }}
             >
               ＋ サブタスクの追加
             </button>
