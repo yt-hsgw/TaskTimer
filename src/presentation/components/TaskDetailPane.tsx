@@ -5,7 +5,6 @@ import type {
   TagItem,
   TaskWithSubtasks,
   TaskListItem,
-  WorkItemDraft,
   WorkItemUpdateDraft,
 } from "../../application/usecases/contracts";
 import type { RecurrenceFrequency } from "../../domain/recurrence/types";
@@ -34,7 +33,7 @@ type TaskDetailPaneProps = {
     subtaskId: string,
     input: WorkItemUpdateDraft,
   ): Promise<boolean>;
-  onCreateSubtask(taskId: string, input: WorkItemDraft): Promise<boolean>;
+  onRequestCreateSubtask(taskId: string): void;
   onSelectSubtask(subtaskId: string): void;
   onSelectParentTask(): void;
   onStartTimer(target: WorkTargetRef): Promise<boolean>;
@@ -61,13 +60,6 @@ type DetailFormDraft = {
   recurrenceEnabled: boolean;
   recurrenceFrequency: RecurrenceFrequency;
   recurrenceInterval: string;
-  memo: string;
-};
-
-type SubtaskCreateDraft = {
-  title: string;
-  dueDate: string;
-  dueTime: string;
   memo: string;
 };
 
@@ -105,7 +97,7 @@ export function TaskDetailPane({
   onClose,
   onUpdateTask,
   onUpdateSubtask,
-  onCreateSubtask,
+  onRequestCreateSubtask,
   onSelectSubtask,
   onSelectParentTask,
   onStartTimer,
@@ -152,17 +144,10 @@ export function TaskDetailPane({
   const [memoDraft, setMemoDraft] = useState(detailItem.memo);
   const [isListPickerOpen, setIsListPickerOpen] = useState(false);
   const [isDuePopoverOpen, setIsDuePopoverOpen] = useState(false);
-  const [isSubtaskCreateOpen, setIsSubtaskCreateOpen] = useState(false);
   const [isDeleteConfirming, setIsDeleteConfirming] = useState(false);
   const [customDueDraft, setCustomDueDraft] = useState({
     dueDate: detailItem.dueDate ?? getTodayDateInputValue(),
     dueTime: detailItem.dueTime ?? "",
-  });
-  const [subtaskDraft, setSubtaskDraft] = useState<SubtaskCreateDraft>({
-    title: "",
-    dueDate: "",
-    dueTime: "",
-    memo: "",
   });
   const [isTagEditorOpen, setIsTagEditorOpen] = useState(false);
   const [tagDraft, setTagDraft] = useState("");
@@ -202,8 +187,7 @@ export function TaskDetailPane({
       | "due"
       | "schedule"
       | "timerTarget"
-      | "recurrence"
-      | "subtask",
+      | "recurrence",
   ) {
     if (except !== "list") {
       setIsListPickerOpen(false);
@@ -226,9 +210,6 @@ export function TaskDetailPane({
     }
     if (except !== "recurrence") {
       setIsRecurrencePopoverOpen(false);
-    }
-    if (except !== "subtask") {
-      setIsSubtaskCreateOpen(false);
     }
   }
 
@@ -256,17 +237,10 @@ export function TaskDetailPane({
     setEditingMemo(false);
     setIsListPickerOpen(false);
     setIsDuePopoverOpen(false);
-    setIsSubtaskCreateOpen(false);
     setIsDeleteConfirming(false);
   }, [detailKey]);
 
   useEffect(() => {
-    setSubtaskDraft({
-      title: "",
-      dueDate: "",
-      dueTime: "",
-      memo: "",
-    });
     setIsTagEditorOpen(false);
     setTagDraft("");
     setEditingTagId(null);
@@ -423,20 +397,6 @@ export function TaskDetailPane({
       setMemoDraft(detailItem.memo);
     }
     setEditingMemo(false);
-  }
-
-  async function handleCreateSubtask(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const created = await onCreateSubtask(task.id, normalizeCreateDraft(subtaskDraft));
-    if (created) {
-      setSubtaskDraft({
-        title: "",
-        dueDate: "",
-        dueTime: "",
-        memo: "",
-      });
-      setIsSubtaskCreateOpen(false);
-    }
   }
 
   async function applyDue(dueDate: string | null, dueTime: string | null) {
@@ -1231,84 +1191,17 @@ export function TaskDetailPane({
             親タスク「{task.title}」に紐づく作業です。既存サブタスクの編集は選択して開きます。
           </p>
 
-          {isSubtaskCreateOpen ? (
-            <form
-              className="detail-form subtask-create-form"
-              onSubmit={(event) => void handleCreateSubtask(event)}
-            >
-              <label>
-                <span>サブタスク名</span>
-                <input
-                  value={subtaskDraft.title}
-                  onChange={(event) =>
-                    setSubtaskDraft((current) => ({
-                      ...current,
-                      title: event.target.value,
-                    }))
-                  }
-                  placeholder="例: チェック項目を整理"
-                  disabled={isMutating}
-                  maxLength={120}
-                  required
-                />
-              </label>
-              <div className="date-fields">
-                <label>
-                  <span>期限日</span>
-                  <input
-                    type="date"
-                    value={subtaskDraft.dueDate}
-                    onChange={(event) =>
-                      setSubtaskDraft((current) => ({
-                        ...current,
-                        dueDate: event.target.value,
-                      }))
-                    }
-                    disabled={isMutating}
-                  />
-                </label>
-                <label>
-                  <span>期限時刻</span>
-                  <input
-                    type="time"
-                    value={subtaskDraft.dueTime}
-                    onChange={(event) =>
-                      setSubtaskDraft((current) => ({
-                        ...current,
-                        dueTime: event.target.value,
-                      }))
-                    }
-                    disabled={isMutating || !subtaskDraft.dueDate}
-                  />
-                </label>
-              </div>
-              <div className="subtask-create-actions">
-                <button className="primary-button" type="submit" disabled={isMutating}>
-                  追加
-                </button>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  disabled={isMutating}
-                  onClick={() => setIsSubtaskCreateOpen(false)}
-                >
-                  キャンセル
-                </button>
-              </div>
-            </form>
-          ) : (
-            <button
-              className="subtask-add-button"
-              type="button"
-              disabled={isMutating}
-              onClick={() => {
-                closeDetailEditors("subtask");
-                setIsSubtaskCreateOpen(true);
-              }}
-            >
-              ＋ サブタスクの追加
-            </button>
-          )}
+          <button
+            className="subtask-add-button"
+            type="button"
+            disabled={isMutating}
+            onClick={() => {
+              closeDetailEditors();
+              onRequestCreateSubtask(task.id);
+            }}
+          >
+            ＋ サブタスクの追加
+          </button>
 
           <div className="detail-subtask-list">
             {task.subtasks.length === 0 ? (
@@ -1599,17 +1492,6 @@ function toRecurrenceRuleDraft(input: DetailFormDraft) {
   return {
     frequency: input.recurrenceFrequency,
     interval: Number.isFinite(interval) ? Math.round(interval) : 0,
-  };
-}
-
-function normalizeCreateDraft(input: SubtaskCreateDraft): WorkItemDraft {
-  const dueDate = normalizeOptionalText(input.dueDate);
-  return {
-    title: input.title,
-    plannedStartDate: null,
-    dueDate,
-    dueTime: dueDate ? normalizeOptionalText(input.dueTime) : null,
-    memo: input.memo,
   };
 }
 
