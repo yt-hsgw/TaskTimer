@@ -39,7 +39,7 @@ try {
   await waitForHttp(`http://127.0.0.1:${vitePort}/`);
 
   chromeProcess = startChrome(chromePath, debugPort, userDataDir);
-  const browserWsUrl = await waitForChromeWebSocket(debugPort);
+  const browserWsUrl = await waitForChromeWebSocket(debugPort, chromeProcess);
   const client = await createCdpClient(browserWsUrl);
   const { targetId } = await client.send("Target.createTarget", {
     url: "about:blank",
