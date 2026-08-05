@@ -2443,7 +2443,7 @@ export function App() {
                   onClose={closeDetailPane}
                   onUpdateTask={handleUpdateTask}
                   onUpdateSubtask={handleUpdateSubtask}
-                  onCreateSubtask={handleCreateSubtask}
+                  onRequestCreateSubtask={handleRequestSubtaskCreate}
                   onSelectSubtask={handleSelectDetailSubtask}
                   onSelectParentTask={handleSelectParentTask}
                   onStartTimer={handleStartTimer}
@@ -2507,7 +2507,7 @@ export function App() {
                   onClose={closeDetailPane}
                   onUpdateTask={handleUpdateTask}
                   onUpdateSubtask={handleUpdateSubtask}
-                  onCreateSubtask={handleCreateSubtask}
+                  onRequestCreateSubtask={handleRequestSubtaskCreate}
                   onSelectSubtask={handleSelectDetailSubtask}
                   onSelectParentTask={handleSelectParentTask}
                   onStartTimer={handleStartTimer}
@@ -2569,7 +2569,7 @@ export function App() {
                   onClose={closeDetailPane}
                   onUpdateTask={handleUpdateTask}
                   onUpdateSubtask={handleUpdateSubtask}
-                  onCreateSubtask={handleCreateSubtask}
+                  onRequestCreateSubtask={handleRequestSubtaskCreate}
                   onSelectSubtask={handleSelectDetailSubtask}
                   onSelectParentTask={handleSelectParentTask}
                   onStartTimer={handleStartTimer}
@@ -2621,7 +2621,7 @@ export function App() {
                   onClose={closeDetailPane}
                   onUpdateTask={handleUpdateTask}
                   onUpdateSubtask={handleUpdateSubtask}
-                  onCreateSubtask={handleCreateSubtask}
+                  onRequestCreateSubtask={handleRequestSubtaskCreate}
                   onSelectSubtask={handleSelectDetailSubtask}
                   onSelectParentTask={handleSelectParentTask}
                   onStartTimer={handleStartTimer}

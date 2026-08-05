@@ -3497,13 +3497,6 @@ button {
   border-color: #c9d9d2;
 }
 
-.subtask-create-form {
-  background: #f8fafb;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 10px;
-}
-
 .subtask-add-button {
   align-items: center;
   background: transparent;
@@ -3522,12 +3515,6 @@ button {
 .subtask-add-button:hover {
   background: #f3f8f6;
   border-color: #9bc4b4;
-}
-
-.subtask-create-actions {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 1fr 1fr;
 }
 
 .detail-subtask-list {
