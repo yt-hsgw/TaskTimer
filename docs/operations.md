@@ -102,7 +102,7 @@ TaskTimerの完全復元用バックアップはSQLiteバックアップを正�
 - バックアップ/復元/エクスポートの設計は [ローカルデータのバックアップとエクスポート方針](data-backup-export.md) と [ADR 0006](adr/0006-local-backup-export-policy.md) に従う。
 - アプリ内実装では、DB書き込み中の単純ファイルコピーを避け、一貫したスナップショットを作る。
 
-`リリースビルド` ワークフローは、`app-v*` タグまたは手動実行でWindows向けartifactをビルドし、Draft Releaseへ添付する。macOS artifactは手動実行で `include_macos` を有効にした場合だけ作成する。
+`リリースビルド` ワークフローは、`app-v*` タグまたは手動実行でWindows向けartifactをビルドし、Draft Releaseへ添付する。macOS artifactは現時点の公式配布対象外とする。
 
 `Windowsインストーラー検証` ワークフローは、手動実行で公開済みReleaseまたはpre-releaseのWindows artifactをGitHub-hosted Windows runnerへ取得し、NSISのサイレントインストールとサイレントアンインストールを検証する。
 
@@ -112,7 +112,6 @@ Release workflowの権限:
 
 - workflow全体は `contents: read` を基本権限として扱う。
 - `build-release` jobだけ `contents: write` を持つ。Releaseとartifact作成に必要な最小権限として扱う。
-- macOS署名・公証用SecretsはRepository Secretsとして扱い、workflowログ、Issue、PR、Release notesには出さない。
 - Windowsコード署名を導入する場合のSecrets、workflow、確認手順は [ADR 0005](adr/0005-windows-code-signing-policy.md) に従って別Issueで設計する。証明書、秘密鍵、証明書パスワード、Azure認証情報はworkflowログ、Issue、PR、Release notesには出さない。
 
 Release workflowの制約:
@@ -120,11 +119,9 @@ Release workflowの制約:
 - Draft Releaseとして作成する。
 - 自動更新artifactは作成しない。
 - v0.1.0の主配布対象はWindowsとする。
-- macOS artifactはApple Developer Programと署名・公証Secretsの準備が完了するまで後回しにする。
+- macOS artifactは現時点の公式配布対象外とする。
 - Windowsコード署名はv0.1.xでは導入せず、未署名配布を既知制限付きで継続する。
-- macOS artifactを作成する場合はDeveloper ID署名とApple公証を行う。
-- macOS署名・公証Secretsが未設定の場合、`preflight-macos` jobで失敗させ、macOS込みmatrix buildへ進めない。
-- macOS job内でもSecrets検証を行い、matrix実行時の防御層として扱う。
+- macOS公式配布を再開する場合は、新IssueでApple署名・公証、GitHub Secrets、Gatekeeper実機確認を改めて設計する。
 - 公開前に `docs/release-checklist.md` の手動確認を完了する。
 
 Windows installer smoke workflowの権限:
@@ -181,32 +178,27 @@ Large dataset performance workflowの制約:
 - `docs/review/checklist.md` を確認する。
 - 自動テストを実行する。
 - Windowsで手動デスクトップ確認を行う。
-- macOS artifactを配布する場合はmacOSでも手動デスクトップ確認を行う。
 - アプリ実行時の外部通信がないことを確認する。
 - ユーザー内容をログへ出していないことを確認する。
 - ローカル通知挙動と通知全体ON/OFFを確認する。
 - OSスリープ/復帰後のタイマー復元、経過時間、通知重複なしを確認する。
 - Draft Releaseのartifact名、Release notes、既知制限を確認する。
-- macOS artifactを配布する場合は、macOS DMGの署名・公証・Gatekeeper確認を完了する。
 
 ## 配布形式
 
 MVPの配布形式:
 
 - Windows: `nsis`。
-- macOS: `dmg`。Apple署名・公証準備が完了したReleaseでのみ提供する。
 
 理由:
 
 - 現在のTauri設定 `src-tauri/tauri.conf.json` と一致する。
 - WindowsではNSISによりインストール/アンインストール導線を用意できる。
-- macOSでは一般的なドラッグ&ドロップ配布にできる。
 - 自動更新artifactはMVPでは作成しないため、リモート更新エンドポイントを必要としない。
 
 トレードオフ:
 
-- v0.1.0ではWindows配布を先行し、macOS利用者向けの正式artifact提供は遅れる。
-- macOS署名・公証にはApple Developer ProgramとSecrets運用が必要になる。
+- macOS利用者向けの正式artifactは現時点で提供しない。
 - Windowsコード署名はv0.1.xでは未導入のため、SmartScreenまたは組織ポリシーの警告が出る可能性がある。
 - `msi` やストア配布よりも企業端末での一括配布には弱い。
 - Windowsコード署名の判断は [ADR 0005](adr/0005-windows-code-signing-policy.md) に従う。導入する場合は別IssueでSecrets、workflow、確認手順を設計する。
@@ -218,7 +210,7 @@ MVPの配布形式:
 
 ## ローカル通知手動確認
 
-Windowsでは必ず確認する。macOS artifactを配布する場合はmacOSでも確認する。
+Windowsでは必ず確認する。
 
 1. 通知全体をOFFにする。
 2. 今日を期限にしたタスクを作成し、OS通知が送信されないことを確認する。
