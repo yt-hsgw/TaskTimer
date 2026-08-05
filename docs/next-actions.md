@@ -5,24 +5,25 @@
 v0.1.0はWindows先行の通常Releaseとして公開済みです。
 Windows実機確認、Windows runnerでのインストール検証、実行時外部通信の静的監査は完了済みです。
 
-当面はWindows利用を主軸にし、macOS配布はApple Developer ID署名とApple公証の準備ができるまで後回しにします。
+当面はWindows利用を主軸にし、macOS公式配布とApple署名・公証対応は現時点のスコープ外とします。
 
-GitHub上で継続追跡しているOpen Issue:
+2026-08-05時点でGitHub上のOpen Issueはありません。
 
-- #24: macOS署名と公証を設定する。
-- #178: 左ペインとカンバンの操作配置を整理する。
+GitHub上で継続追跡しているOpen PR:
+
+- Dependabotのnpm依存更新PR。Windows Read Model計測で失敗しているものがあるため、再実行または計測安定化を行う。
 
 ## 判断理由
 
 - Windows実機確認が完了したため、v0.1.0は検証版ではなく通常Releaseとして扱える。
 - Windowsコード署名はADR 0005に従い、v0.1.xでは未署名配布を既知制限付きで継続する。
-- macOSはユーザー要望どおり後回しにし、未署名・未公証artifactを外部利用者向けに出さない。
+- macOS版の公式配布とApple署名・公証対応は、現時点ではスコープ外とする。
 - アプリ実行時の外部通信なし、自動更新なし、ローカルSQLite保存という公開運用方針は維持する。
 
 ## トレードオフ
 
 - Windows先行Releaseにすることで外部利用者が試しやすくなる一方、Windows SmartScreenなどの未署名警告は残る。
-- macOS配布を遅らせることでGatekeeper警告を避けられる一方、macOSユーザーはv0.1.0を公式artifactとして利用できない。
+- macOS配布を現行スコープから外すことで運用負荷を下げられる一方、macOSユーザーは公式artifactを利用できない。
 - 静的監査はCIで再現しやすい一方、実行時のネットワーク挙動を完全保証するものではないため、必要に応じて実機監視を併用する。
 
 ## 代替案
@@ -33,12 +34,13 @@ macOS署名・公証とWindowsコード署名導入が整うまでv0.1.0を非�
 
 - Windows実機確認とWindows runner検証は完了しており、Windows利用者へ先に価値を届けられる。
 - コード署名未設定はRelease notesで既知制限として説明できる。
-- macOS未署名artifactを出さなければ、Apple Gatekeeper警告を外部利用者に踏ませずに済む。
+- macOS artifactを出さなければ、Apple Gatekeeper警告を外部利用者に踏ませずに済む。
 
 ## 次に着手しやすい優先順
 
-1. #178 左ペインとカンバンの操作配置を整理する。
-2. #24 macOS署名と公証を設定する。現ラベルはP1だが、Windows優先運用ではApple署名・公証準備ができるまで後回しにする。
+1. Dependabot PRのWindows Read Model計測失敗を再実行または安定化で解消する。
+2. 依存更新PRを安全にマージする。
+3. 新しいUI/UX改善要望が出た場合は、Issue化して優先度を付ける。
 
 ## 完了済み
 
@@ -125,23 +127,23 @@ macOS署名・公証とWindowsコード署名導入が整うまでv0.1.0を非�
 - #160 選択中範囲の開始予定と期限を比較する読み取り専用タイムラインを追加した。日/週/月の固定窓、日付未設定領域、既存200件ページングと詳細導線を使用する。
 - #161 詳細からタイマー/通知/リスト色編集を外し、リスト色を左ペインへ移し、左タグを非表示にする。代替導線が必要なカンバン/カレンダー/ポモドーロは #157 と同時に移動する。
 - #163 左ペインのリスト編集・削除ボタンを廃止し、件数右側の縦三点メニューへ集約した。既定リストの削除非表示、ポータル配置、外側クリックとキーボード操作を追加した。
+- #189 右ペインをインライン編集中心の詳細ビューへ再設計した。
+- #24 macOS署名と公証は、現時点ではApple署名を進めない判断に変更したためOpen残件から外した。将来macOS配布を再開する場合は新Issueで扱う。
 
 ## 実務運用時に継続確認すること
 
 1. Windows未署名artifactのOS警告をRelease notesへ既知制限として維持する。
 2. 不具合報告には、個人のタスク名、メモ本文、通知本文、SQLiteファイル、秘密情報を貼らない。
 3. 新しい外部通信、自動更新、リモートアセットを追加する場合は、ADRとRelease notesを更新して明示承認を取る。
-4. macOS artifactを配布する場合は、macOS署名・公証用GitHub Secretsを登録する。
-5. macOS artifactを配布する場合は、macOS DMGを実機で開き、Gatekeeper警告が解消されることを確認する。
+4. macOS artifactを再び配布対象にする場合は、新IssueでApple署名・公証、GitHub Secrets、Gatekeeper実機確認を設計する。
 
 ## 危険ケース
 
 - Windows通常Releaseなのに、READMEやRelease notesが公開待ちまたはpre-releaseのまま残る。
 - Windows runnerのインストール検証成功を、実機の通知、GUI、SmartScreen確認完了と誤認する。
-- macOS artifactを含める時に、macOS署名・公証Secrets未登録のままRelease workflowを実行する。
-- `npm run check:macos-signing` の失敗を無視してmacOS artifactを公開する。
+- macOS artifactを公式配布対象へ戻す判断をIssue化せず、古い手順のままRelease workflowを実行する。
 - 古いcommitで生成したRelease artifactを公開し、Release notesや手動確認結果と実artifactが食い違う。
-- Gatekeeper警告が残るDMGを外部利用者向けに公開する。
+- macOS公式配布を再開するときに、Gatekeeper警告が残るDMGを外部利用者向けに公開する。
 - Windows未署名警告をRelease notesへ書かず、利用者がインストール可否を判断できない。
 - dismiss済みglib advisoryの判断をRelease notesとADRから消し、Linux配布対象外の理由が伝わらない。
-- Issue、PR、Release notesへApple証明書、Apple ID、App用パスワード、Team ID、Windows署名用の証明書、秘密鍵、Azure認証情報、ローカルDB、個人タスク内容を貼ってしまう。
+- Issue、PR、Release notesへWindows署名用の証明書、秘密鍵、Azure認証情報、ローカルDB、個人タスク内容を貼ってしまう。
