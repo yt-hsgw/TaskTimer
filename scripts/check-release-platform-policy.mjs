@@ -7,22 +7,6 @@ const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const releaseWorkflowPath = join(rootDir, ".github", "workflows", "release.yml");
 const allowedEntries = new Map([
   ["Windows", { platform: "windows-latest", rustTarget: "", args: "" }],
-  [
-    "macOS Apple Silicon",
-    {
-      platform: "macos-latest",
-      rustTarget: "aarch64-apple-darwin",
-      args: "--target aarch64-apple-darwin",
-    },
-  ],
-  [
-    "macOS Intel",
-    {
-      platform: "macos-latest",
-      rustTarget: "x86_64-apple-darwin",
-      args: "--target x86_64-apple-darwin",
-    },
-  ],
 ]);
 
 function fail(message) {
@@ -52,10 +36,7 @@ function validateMatrices(matrices) {
   const matrixLabels = matrices
     .map((matrix) => matrix.include.map((entry) => entry.label).sort().join("|"))
     .sort();
-  const expectedLabels = [
-    "Windows",
-    "Windows|macOS Apple Silicon|macOS Intel",
-  ].sort();
+  const expectedLabels = ["Windows"];
   if (JSON.stringify(matrixLabels) !== JSON.stringify(expectedLabels)) {
     fail(`Release build matrixの構成が不正です: ${matrixLabels.join(", ")}`);
   }
@@ -80,8 +61,8 @@ try {
 
   const workflow = readFileSync(releaseWorkflowPath, "utf8");
   const matrixMatches = [...workflow.matchAll(/echo 'build_matrix=([^']+)'/g)];
-  if (matrixMatches.length !== 2) {
-    fail(`Release build matrixは2種類必要です: detected=${matrixMatches.length}`);
+  if (matrixMatches.length !== 1) {
+    fail(`Release build matrixはWindows用の1種類だけにしてください: detected=${matrixMatches.length}`);
   }
 
   const matrices = matrixMatches.map((match) => {
@@ -93,7 +74,7 @@ try {
   });
   validateMatrices(matrices);
 
-  console.log("Release artifact対象: Windows、署名・公証済みmacOSのみ");
+  console.log("Release artifact対象: Windowsのみ");
   console.log("Linuxおよび未知のartifactターゲットは含まれていません。");
 } catch (error) {
   console.error(`::error title=release platform policy failed::${error.message}`);
