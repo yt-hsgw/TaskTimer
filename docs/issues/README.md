@@ -19,7 +19,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [011 右詳細ペインを実装する](011-ui-task-detail-pane.md) / GitHub #29
 - [012 カレンダーと設定を左ナビ配下のビューへ移管する](012-ui-calendar-settings-migration.md) / GitHub #28
 - [013 タイマー一時停止/再開と繰り返し設定を設計・実装する](013-timer-recurrence-detail-extensions.md) / GitHub #30
-- [014 macOS署名と公証を設定する](014-release-macos-signing-notarization.md) / GitHub #24
+- [014 macOS署名と公証を設定する](014-release-macos-signing-notarization.md) / GitHub #24（現時点ではスコープ外としてクローズ）
 - [015 v0.1.0公開判定資料を整える](015-release-v010-readiness.md) / GitHub #20
 - [016 glib advisory監視を自動化する](016-glib-advisory-watch.md) / GitHub #22（完了）
 - [017 v0.1.0のRelease target検証を追加する](017-release-target-guard.md) / GitHub #20
@@ -82,7 +82,7 @@ GitHub上のIssueを正とし、このディレクトリは設計理由、トレ
 - [074 タスク行三点メニューとタイムライン一時非表示を整理する](074-task-row-menu-hide-timeline.md) / GitHub #188
 - [075 左ペインのブランド表示と新規リスト編集UXを整理する](075-navigation-brand-list-create.md) / GitHub #186
 - [076 ポモドーロの画面遷移、設定、完了通知を改善する](076-pomodoro-navigation-settings-notification.md) / GitHub #185
-- [077 右ペインをインライン編集中心の詳細ビューへ再設計する](077-task-detail-inline-redesign.md) / GitHub #189
+- [077 右ペインをインライン編集中心の詳細ビューへ再設計する](077-task-detail-inline-redesign.md) / GitHub #189（完了）
 
 ## 運用
 

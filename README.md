@@ -1,6 +1,6 @@
 # TaskTimer
 
-Windows/macOS向けの、オフライン前提TODO・タイマー管理デスクトップアプリです。
+Windows向けの、オフライン前提TODO・タイマー管理デスクトップアプリです。
 
 ## 画面イメージ
 
@@ -27,7 +27,6 @@ Windows/macOS向けの、オフライン前提TODO・タイマー管理デスク
 外部利用者は [GitHub Releases](https://github.com/yt-hsgw/TaskTimer/releases) から最新版を入手します。
 
 - Windows: NSISインストーラーをダウンロードします。
-- macOS: Developer ID署名・公証済みDMGが提供されているReleaseのみ利用してください。
 - 自動更新はありません。新しいバージョンはGitHub Releasesで確認してください。
 - Windows版はv0.1.xではコード署名未設定のため、Windows SmartScreenまたは組織ポリシーの警告が出る場合があります。
 
@@ -79,7 +78,7 @@ TaskTimerは、タスク、サブタスク、予定日、ローカル通知、�
 
 MVPの決定事項:
 
-- Windows/macOS向けデスクトップアプリ。
+- Windows向けデスクトップアプリ。
 - 技術構成は Tauri + React + TypeScript + SQLite。
 - アプリ全体で同時に開始できるタイマーは1件だけ。
 - 通常タイマーは開始時点の対象別時間または既定時間を使うカウントダウン型で、再起動やスリープ復帰後もSQLiteを正として完了判定する。
@@ -97,7 +96,7 @@ MVPの決定事項:
 
 ## 現在の状態
 
-MVPの主要機能は実装済みです。v0.1.0はWindows版を先行して通常Releaseとして公開済みで、macOS版はApple署名・公証準備が完了したReleaseで提供します。業務利用前には、[Release notes](https://github.com/yt-hsgw/TaskTimer/releases/tag/app-v0.1.0) と既知制限を確認してください。
+MVPの主要機能は実装済みです。v0.1.0はWindows版を通常Releaseとして公開済みです。現時点でmacOS版の公式配布とApple署名・公証対応は行いません。業務利用前には、[Release notes](https://github.com/yt-hsgw/TaskTimer/releases/tag/app-v0.1.0) と既知制限を確認してください。
 
 ## ドキュメント
 
@@ -186,16 +185,15 @@ README画像の再生成にはChromeが必要です。自動検出できない�
 
 GitHub Actionsの `リポジトリチェック` は、PRとブランチpushで基本チェックを実行します。
 
-GitHub Actionsの `リリースビルド` は、`app-v*` タグまたは手動実行の既定ではWindows向けartifactだけをビルドし、Draft Releaseへ添付します。macOS artifactは、手動実行で `include_macos` を有効にした場合だけDeveloper ID署名とApple公証を行ったうえで作成します。
+GitHub Actionsの `リリースビルド` は、`app-v*` タグまたは手動実行の既定ではWindows向けartifactだけをビルドし、Draft Releaseへ添付します。現時点でmacOS artifactは公式配布対象外です。
 
 配布形式:
 
 - Windows: `nsis`
-- macOS: `dmg`。Apple署名・公証準備が完了したReleaseでのみ提供します。
 
-リリース前には [リリース前チェックリスト](docs/release-checklist.md) を使い、Windowsの手動確認、通知権限、オフライン起動、外部通信なしの方針を確認します。macOS artifactを配布する場合はmacOSの署名・公証・Gatekeeper確認も必須です。Windows実機確認を完了できない状態では通常Releaseとして公開せず、Release notesに未確認範囲と配布判断を明記します。
+リリース前には [リリース前チェックリスト](docs/release-checklist.md) を使い、Windowsの手動確認、通知権限、オフライン起動、外部通信なしの方針を確認します。Windows実機確認を完了できない状態では通常Releaseとして公開せず、Release notesに未確認範囲と配布判断を明記します。
 
-Windowsコード署名は [ADR 0005](docs/adr/0005-windows-code-signing-policy.md) に従い、v0.1.xでは未署名配布を既知制限付きで継続します。macOS署名・公証は後回しにできますが、macOS artifactを配布する場合はApple Developer Programの証明書とGitHub Secretsが必要です。証明書、秘密鍵、Apple ID、App用パスワード、Team IDはリポジトリ、Issue、PR、Release notesに書かないでください。
+Windowsコード署名は [ADR 0005](docs/adr/0005-windows-code-signing-policy.md) に従い、v0.1.xでは未署名配布を既知制限付きで継続します。証明書、秘密鍵、証明書パスワード、Azure認証情報はリポジトリ、Issue、PR、Release notesに書かないでください。
 
 ## ライセンス
 
