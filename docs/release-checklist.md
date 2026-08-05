@@ -2,7 +2,7 @@
 
 ## 目的
 
-Windows向けにTaskTimerを配布する前に、実務運用で必要な品質、セキュリティ、オフライン方針を確認する。macOS配布はApple署名・公証準備が完了したReleaseでだけ対象に含める。
+Windows向けにTaskTimerを配布する前に、実務運用で必要な品質、セキュリティ、オフライン方針を確認する。現時点でmacOS artifactは公式配布対象外とする。
 
 このチェックリストは、GitHub Releaseを作成する前の手動ゲートとして使う。GitHub Actionsは基本的なビルドとテストを確認するが、OS通知やインストーラー挙動はOSごとの手動確認を必須とする。
 
@@ -11,15 +11,12 @@ Windows向けにTaskTimerを配布する前に、実務運用で必要な品質�
 - バージョンは `src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`package.json` の整合を確認する。
 - 配布形式はTauri設定に合わせる。
 - Windows: `nsis`。
-- macOS: `dmg`。Apple署名・公証準備が完了したReleaseでのみ対象に含める。
 - GitHub Release tagは `app-vX.Y.Z` 形式にする。
 - Release tagは意図したリリース対象commitを指している必要がある。
 - GitHub Actionsの `リリースビルド` でDraft Releaseを作成する。
 - `リリースビルド` は既定でWindows artifactだけを作成する。
-- macOS artifactを作成する場合は、手動実行で `include_macos` を有効にする。
 - `npm run check:release-platform-policy` が成功し、Linuxまたは未知のartifactターゲットがない。
 - 自動更新用artifactはMVPでは作成しない。`createUpdaterArtifacts` は `false` を維持する。
-- macOS artifactを配布する場合はDeveloper ID署名とApple公証を必須にする。
 - Windowsコード署名はv0.1.xでは未導入のため、Release notesに既知制限として記載する。判断は [ADR 0005](adr/0005-windows-code-signing-policy.md) に従う。
 
 ## 事前条件
@@ -33,7 +30,6 @@ Windows向けにTaskTimerを配布する前に、実務運用で必要な品質�
 - リリースノートに既知制限、手動確認結果、外部通信方針を記載できる。
 - 未解決またはdismiss済みのDependabot alertにリスク受容がある場合は、影響範囲、配布対象、ADRをRelease notesに記載できる。
 - Windows artifactを実機でインストール確認できる環境がある。
-- macOS artifactを配布する場合は、macOS署名・公証用GitHub Secretsを登録済みである。
 - Secrets値をIssue、PR、Release notes、ログに貼っていない。
 
 ## Windowsコード署名方針
@@ -57,36 +53,9 @@ npm run check:release-target -- <version> origin/main
 
 既存Draft Releaseが古いcommitのartifactを持っている場合は、Draft Releaseを公開せず、Release notesと手動確認結果を引き継いだうえでDraft Releaseとtagを作り直す。
 
-## macOS署名・公証Secrets
+## macOS公式配布
 
-このセクションはmacOS artifactを配布対象に含める場合だけ必須とする。WindowsのみのReleaseではApple準備を後回しにできる。
-
-GitHub Repository Secretsに以下を登録する。
-
-- `APPLE_CERTIFICATE`: Developer ID Application証明書を `.p12` でexportし、base64化した値。
-- `APPLE_CERTIFICATE_PASSWORD`: `.p12` export時のパスワード。
-- `APPLE_SIGNING_IDENTITY`: `security find-identity -v -p codesigning` で確認した署名ID。
-- `APPLE_ID`: 公証に使うApple ID。
-- `APPLE_PASSWORD`: Apple IDのApp用パスワード。
-- `APPLE_TEAM_ID`: Apple Developer Team ID。
-
-Secrets値はローカルファイル、Issue、PR、Release notesに保存しない。
-
-macOS込みRelease workflow実行前にpreflightを実行する。
-
-```bash
-npm run check:macos-signing
-```
-
-このコマンドはSecrets値を読み取らず、登録済みSecret名とTauri設定、Entitlements、macOS検証ツールの存在だけを確認する。失敗した場合はmacOS artifactを配布しない。
-
-通常CIではSecretsを必要としない設定検査を実行する。
-
-```bash
-npm run check:macos-signing-config
-```
-
-このコマンドはTauri設定、空のEntitlements、Release workflowの署名・公証経路だけを確認する。Secretsの登録状態と実値の妥当性、成果物の署名状態は保証しない。
+macOS artifactは現時点の公式配布対象外とする。将来macOS配布を再開する場合は、新IssueでApple Developer Program、GitHub Secrets、署名・公証、Gatekeeper実機確認を改めて設計する。
 
 ## 自動チェック
 
@@ -101,9 +70,6 @@ GitHub Actionsで以下が成功していることを確認する。
 - npm audit。
 - TypeScript/Vite build。
 - 公開済みReleaseまたはpre-releaseに対するWindows runnerでのインストーラー最低限検証。
-- macOS artifactを含める場合のmacOS署名・公証Secrets検証。
-- Secretsに依存しないmacOS署名・公証設定検査。
-- macOS artifactを含める場合の `.app` と `.dmg` の署名・公証成果物検証。
 - `.env` と `.env.*` の誤コミット検出。
 - DB、鍵、証明書、ログ、個人環境パス、メールアドレスの誤コミット検出。
 - `git diff --check`。
@@ -126,7 +92,7 @@ git diff --check
 
 ## 手動デスクトップ確認
 
-Windowsでは必ず確認する。macOSはartifactを配布対象に含める場合だけ確認する。
+Windowsでは必ず確認する。
 
 - インターネット接続なしでアプリが起動する。
 - タスクを作成、完了、削除できる。
@@ -154,12 +120,6 @@ Windowsでは必ず確認する。macOSはartifactを配布対象に含める場
 - OSスリープ/復帰後にタイマーと通知状態が破綻しない。
 - 期限到来通知が復帰または再フォーカス後に重複送信されない。
 
-macOS artifactを配布する場合だけ確認する。
-
-- macOS DMGを開いたときに「Appleが検証できません」警告が出ない。
-- macOSで `spctl --assess --type execute --verbose /Applications/TaskTimer.app` が成功する。
-- macOSで `xcrun stapler validate /Applications/TaskTimer.app` が成功する。
-
 ## セキュリティ確認
 
 - アプリ実行時の外部通信を追加していない。
@@ -172,27 +132,23 @@ macOS artifactを配布する場合だけ確認する。
 - メモ本文をHTMLとして描画していない。
 - 秘密情報、DBファイル、個人データをRelease artifactやIssue/PRに添付していない。
 - SQLiteバックアップ、JSONエクスポート、CSVエクスポートをRelease artifactやIssue/PRに添付していない。
-- Apple証明書、Apple ID、App用パスワード、Team IDをログやGitHub本文へ出していない。
 - Windows署名用の証明書、秘密鍵、証明書パスワード、Azure認証情報をログやGitHub本文へ出していない。
 - Git履歴の著者情報を公開してよいか確認済みである。
 
 ## リリース作成手順
 
 1. `main` のGitHub Actionsが成功していることを確認する。
-2. Windowsの手動確認結果をリリースIssueへ記録する。macOS artifactを配布する場合はmacOSの手動確認結果も記録する。
+2. Windowsの手動確認結果をリリースIssueへ記録する。
 3. `app-vX.Y.Z` タグを `main` の対象コミットへ作成してpushする。またはGitHub Actionsから `リリースビルド` を手動実行する。
 4. Draft ReleaseへWindows artifactが添付されることを確認する。
 5. `npm run check:release-target -- <version> origin/main` でtagと公開対象commitが一致することを確認する。
 6. Windows実機確認を完了できない場合は通常Releaseとして公開せず、Release notesに未確認範囲と配布判断を明記する。
 7. `Windowsインストーラー検証` workflowを対象tagで手動実行し、Windows runner上のサイレントインストール/アンインストールが成功することを確認する。
-8. macOS artifactを配布する場合は、手動実行で `include_macos` を有効にし、`npm run check:macos-signing` と `preflight-macos` が成功することを確認する。
-9. macOS artifactを配布する場合は、macOSジョブで署名・公証が成功していることを確認する。
-10. macOS artifactを配布する場合は、Apple SiliconとIntelの両jobで `macOS署名・公証成果物を検証` が成功していることを確認する。
-11. Windowsでは生成された `nsis` artifactを手動でインストール確認する。macOS artifactを配布する場合は生成された `dmg` も手動確認する。
-12. `docs/releases/<version>.md` の草案をもとに、Release notesへ変更点、既知制限、手動確認結果、外部通信なしの方針を記載する。
-13. Windowsコード署名未設定によるSmartScreenまたは組織ポリシーの警告可能性を既知制限に記載する。
-14. 未解決またはdismiss済みのDependabot alertにリスク受容がある場合は、影響範囲、配布対象、ADRを既知制限に記載する。
-15. 通常Releaseとして扱える確認が完了したら、pre-releaseを解除して公開する。
+8. Windowsでは生成された `nsis` artifactを手動でインストール確認する。
+9. `docs/releases/<version>.md` の草案をもとに、Release notesへ変更点、既知制限、手動確認結果、外部通信なしの方針を記載する。
+10. Windowsコード署名未設定によるSmartScreenまたは組織ポリシーの警告可能性を既知制限に記載する。
+11. 未解決またはdismiss済みのDependabot alertにリスク受容がある場合は、影響範囲、配布対象、ADRを既知制限に記載する。
+12. 通常Releaseとして扱える確認が完了したら、pre-releaseを解除して公開する。
 
 ローカルでartifactを作る場合:
 
@@ -208,14 +164,11 @@ npm run tauri:build
 
 ## 破綻シナリオ
 
-- CIは通るが、WindowsまたはmacOS固有の通知権限で通知が届かない。
+- CIは通るが、Windows固有の通知権限で通知が届かない。
 - インストール済みアプリでは通知表示名やアイコンが開発時と異なる。
-- WindowsだけのReleaseなのに、Release notesがmacOS artifact提供済みであるように見える。
+- Windows Releaseなのに、Release notesがmacOS artifact提供済みであるように見える。
 - Windows runnerのインストール検証成功を、通知やGUIを含む実機確認完了と誤認する。
-- macOS artifactを含める時に、macOS署名・公証Secretsが未設定でRelease workflowが失敗する。
-- macOS署名・公証preflightの失敗を無視してmacOS artifactを公開する。
-- macOS成果物検証stepの失敗を無視してDraft Releaseを公開する。
-- 公証が失敗したDMGを公開してしまい、Gatekeeper警告により業務利用者へ配布できない。
+- macOS公式配布を再開する判断をIssue化せず、古い署名・公証手順を誤用する。
 - Windows未署名artifactがOSセキュリティ警告により業務利用者へ配布しにくい。
 - 署名済みartifactならSmartScreen警告が必ず消えると誤説明する。
 - OS復帰または再フォーカス時に同じ期限通知が重複送信される。
