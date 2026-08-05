@@ -140,22 +140,35 @@ export async function waitForExpression(
   );
 }
 
-export async function waitForChromeWebSocket(port) {
+export async function waitForChromeWebSocket(port, chromeProcess) {
   const endpoint = `http://127.0.0.1:${port}/json/version`;
-  const deadline = Date.now() + 10000;
+  const timeoutMs = Number.parseInt(
+    process.env.HEADLESS_CHROME_STARTUP_TIMEOUT_MS ?? "30000",
+    10,
+  );
+  const deadline = Date.now() + Math.max(timeoutMs, 10000);
+  let lastError;
   while (Date.now() < deadline) {
+    if (chromeProcess?.exitCode !== null || chromeProcess?.signalCode !== null) {
+      throw new Error(
+        `Chrome exited before DevTools became available. exitCode=${String(chromeProcess.exitCode)} signal=${String(chromeProcess.signalCode)}`,
+      );
+    }
     try {
       const response = await fetch(endpoint);
       if (response.ok) {
         const version = await response.json();
         return version.webSocketDebuggerUrl;
       }
-    } catch {
+    } catch (error) {
+      lastError = error;
       // Keep polling until Chrome exposes the debugging endpoint.
     }
     await sleep(200);
   }
-  throw new Error("Chrome DevTools endpoint did not become available.");
+  throw new Error(
+    `Chrome DevTools endpoint did not become available within ${Math.max(timeoutMs, 10000)}ms. ${lastError ?? ""}`,
+  );
 }
 
 export async function waitForHttp(url) {
