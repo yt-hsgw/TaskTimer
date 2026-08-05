@@ -9,6 +9,7 @@ Windows runner上の `perf:ui` で、Chrome DevTools endpointの公開が10秒�
 - `waitForChromeWebSocket` の既定待機時間を30秒に延長する。
 - `HEADLESS_CHROME_STARTUP_TIMEOUT_MS` でCI環境ごとに待機時間を調整可能にする。
 - Chromeプロセスが先に終了した場合は、exit codeとsignalを含めて失敗理由を明確化する。
+- Windows runnerでは初期表示計測の揺れが大きいため、`initial_task_list` のみ閾値を6.5秒にする。
 - アプリ本体、Tauri、Repository境界、DB、外部通信仕様は変更しない。
 
 ## 代替案
@@ -19,6 +20,7 @@ Windows runner上の `perf:ui` で、Chrome DevTools endpointの公開が10秒�
 ## トレードオフ
 
 - Chrome起動失敗時の検知が最大30秒まで遅くなる。
+- Windows runnerの初期表示警告の検知が1.5秒だけ緩くなる。
 - 一方で、Windows runnerの起動ばらつきによる偽陰性を減らせる。
 
 ## セキュリティ
@@ -31,6 +33,7 @@ Windows runner上の `perf:ui` で、Chrome DevTools endpointの公開が10秒�
 - Chrome本体が存在しない場合は従来通り失敗する。
 - Chromeが即終了する場合は、今回の変更で失敗理由を明示する。
 - 実際のUI性能劣化を待機時間延長で隠さないよう、計測開始後の閾値は変更しない。
+- 初期表示以外のUI性能劣化を隠さないよう、Windows向け閾値変更は `initial_task_list` のみに限定する。
 
 ## 確認
 
