@@ -2,6 +2,8 @@
 
 GitHub Issue: #24
 
+Status: 2026-08-05にクローズ。現時点ではApple署名・公証を進めず、macOS公式配布もスコープ外とする。将来macOS配布を再開する場合は、新しいIssueでApple Developer Program、GitHub Secrets、署名・公証、Gatekeeper実機確認を改めて設計する。
+
 ## 目的
 
 GitHub Releasesから配布するmacOS DMGをDeveloper ID署名とApple公証済みにし、外部利用者がGatekeeper警告で起動を阻まれにくい状態にする。
