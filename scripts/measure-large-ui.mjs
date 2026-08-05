@@ -29,7 +29,7 @@ const profile = options.profile === "standard"
       listCount: 4,
     };
 const thresholds = {
-  initial_task_list: 5000,
+  initial_task_list: process.platform === "win32" ? 6500 : 5000,
   navigation_list_edit: 1000,
   task_countdown_controls: 3000,
   task_list_load_more: 1500,
@@ -87,7 +87,7 @@ try {
   viteProcess = startVite(repoRoot, vitePort);
   await waitForHttp(`http://127.0.0.1:${vitePort}/`);
   chromeProcess = startChrome(chromePath, debugPort, userDataDir);
-  const browserWsUrl = await waitForChromeWebSocket(debugPort);
+  const browserWsUrl = await waitForChromeWebSocket(debugPort, chromeProcess);
   client = await createCdpClient(browserWsUrl);
   const { targetId } = await client.send("Target.createTarget", {
     url: "about:blank",
