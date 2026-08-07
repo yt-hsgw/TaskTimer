@@ -85,6 +85,7 @@ jobs:
           test -f docs/mvp-spec.md
           test -f docs/handoff/tasktimer-blueprint.html
           test -f docs/handoff/tasktimer-structure.json
+          test -f docs/handoff/tasktimer-kdoc.md
           test -f docs/architecture.md
           test -f docs/domain-model.md
           test -f docs/database-schema.sql

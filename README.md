@@ -103,6 +103,7 @@ MVPの主要機能は実装済みです。v0.1.0はWindows版を通常Releaseと
 - [MVP仕様](docs/mvp-spec.md)
 - [AI引き継ぎ設計図 HTML](docs/handoff/tasktimer-blueprint.html)
 - [AI引き継ぎ構造 JSON](docs/handoff/tasktimer-structure.json)
+- [AI引き継ぎKDoc風リファレンス](docs/handoff/tasktimer-kdoc.md)
 - [アーキテクチャ](docs/architecture.md)
 - [ドメインモデル](docs/domain-model.md)
 - [データベーススキーマ](docs/database-schema.sql)

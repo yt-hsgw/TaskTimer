@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "documentType": "ai_handoff_structure",
-  "generatedAt": "2026-08-07",
+  "generatedAt": "2026-08-08",
   "language": "ja-JP",
   "project": {
     "name": "TaskTimer",
@@ -16,9 +16,12 @@
   "handoff": {
     "humanBlueprint": "docs/handoff/tasktimer-blueprint.html",
     "machineStructure": "docs/handoff/tasktimer-structure.json",
+    "kdocStyleReference": "docs/handoff/tasktimer-kdoc.md",
     "sourceOfTruthOrder": [
       "AGENTS.md",
       "docs/mvp-spec.md",
+      "docs/handoff/tasktimer-structure.json",
+      "docs/handoff/tasktimer-kdoc.md",
       "docs/architecture.md",
       "docs/domain-model.md",
       "docs/ui-ux-redesign.md",
