@@ -1,0 +1,558 @@
+{
+  "schemaVersion": "1.0.0",
+  "documentType": "ai_handoff_structure",
+  "generatedAt": "2026-08-07",
+  "language": "ja-JP",
+  "project": {
+    "name": "TaskTimer",
+    "repository": "https://github.com/yt-hsgw/TaskTimer",
+    "productType": "offline_first_desktop_task_timer",
+    "summary": "Windows/macOS共通を想定したTauri + ReactのオフラインTODO・タイマー管理デスクトップアプリ。現行運用はWindows優先。",
+    "runtimeCommunicationPolicy": "アプリ実行時の外部通信を追加しない",
+    "primaryDistributionTarget": "Windows",
+    "currentVersion": "0.1.0",
+    "license": "MIT"
+  },
+  "handoff": {
+    "humanBlueprint": "docs/handoff/tasktimer-blueprint.html",
+    "machineStructure": "docs/handoff/tasktimer-structure.json",
+    "sourceOfTruthOrder": [
+      "AGENTS.md",
+      "docs/mvp-spec.md",
+      "docs/architecture.md",
+      "docs/domain-model.md",
+      "docs/ui-ux-redesign.md",
+      "docs/database-schema.sql",
+      "src-tauri/migrations/0001_initial.sql",
+      "src/presentation/App.tsx",
+      "src-tauri/src/application/usecases.rs"
+    ],
+    "intendedNextAiUsage": [
+      "最初にこのJSONを読み、作業対象のレイヤーと制約を把握する",
+      "仕様と設計を更新してから実装する",
+      "変更前にdocs/review/checklist.mdを確認する",
+      "外部通信、秘密情報、ユーザー本文ログ出力を増やさない"
+    ]
+  },
+  "architecture": {
+    "style": "Clean Architecture with DDD concepts",
+    "dependencyRule": "DomainはReact、Tauri、SQLite、OS APIに依存しない。Presentationはトランザクション挙動を決めない。",
+    "layers": [
+      {
+        "name": "Domain",
+        "responsibility": "業務ルール、状態遷移、日付検証、単一アクティブタイマー制約",
+        "frontendPaths": [
+          "src/domain/task",
+          "src/domain/timer",
+          "src/domain/notification",
+          "src/domain/recurrence"
+        ],
+        "backendPaths": [
+          "src-tauri/src/domain"
+        ],
+        "mustNotDependOn": [
+          "React",
+          "Tauri",
+          "SQLite",
+          "OS通知API",
+          "ファイルシステムAPI"
+        ]
+      },
+      {
+        "name": "Application",
+        "responsibility": "Use Case、DTO、Repository port、トランザクション境界、DBコミット後副作用の調整",
+        "frontendPaths": [
+          "src/application/usecases/contracts.ts"
+        ],
+        "backendPaths": [
+          "src-tauri/src/application/usecases.rs",
+          "src-tauri/src/application/commands.rs",
+          "src-tauri/src/application/repositories.rs",
+          "src-tauri/src/application/dto.rs"
+        ]
+      },
+      {
+        "name": "Infrastructure",
+        "responsibility": "SQLite実装、マイグレーション、OS通知、Clock、Tauri gateway",
+        "frontendPaths": [
+          "src/infrastructure/tauri/gateway.ts"
+        ],
+        "backendPaths": [
+          "src-tauri/src/infrastructure/sqlite.rs",
+          "src-tauri/src/infrastructure/notification.rs",
+          "src-tauri/src/infrastructure/clock.rs",
+          "src-tauri/migrations/0001_initial.sql"
+        ]
+      },
+      {
+        "name": "Presentation",
+        "responsibility": "React UI、表示状態、ユーザー操作、Read Model更新範囲の制御",
+        "frontendPaths": [
+          "src/presentation/App.tsx",
+          "src/presentation/components",
+          "src/presentation/styles/global.css"
+        ],
+        "mustNotDo": [
+          "DBトランザクション仕様を決める",
+          "ユーザー本文をHTMLとして描画する",
+          "外部通信を追加する"
+        ]
+      }
+    ],
+    "mainFlow": [
+      "React UI",
+      "Tauri gateway",
+      "Tauri command",
+      "Application Use Case",
+      "Domain policy/model",
+      "Repository port",
+      "SQLite/OS adapter"
+    ]
+  },
+  "technologyStack": {
+    "frontend": {
+      "language": "TypeScript",
+      "framework": "React",
+      "bundler": "Vite",
+      "icons": "lucide-react",
+      "dragAndDrop": "@dnd-kit/core, @dnd-kit/sortable"
+    },
+    "desktop": {
+      "framework": "Tauri 2",
+      "window": {
+        "title": "TaskTimer",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 900,
+        "minHeight": 620
+      }
+    },
+    "backend": {
+      "language": "Rust",
+      "database": "SQLite via rusqlite bundled",
+      "notifications": "tauri-plugin-notification plus Windows native notification PoC"
+    },
+    "ci": {
+      "node": 22,
+      "rust": "stable",
+      "primaryWorkflows": [
+        ".github/workflows/repository-check.yml",
+        ".github/workflows/performance-large-dataset.yml",
+        ".github/workflows/windows-resume-regression.yml",
+        ".github/workflows/release.yml"
+      ]
+    }
+  },
+  "productCapabilities": [
+    {
+      "area": "Tasks",
+      "capabilities": [
+        "親タスク作成、編集、削除、完了、未完了戻し",
+        "サブタスク作成、編集、削除、完了、未完了戻し",
+        "お気に入り",
+        "カスタムリスト",
+        "タグ",
+        "メモ",
+        "期限日と期限時刻",
+        "予定期間",
+        "タスク表示色"
+      ]
+    },
+    {
+      "area": "Timer",
+      "capabilities": [
+        "通常タイマー",
+        "タスク/サブタスク別の目標時間",
+        "開始、一時停止、再開、終了",
+        "アプリ全体で同時に1件だけアクティブ",
+        "完了時通知"
+      ]
+    },
+    {
+      "area": "Pomodoro",
+      "capabilities": [
+        "独立ポモドーロ",
+        "作業、短休憩、長休憩",
+        "円形残量ディスク",
+        "作業完了、休憩開始、休憩完了、スキップ、終了",
+        "設定画面の既定時間"
+      ]
+    },
+    {
+      "area": "Calendar",
+      "capabilities": [
+        "週/日/月表示",
+        "Googleカレンダー型の上部予定行と時間グリッド",
+        "D&Dによる予定移動",
+        "開始端/終了端リサイズ",
+        "空き時間ドラッグ作成",
+        "日時未設定タスクのD&D割り当て",
+        "重複予定のレーン分割",
+        "複数日予定の連続バー"
+      ]
+    },
+    {
+      "area": "Settings",
+      "capabilities": [
+        "通知ON/OFF",
+        "通知表示タイプ",
+        "JSON/CSVエクスポート",
+        "ポモドーロ既定値",
+        "通常タイマー既定時間"
+      ]
+    }
+  ],
+  "domainModel": {
+    "aggregateRoots": [
+      "Task",
+      "TaskList",
+      "BoardColumn",
+      "Tag",
+      "TimerSession",
+      "PomodoroSession",
+      "NotificationRule",
+      "UiPreference"
+    ],
+    "importantInvariants": [
+      "同時に開始できる通常タイマーは1件だけ",
+      "アクティブ通常タイマーとアクティブポモドーロは同時に存在させない",
+      "完了済みタスク/サブタスクはタイマー開始不可",
+      "親タスク完了時、未完了サブタスクがある場合は確認済みフラグが必要",
+      "タスク削除は子サブタスク、タイマー履歴、通知ルールをソフト削除する",
+      "カスタムリスト削除時、所属タスクは初期リストへ移動する",
+      "初期リストは名称変更と削除不可",
+      "アクティブなリストは初期リストを含めて最大10件",
+      "予定期間変更は期限通知を変更しない",
+      "通知送信はDBコミット後の副作用として扱う"
+    ],
+    "tables": [
+      "task_lists",
+      "board_columns",
+      "tags",
+      "tasks",
+      "task_tags",
+      "subtasks",
+      "timer_sessions",
+      "timer_pauses",
+      "pomodoro_settings",
+      "pomodoro_sessions",
+      "notification_preferences",
+      "notification_rules",
+      "notification_delivery_attempts",
+      "notification_os_registrations",
+      "recurrence_rules",
+      "ui_preferences",
+      "task_timer_settings"
+    ],
+    "scheduleFields": {
+      "meaning": "予定期間は期限とは別物。カレンダー移動/リサイズはscheduled_*を更新し、due_*と通知ルールは変更しない。",
+      "taskFields": [
+        "scheduled_start_date",
+        "scheduled_start_time",
+        "scheduled_end_date",
+        "scheduled_end_time",
+        "scheduled_is_all_day"
+      ],
+      "subtaskFields": [
+        "scheduled_start_date",
+        "scheduled_start_time",
+        "scheduled_end_date",
+        "scheduled_end_time",
+        "scheduled_is_all_day"
+      ]
+    }
+  },
+  "presentation": {
+    "appShell": {
+      "stateOwner": "src/presentation/App.tsx",
+      "responsibilities": [
+        "左ペイン開閉",
+        "アクティブビュー",
+        "中央ビュー表示モード",
+        "タスクページRead Model",
+        "カレンダーRead Model",
+        "アクティブタイマー/ポモドーロ",
+        "通知同期",
+        "共通タスク作成ダイアログ",
+        "右詳細ペイン表示"
+      ],
+      "refreshDesign": "MutationごとにReadModelRefreshPlanを指定し、全体再描画や不要なローディング戻りを避ける"
+    },
+    "views": [
+      {
+        "name": "List",
+        "component": "src/presentation/components/TaskPanel.tsx",
+        "entry": "左ペインの今日/お気に入り/リスト、中央表示切替のリスト",
+        "mainActions": [
+          "タスク追加",
+          "完了切替",
+          "お気に入り切替",
+          "行選択で詳細表示",
+          "サブタスク展開",
+          "行メニュー操作"
+        ]
+      },
+      {
+        "name": "Kanban",
+        "component": "src/presentation/components/KanbanBoard.tsx",
+        "entry": "中央表示切替のかんばん",
+        "mainActions": [
+          "列追加",
+          "列名編集",
+          "列D&D並べ替え",
+          "タスクD&D状態変更",
+          "列内タスク追加",
+          "完了セクション表示"
+        ]
+      },
+      {
+        "name": "Calendar",
+        "component": "src/presentation/components/WeekCalendar.tsx",
+        "entry": "中央表示切替のカレンダー",
+        "mainActions": [
+          "週/日/月切替",
+          "ドラッグ範囲作成",
+          "予定移動",
+          "予定リサイズ",
+          "未設定タスク割り当て",
+          "他N件ポップアップ"
+        ]
+      },
+      {
+        "name": "Pomodoro",
+        "component": "src/presentation/components/PomodoroPanel.tsx",
+        "entry": "画面右上のポモドーロアイコン",
+        "mainActions": [
+          "開始",
+          "一時停止",
+          "再開",
+          "作業完了",
+          "休憩開始",
+          "休憩完了",
+          "スキップ",
+          "終了"
+        ]
+      },
+      {
+        "name": "Settings",
+        "component": "src/presentation/components/SettingsPanel.tsx",
+        "entry": "左ペイン最下部の設定",
+        "mainActions": [
+          "通知設定",
+          "エクスポート",
+          "ポモドーロ設定",
+          "通常タイマー設定"
+        ]
+      }
+    ],
+    "dialogsAndOverlays": [
+      {
+        "name": "TaskCreateDialog",
+        "path": "src/presentation/components/TaskCreateDialog.tsx",
+        "role": "通常タスク追加、今日ビュー追加、かんばん列内追加、カレンダー範囲作成の共通ダイアログ"
+      },
+      {
+        "name": "TaskDetailPane",
+        "path": "src/presentation/components/TaskDetailPane.tsx",
+        "role": "中央ペイン上部レイヤーとして表示するタスク/サブタスク詳細"
+      },
+      {
+        "name": "ScheduleAssignmentDialog",
+        "path": "src/presentation/components/ScheduleAssignmentDialog.tsx",
+        "role": "日時未設定タスクをカレンダー/かんばん/タイムラインから予定割り当てする"
+      },
+      {
+        "name": "GlobalSearch",
+        "path": "src/presentation/components/GlobalSearch.tsx",
+        "role": "タスク名、サブタスク名、メモ、タグの検索"
+      }
+    ]
+  },
+  "applicationCommands": {
+    "queryCommands": [
+      "health_check",
+      "list_calendar_items",
+      "list_week_calendar_items",
+      "list_tasks",
+      "list_task_page",
+      "get_task_detail",
+      "search_work_items",
+      "list_task_lists",
+      "list_board_columns",
+      "list_tags",
+      "list_task_rows",
+      "list_archived_task_rows",
+      "get_active_timer",
+      "get_task_timer_settings",
+      "get_pomodoro_settings",
+      "get_active_pomodoro",
+      "get_notification_display_mode",
+      "get_notifications_enabled",
+      "get_next_pending_notification",
+      "get_ui_preferences",
+      "list_notification_failure_history"
+    ],
+    "mutationCommands": [
+      "create_task",
+      "create_task_in_board_column",
+      "create_scheduled_task",
+      "create_task_list",
+      "update_task_list",
+      "delete_task_list",
+      "create_board_column",
+      "update_board_column",
+      "reorder_board_columns",
+      "delete_board_column",
+      "move_task_to_board_column",
+      "create_tag",
+      "update_tag",
+      "delete_tag",
+      "attach_tag_to_task",
+      "detach_tag_from_task",
+      "create_subtask",
+      "update_task",
+      "update_subtask",
+      "reorder_task_within_list",
+      "resize_scheduled_work_item",
+      "assign_work_schedule",
+      "move_scheduled_work_item",
+      "start_timer",
+      "start_standalone_pomodoro",
+      "pause_pomodoro",
+      "resume_pomodoro",
+      "complete_pomodoro_work_phase",
+      "start_pomodoro_break",
+      "skip_pomodoro_break",
+      "complete_pomodoro_break",
+      "cancel_pomodoro",
+      "pause_active_timer",
+      "resume_active_timer",
+      "stop_active_timer",
+      "complete_task",
+      "update_task_status",
+      "reopen_task",
+      "complete_subtask",
+      "reopen_subtask",
+      "toggle_task_favorite",
+      "archive_task",
+      "restore_archived_task",
+      "delete_task",
+      "delete_completed_tasks_in_board_column",
+      "delete_subtask",
+      "update_notification_display_mode",
+      "update_notifications_enabled",
+      "dispatch_due_notifications",
+      "sync_notifications",
+      "process_notification_os_registrations",
+      "sync_expired_task_countdown",
+      "sync_expired_pomodoro",
+      "create_sqlite_backup",
+      "restore_sqlite_backup",
+      "create_json_export",
+      "create_csv_export",
+      "update_ui_preferences",
+      "update_task_timer_settings",
+      "update_pomodoro_settings"
+    ]
+  },
+  "securityAndPrivacy": {
+    "rules": [
+      "外部通信を追加しない",
+      "秘密情報をコード、Issue、PR、Release notes、Actionsログへ書かない",
+      "ユーザーのタスク名、メモ、通知本文をログへ出さない",
+      "ユーザー本文をHTMLとして描画しない",
+      "Tauri権限を増やす場合は理由を設計資料へ記録する",
+      "通知本文は表示モードに従い、genericではタイトルやメモを含めない"
+    ],
+    "runtimeAuditScript": "npm run audit:runtime-privacy",
+    "currentCsp": "default-src 'self'; img-src 'self' asset:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+  },
+  "releaseAndOperations": {
+    "currentPolicy": [
+      "Windows先行",
+      "v0.1.xではWindowsコード署名未設定を既知制限として扱う",
+      "自動更新なし",
+      "Linux配布なし",
+      "macOS公式配布とApple署名・公証は現時点では優先外"
+    ],
+    "releaseChecklist": "docs/release-checklist.md",
+    "publicReadiness": "docs/public-readiness.md",
+    "windowsCodeSigningAdr": "docs/adr/0005-windows-code-signing-policy.md"
+  },
+  "qualityGates": {
+    "localRecommended": [
+      "npm ci",
+      "sqlite3 :memory: \".read docs/database-schema.sql\"",
+      "sqlite3 :memory: \".read src-tauri/migrations/0001_initial.sql\"",
+      "cargo fmt --manifest-path src-tauri/Cargo.toml -- --check",
+      "cargo test --manifest-path src-tauri/Cargo.toml",
+      "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+      "npm run build",
+      "npm run audit:runtime-privacy",
+      "git diff --check"
+    ],
+    "performance": [
+      "npm run perf:seed -- --force",
+      "npm run perf:measure",
+      "npm run perf:ui -- --profile smoke"
+    ],
+    "ciWorkflows": [
+      "リポジトリチェック",
+      "大量データ性能検証",
+      "Windows復帰回帰検証",
+      "リリースビルド"
+    ]
+  },
+  "changeProtocol": {
+    "requiredOrder": [
+      "仕様確認または更新",
+      "設計確認または更新",
+      "docs/review/checklist.md確認",
+      "実装",
+      "テストまたは手動確認",
+      "レビュー記録またはPR本文へ判断を残す"
+    ],
+    "whenChangingDomainOrPersistence": [
+      "docs/domain-model.mdを更新する",
+      "docs/database-schema.sqlとsrc-tauri/migrationsを整合させる",
+      "Repository traitとSQLite実装の境界を確認する",
+      "既存データ移行と制約違反ケースをテストする"
+    ],
+    "whenChangingUi": [
+      "docs/ui-ux-redesign.mdを更新する",
+      "App Shell全体の再描画やちらつきが増えないか確認する",
+      "狭い幅で文字がはみ出さないか確認する",
+      "操作ボタンと行選択のイベント伝播を分離する"
+    ],
+    "whenChangingNotifications": [
+      "DBコミット後副作用の原則を守る",
+      "generic通知でタイトルやメモを出さない",
+      "失敗時に通知意図を失わず再試行状態を残す",
+      "OS登録状態と通知意図を混ぜない"
+    ]
+  },
+  "knownRisks": [
+    "Windows hosted runnerのUI smoke初期表示は環境負荷で揺れる",
+    "macOS公式配布はApple署名・公証の運用設計が必要",
+    "Windows未署名配布ではSmartScreenまたは組織ポリシー警告が出る可能性がある",
+    "タイマー、ポモドーロ、通知、カレンダー予定は似た時間概念を持つため、予定期間と期限を混同しやすい",
+    "タグ名編集は同じタグを使う他タスクにも反映される",
+    "タイムラインは通常導線から一時非表示で、改善待ち"
+  ],
+  "nextAiBootstrap": {
+    "firstCommands": [
+      "git status --short --branch",
+      "rg --files",
+      "sed -n '1,220p' docs/handoff/tasktimer-structure.json",
+      "sed -n '1,220p' docs/architecture.md",
+      "sed -n '1,220p' docs/ui-ux-redesign.md"
+    ],
+    "doNotAssume": [
+      "UI表示上の期限とカレンダー予定期間が同じ意味である",
+      "タスク行のクリックとチェック/お気に入りクリックが同じ挙動でよい",
+      "通知送信をDBトランザクション内に含めてよい",
+      "タイムラインが通常利用可能な完成機能である",
+      "外部通信を追加してよい"
+    ]
+  }
+}
