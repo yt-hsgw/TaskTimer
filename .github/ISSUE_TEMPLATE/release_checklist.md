@@ -38,25 +38,6 @@ assignees: ""
 - [ ] 通知権限拒否時の失敗表示と再試行
 - [ ] インストーラーartifact確認
 
-## macOS手動確認（macOS artifactを配布する場合のみ）
-
-- [ ] Developer ID署名済みDMGを確認
-- [ ] Apple公証済みDMGを確認
-- [ ] Gatekeeperで「Appleが検証できません」警告が出ない
-- [ ] `spctl --assess --type execute --verbose /Applications/TaskTimer.app`
-- [ ] `xcrun stapler validate /Applications/TaskTimer.app`
-- [ ] オフライン起動
-- [ ] タスク作成/完了/削除
-- [ ] サブタスク作成/完了/削除
-- [ ] タスクタイマー開始/停止
-- [ ] サブタスクタイマー開始/停止
-- [ ] 同時に開始できるタイマーが1件だけ
-- [ ] 週カレンダー表示
-- [ ] 通知表示タイプ `タイトルのみ`
-- [ ] 通知表示タイプ `汎用メッセージ`
-- [ ] 通知権限拒否時の失敗表示と再試行
-- [ ] インストーラーartifact確認
-
 ## セキュリティ確認
 
 - [ ] アプリ実行時の外部通信を追加していない
@@ -64,7 +45,6 @@ assignees: ""
 - [ ] ユーザー内容をHTMLとして描画していない
 - [ ] 新しいTauri権限の理由を記録した
 - [ ] 秘密情報、DBファイル、個人データを添付していない
-- [ ] Apple証明書、Apple ID、App用パスワード、Team IDを本文やログへ出していない
 - [ ] Windows署名用の証明書、秘密鍵、証明書パスワード、Azure認証情報を本文やログへ出していない
 
 ## 配布判断
@@ -74,15 +54,13 @@ assignees: ""
 - [ ] Draft Releaseとして作成されている
 - [ ] Draft Release artifactがRelease tagと同じcommitから生成されている
 - [ ] Windows artifactを実機インストール確認した
-- [ ] macOS artifactを配布する場合、macOS署名・公証SecretsがGitHub Secretsに登録されている
-- [ ] macOS artifactを配布する場合、`npm run check:macos-signing` が成功している
 - [ ] `docs/releases/<version>.md` のRelease notes草案を確認した
 - [ ] Release notesに変更点を記載した
 - [ ] Release notesに既知制限を記載した
 - [ ] Release notesに外部通信なしと自動更新なしを記載した
 - [ ] 未解決のDependabot alertがある場合、影響範囲、配布対象、追跡Issueを既知制限に記載した
 - [ ] Windowsコード署名未設定によるSmartScreenまたは組織ポリシーの警告可能性を既知制限に記載した
-- [ ] macOS artifactを配布しない場合、Release notesにmacOS後回しを記載した
+- [ ] Release notesにmacOSは現時点で配布対象外であることを記載した
 - [ ] ロールバック判断基準を確認した
 
 ## メモ

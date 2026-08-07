@@ -85,8 +85,6 @@ cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 npm run build
 npm run audit:runtime-privacy
-npm run check:macos-signing-config
-npm run test:release-scripts
 git diff --check
 ```
 

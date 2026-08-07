@@ -153,19 +153,16 @@ CIで確認するもの:
 - `Windows復帰回帰検証`で、Windows向け依存を含むRustテストが成功する。
 - Windows VM上で、開始中・一時停止中タイマーのDB再接続、wall-clock差分、通知重複防止が成功する。
 - TypeScript/Vite buildが成功する。
-- Secretsに依存しないmacOS署名・公証設定検査が成功する。
-- macOS成果物検証スクリプトの正常系と、壊れた入力、リポジトリ外path、ad-hoc署名、タイムスタンプ/Hardened Runtime欠落の異常系が成功する。
 - `.env` と `.env.*` がコミットされていない。
 - 空白エラーがない。
 
-macOSを含むRelease workflowでは、通常CIに加えて `.app` のDeveloper ID署名、Hardened Runtime、Gatekeeper評価、公証チケットと、`.dmg` のDeveloper ID署名をApple標準ツールで確認する。
+現時点のRelease workflowはWindows artifactのみを生成する。macOS公式配布を再開する場合は、新IssueでApple署名・公証、成果物検証、Gatekeeper実機確認を改めて設計し、CI確認項目へ追加する。
 
 CIで保証しないもの:
 
 - macOS/Windows固有の通知権限。
 - アプリ完全終了中の将来時刻通知。#123 でWindows先行PoC adapterを追加したが、Windows 11のインストール済みアプリで手動検証が完了するまで公開保証対象外とする。
 - インストーラーartifactの実インストール。
-- macOS artifactを配布する場合の署名・公証済みDMGのGatekeeper実機挙動。
 - Windows未署名artifactに対するOS警告。
 - Windows実機での実電源スリープ、WebView2フォーカス復帰、OS通知表示。手順は [Issue 025](issues/025-sleep-resume-timer-notification.md) に記録する。
 - オフライン起動の実機確認。

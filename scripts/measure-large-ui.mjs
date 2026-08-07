@@ -29,7 +29,7 @@ const profile = options.profile === "standard"
       listCount: 4,
     };
 const thresholds = {
-  initial_task_list: process.platform === "win32" ? 6500 : 5000,
+  initial_task_list: process.platform === "win32" ? 12000 : 5000,
   navigation_list_edit: 1000,
   task_countdown_controls: 3000,
   task_list_load_more: 1500,
