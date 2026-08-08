@@ -1,3 +1,9 @@
+/**
+ * リスト、かんばん、カレンダーから共通タスク作成ダイアログへ渡すプリセット契約。
+ * カレンダー選択範囲は予定期間へ保存し、通知期限を暗黙に設定しない。
+ *
+ * @packageDocumentation
+ */
 import type {
   ScheduledTaskDraft,
   WorkItemDraft,

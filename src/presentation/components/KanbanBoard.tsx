@@ -1,3 +1,9 @@
+/**
+ * 状態列とタスクカードをドラッグ操作で管理するかんばんビュー。
+ * ドロップ中は楽観表示を維持し、保存完了前に移動元カードを再表示しない。
+ *
+ * @packageDocumentation
+ */
 import {
   closestCenter,
   DndContext,

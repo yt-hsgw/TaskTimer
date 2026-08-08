@@ -1,3 +1,9 @@
+/**
+ * ローカル通知ルールと表示設定のドメイン型。
+ * タスク名やメモ本文を不要なDTOやログへ含めない。
+ *
+ * @packageDocumentation
+ */
 import type { WorkTargetRef } from "../task/types";
 
 export type NotificationKind = "planned_start" | "due";

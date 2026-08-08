@@ -1,3 +1,9 @@
+/**
+ * タスク名とタグを対象にしたローカル検索UI。
+ * 検索語はTauri gateway経由でローカルDBへ渡し、外部送信しない。
+ *
+ * @packageDocumentation
+ */
 import { useEffect, useRef } from "react";
 import { Search, Timer, X } from "lucide-react";
 import type { WorkItemSearchResult } from "../../application/usecases/contracts";

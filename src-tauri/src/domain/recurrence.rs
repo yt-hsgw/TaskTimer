@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+//! タスクとサブタスクで共有する繰り返し頻度のドメイン型。
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecurrenceFrequency {
     Daily,

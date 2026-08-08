@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+//! TauriおよびWindows APIを使うローカル通知・ネイティブ通知登録adapter。
+//! ユーザー本文を診断ログへ出さない。
+
 use tauri::AppHandle;
 use tauri_plugin_notification::NotificationExt;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};

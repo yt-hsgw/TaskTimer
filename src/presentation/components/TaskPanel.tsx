@@ -1,3 +1,9 @@
+/**
+ * 未完了、完了、サブタスクを表示する主タスク一覧。
+ * 完了・お気に入り・タイマー操作は行選択と分離し、右詳細を自動表示しない。
+ *
+ * @packageDocumentation
+ */
 import {
   useCallback,
   useEffect,

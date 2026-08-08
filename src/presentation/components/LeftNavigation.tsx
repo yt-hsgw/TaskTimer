@@ -1,3 +1,9 @@
+/**
+ * 今日、お気に入り、カスタムリスト、設定を切り替える左ナビゲーション。
+ * 初期リスト「タスク」は全件表示のスマート範囲で、通常の所属先候補ではない。
+ *
+ * @packageDocumentation
+ */
 import {
   FormEvent,
   useCallback,

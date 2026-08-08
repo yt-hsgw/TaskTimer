@@ -1,3 +1,6 @@
+//! Application Use Caseが要求するRead Model、更新入力、Repository port。
+//! SQLite固有型を公開せず、トランザクションの実装はadapterへ委譲する。
+
 use crate::domain::{
     notification::{
         NotificationDeliveryResult, NotificationDisplayMode, NotificationKind,

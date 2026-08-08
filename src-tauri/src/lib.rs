@@ -1,3 +1,5 @@
+#![doc = include_str!("../../docs/handoff/api-reference.md")]
+
 mod application;
 mod domain;
 mod infrastructure;

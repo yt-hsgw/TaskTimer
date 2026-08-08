@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+//! 通常タイマーの対象、終了理由、既定時間に関するドメイン型。
+
 pub const DEFAULT_TASK_TIMER_SETTINGS_ID: &str = "default";
 pub const DEFAULT_TASK_TIMER_TARGET_SECONDS: i64 = 30 * 60;
 pub const MIN_TASK_TIMER_TARGET_SECONDS: i64 = 60;

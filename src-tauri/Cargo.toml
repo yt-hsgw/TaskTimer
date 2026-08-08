@@ -6,6 +6,9 @@ authors = ["TaskTimer Contributors"]
 edition = "2021"
 default-run = "tasktimer"
 
+[lints.rustdoc]
+broken_intra_doc_links = "deny"
+
 [lib]
 name = "tasktimer_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

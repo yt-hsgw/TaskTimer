@@ -16,12 +16,27 @@
   "handoff": {
     "humanBlueprint": "docs/handoff/tasktimer-blueprint.html",
     "machineStructure": "docs/handoff/tasktimer-structure.json",
-    "kdocStyleReference": "docs/handoff/tasktimer-kdoc.md",
+    "sourceApiReference": "docs/handoff/api-reference.md",
+    "generatedApiDocumentation": {
+      "typescript": {
+        "generator": "TypeDoc",
+        "generatorVersion": "0.28.20",
+        "parserTypeScriptVersion": "6.0.3 (tools/api-docs workspace; application remains TypeScript 7)",
+        "command": "npm run docs:typescript",
+        "htmlOutput": "target/docs/typescript/index.html",
+        "jsonOutput": "target/docs/typescript.json"
+      },
+      "rust": {
+        "generator": "rustdoc via cargo doc",
+        "command": "npm run docs:rust",
+        "htmlOutput": "src-tauri/target/doc/tasktimer_lib/index.html"
+      }
+    },
     "sourceOfTruthOrder": [
       "AGENTS.md",
       "docs/mvp-spec.md",
       "docs/handoff/tasktimer-structure.json",
-      "docs/handoff/tasktimer-kdoc.md",
+      "docs/handoff/api-reference.md",
       "docs/architecture.md",
       "docs/domain-model.md",
       "docs/ui-ux-redesign.md",
@@ -491,6 +506,7 @@
       "cargo test --manifest-path src-tauri/Cargo.toml",
       "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
       "npm run build",
+      "npm run docs",
       "npm run audit:runtime-privacy",
       "git diff --check"
     ],

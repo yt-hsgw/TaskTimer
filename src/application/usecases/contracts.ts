@@ -1,3 +1,9 @@
+/**
+ * PresentationとTauri gatewayの間で共有するApplication境界の契約。
+ * MutationのトランザクションはRust Use Caseが所有し、この型群はDB実装を公開しない。
+ *
+ * @packageDocumentation
+ */
 import type { ActiveTimer, TimerSession } from "../../domain/timer/types";
 import type { NotificationDisplayMode } from "../../domain/notification/types";
 import type { RecurrenceFrequency } from "../../domain/recurrence/types";

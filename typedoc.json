@@ -1,0 +1,26 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "TaskTimer TypeScript API",
+  "entryPoints": [
+    "src/application",
+    "src/domain",
+    "src/infrastructure",
+    "src/presentation"
+  ],
+  "entryPointStrategy": "expand",
+  "exclude": ["src/vite-env.d.ts", "src/main.tsx"],
+  "excludeInternal": true,
+  "excludePrivate": true,
+  "readme": "docs/handoff/api-reference.md",
+  "tsconfig": "tsconfig.json",
+  "out": "target/docs/typescript",
+  "json": "target/docs/typescript.json",
+  "includeVersion": true,
+  "cleanOutputDir": true,
+  "treatWarningsAsErrors": true,
+  "validation": {
+    "invalidLink": true,
+    "notExported": false,
+    "notDocumented": false
+  }
+}

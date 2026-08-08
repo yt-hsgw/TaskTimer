@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+//! 独立ポモドーロのフェーズ、状態、時間設定に関するドメイン型と検証。
+
 pub const DEFAULT_POMODORO_SETTINGS_ID: &str = "default";
 pub const DEFAULT_POMODORO_WORK_SECONDS: i64 = 25 * 60;
 pub const DEFAULT_POMODORO_SHORT_BREAK_SECONDS: i64 = 5 * 60;

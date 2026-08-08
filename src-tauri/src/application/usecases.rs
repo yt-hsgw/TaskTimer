@@ -1,3 +1,6 @@
+//! 入力検証、存在確認、トランザクション調整、DBコミット後副作用を実行するUse Case群。
+//! PresentationやTauri commandへ業務ルールを漏らさない。
+
 use crate::domain::{
     notification::{
         build_notification_content, NotificationDisplayMode, NotificationOsRegistrationAction,
