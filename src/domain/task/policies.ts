@@ -1,3 +1,9 @@
+/**
+ * タスク入力と状態遷移に関する副作用を持たないドメインポリシー。
+ * UI固有の表示判断や永続化処理を追加しない。
+ *
+ * @packageDocumentation
+ */
 import type { WorkStatus } from "./types";
 
 export type DateRangeInput = {

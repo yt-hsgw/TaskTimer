@@ -1,3 +1,6 @@
+//! Reactから呼ばれるTauri command境界。
+//! Tauri Stateを受け取りUse Caseへ委譲し、ユーザー本文をエラーへ含めない。
+
 use tauri::State;
 
 type DatabaseState<'a> = State<'a, crate::infrastructure::sqlite::SqliteDatabase>;

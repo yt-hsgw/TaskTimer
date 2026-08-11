@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+//! Repository portのSQLite実装、マイグレーション、Read Modelクエリ。
+//! SQLには必ずパラメータを使い、削除対象は関連履歴を含めてソフト削除する。
+
 use std::{
     collections::{HashMap, HashSet},
     fs,

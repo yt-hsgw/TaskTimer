@@ -12,8 +12,14 @@
   },
   "homepage": "https://github.com/yt-hsgw/TaskTimer#readme",
   "type": "module",
+  "workspaces": [
+    "tools/api-docs"
+  ],
   "scripts": {
     "dev": "vite",
+    "docs": "npm run docs:typescript && npm run docs:rust",
+    "docs:typescript": "npm run docs --workspace @tasktimer/api-docs-toolchain",
+    "docs:rust": "cargo doc --manifest-path src-tauri/Cargo.toml --no-deps --document-private-items",
     "build": "tsc --noEmit && vite build",
     "audit:runtime-privacy": "node scripts/audit-runtime-privacy.mjs",
     "check:glib-advisory": "node scripts/check-glib-advisory.mjs",

@@ -1,3 +1,9 @@
+/**
+ * TaskTimerのPresentation状態と主要ビューを統合するアプリケーションシェル。
+ * Mutation後は必要なRead Modelだけを更新し、局所操作で画面全体を再読込しない。
+ *
+ * @packageDocumentation
+ */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";

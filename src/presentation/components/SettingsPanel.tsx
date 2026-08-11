@@ -1,3 +1,9 @@
+/**
+ * 通知、通常タイマー既定値、JSON/CSVエクスポートを扱うローカル設定画面。
+ * エクスポート失敗ログへタスク名、メモ、通知本文を含めない。
+ *
+ * @packageDocumentation
+ */
 import { useEffect, useState } from "react";
 import type { NotificationDisplayMode } from "../../domain/notification/types";
 import type {

@@ -1,3 +1,9 @@
+/**
+ * 予定期間を横軸で参照するタイムラインビュー。
+ * 現在は改善中の補助ビューで、予定期間と期限を別の値として扱う。
+ *
+ * @packageDocumentation
+ */
 import { CalendarClock, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";

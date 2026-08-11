@@ -77,6 +77,11 @@ jobs:
           test -f .github/workflows/performance-large-dataset.yml
           test -f .github/workflows/windows-resume-regression.yml
           test -f docs/mvp-spec.md
+          test -f docs/handoff/tasktimer-blueprint.html
+          test -f docs/handoff/tasktimer-structure.json
+          test -f docs/handoff/api-reference.md
+          test -f typedoc.json
+          test -f tools/api-docs/package.json
           test -f docs/architecture.md
           test -f docs/domain-model.md
           test -f docs/database-schema.sql
@@ -111,6 +116,9 @@ jobs:
 
       - name: フロントエンドをビルド
         run: npm run build
+
+      - name: APIドキュメントを生成
+        run: npm run docs
 
       - name: 実行時プライバシー監査を実行
         run: npm run audit:runtime-privacy

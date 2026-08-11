@@ -1,3 +1,5 @@
+//! Use Caseが利用するローカル通知とOS通知登録のportおよび安全なメッセージ型。
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalNotificationMessage {
     pub title: String,

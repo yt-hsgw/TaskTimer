@@ -1,3 +1,9 @@
+/**
+ * 開発・性能検証時にPresentationの再描画回数を観測する補助フック。
+ * ユーザー入力本文を計測ログへ含めない。
+ *
+ * @packageDocumentation
+ */
 import { useEffect } from "react";
 
 type RenderProbeGlobal = typeof globalThis & {

@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+//! ApplicationのClock portをOSの現在時刻で実装するadapter。
+
 use crate::application::clock::Clock;
 
 pub struct SystemClock;

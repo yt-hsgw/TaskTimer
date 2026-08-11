@@ -1,3 +1,9 @@
+/**
+ * 通知表示設定からOSへ渡す安全な文面を組み立てるドメインポリシー。
+ * 汎用表示ではユーザー入力本文を返さない。
+ *
+ * @packageDocumentation
+ */
 import type { NotificationDisplayMode } from "./types";
 
 export type NotificationContent = {

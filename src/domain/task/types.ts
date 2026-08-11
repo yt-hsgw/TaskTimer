@@ -1,3 +1,9 @@
+/**
+ * タスク、サブタスク、予定期間、タグのフロントエンドドメイン型。
+ * 予定期間と通知判断に使う期限は別概念として扱い、React、Tauri、SQLiteへ依存しない。
+ *
+ * @packageDocumentation
+ */
 import type { RecurrenceRule } from "../recurrence/types";
 
 export const DEFAULT_TASK_LIST_ID = "default";

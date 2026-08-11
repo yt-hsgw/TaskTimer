@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+//! タスク、サブタスク、リスト、タグ、予定期間の検証と状態遷移。
+//! 予定期間と通知期限を別概念として扱う。
+
 use time::{macros::format_description, Date, PrimitiveDateTime, Time};
 
 const DATE_FORMAT: &[time::format_description::FormatItem<'_>] =

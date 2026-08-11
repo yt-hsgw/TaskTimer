@@ -1,3 +1,6 @@
+//! Tauri IPCへ公開する入力・出力DTO。
+//! Repository recordやSQLite表現をそのままPresentationへ公開しない。
+
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{

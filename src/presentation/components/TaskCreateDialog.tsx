@@ -1,3 +1,9 @@
+/**
+ * 親タスク作成の共通ダイアログ。
+ * 作成元のプリセットを尊重し、作成完了後に右詳細を自動表示しない。
+ *
+ * @packageDocumentation
+ */
 import {
   useCallback,
   useEffect,

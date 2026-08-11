@@ -1,3 +1,8 @@
+/**
+ * タスクとサブタスクで共有する繰り返しルールのドメイン型。
+ *
+ * @packageDocumentation
+ */
 export type RecurrenceFrequency = "daily" | "weekly" | "monthly";
 
 export type RecurrenceRule = {

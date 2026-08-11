@@ -1,3 +1,9 @@
+/**
+ * 日・週・月表示で予定作成、移動、リサイズを扱うカレンダービュー。
+ * 時刻あり予定は15分単位、終日・月予定は1日単位で、予定期間を保って移動する。
+ *
+ * @packageDocumentation
+ */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   CSSProperties,

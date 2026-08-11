@@ -1,3 +1,9 @@
+/**
+ * タスクまたはサブタスクをその場で編集する詳細オーバーレイ。
+ * 空白タイトルは保存せず、予定期間と通知期限、通常タイマーとポモドーロを混同しない。
+ *
+ * @packageDocumentation
+ */
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Repeat2, X } from "lucide-react";
 import type {

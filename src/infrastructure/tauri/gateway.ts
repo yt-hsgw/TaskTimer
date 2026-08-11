@@ -1,3 +1,9 @@
+/**
+ * Application契約をTauri command呼び出しへ変換するInfrastructure adapter。
+ * 業務ルールやトランザクション判断を持たず、外部ネットワーク通信を行わない。
+ *
+ * @packageDocumentation
+ */
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ActivePomodoro,

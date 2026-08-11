@@ -1,3 +1,9 @@
+/**
+ * 日時未設定のタスクへ予定期間を割り当てるダイアログ。
+ * 通知期限ではなく予定期間だけを更新する。
+ *
+ * @packageDocumentation
+ */
 import { CalendarClock, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";

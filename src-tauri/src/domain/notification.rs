@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+//! ローカル通知の種別、表示モード、OS登録状態、安全な通知文面を扱う。
+//! 汎用表示ではユーザー入力本文を公開しない。
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotificationDisplayMode {
     TitleOnly,

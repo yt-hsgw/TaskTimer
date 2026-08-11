@@ -1,3 +1,9 @@
+/**
+ * 通常タイマーのドメイン型。
+ * アクティブタイマーの正はSQLiteにあり、画面内のカウント値を正としない。
+ *
+ * @packageDocumentation
+ */
 import type { WorkTargetRef } from "../task/types";
 
 export type TimerSession = {
